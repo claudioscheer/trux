@@ -49,6 +49,13 @@ type AssignStmt struct {
 
 func (*AssignStmt) stmtNode() {}
 
+type IndexAssignStmt struct {
+	Target *IndexExpr
+	Value  Expr
+}
+
+func (*IndexAssignStmt) stmtNode() {}
+
 type IfStmt struct {
 	Condition Expr
 	Then      []Stmt
@@ -70,6 +77,15 @@ type PrintStmt struct {
 }
 
 func (*PrintStmt) stmtNode() {}
+
+type AppendStmt struct {
+	List     Expr
+	Value    Expr
+	ListType ast.Type
+	ElemType ast.Type
+}
+
+func (*AppendStmt) stmtNode() {}
 
 type ExprStmt struct {
 	Expr Expr
@@ -127,6 +143,33 @@ func (e *BoolLiteral) Type() ast.Type { return e.Typ }
 
 func (*BoolLiteral) exprNode() {}
 
+type ArrayLiteral struct {
+	Elements []Expr
+	Typ      ast.Type
+}
+
+func (e *ArrayLiteral) Type() ast.Type { return e.Typ }
+
+func (*ArrayLiteral) exprNode() {}
+
+type ListLiteral struct {
+	Elements []Expr
+	Typ      ast.Type
+}
+
+func (e *ListLiteral) Type() ast.Type { return e.Typ }
+
+func (*ListLiteral) exprNode() {}
+
+type MakeExpr struct {
+	Len Expr
+	Typ ast.Type
+}
+
+func (e *MakeExpr) Type() ast.Type { return e.Typ }
+
+func (*MakeExpr) exprNode() {}
+
 type CallExpr struct {
 	Callee     string
 	ReturnType ast.Type
@@ -147,6 +190,36 @@ type BinaryExpr struct {
 func (e *BinaryExpr) Type() ast.Type { return e.Typ }
 
 func (*BinaryExpr) exprNode() {}
+
+type LenExpr struct {
+	Value Expr
+	Typ   ast.Type
+}
+
+func (e *LenExpr) Type() ast.Type { return e.Typ }
+
+func (*LenExpr) exprNode() {}
+
+type IndexExpr struct {
+	Collection Expr
+	Index      Expr
+	Typ        ast.Type
+}
+
+func (e *IndexExpr) Type() ast.Type { return e.Typ }
+
+func (*IndexExpr) exprNode() {}
+
+type SliceExpr struct {
+	Collection Expr
+	Start      Expr
+	End        Expr
+	Typ        ast.Type
+}
+
+func (e *SliceExpr) Type() ast.Type { return e.Typ }
+
+func (*SliceExpr) exprNode() {}
 
 func Build(program *ast.Program, info *types.Info) (*Program, error) {
 	builder := builder{info: info}
@@ -209,6 +282,16 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 			return nil, err
 		}
 		return &AssignStmt{Name: stmt.Name, Value: value}, nil
+	case *ast.IndexAssignStmt:
+		target, err := b.buildExpr(stmt.Target)
+		if err != nil {
+			return nil, err
+		}
+		value, err := b.buildExpr(stmt.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &IndexAssignStmt{Target: target.(*IndexExpr), Value: value}, nil
 	case *ast.IfStmt:
 		condition, err := b.buildExpr(stmt.Condition)
 		if err != nil {
@@ -245,6 +328,13 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 				}
 				return &PrintStmt{Args: args, Types: printTypes}, nil
 			}
+			if appendSig, ok := b.info.AppendCalls[call]; ok {
+				args, err := b.buildExprs(call.Args)
+				if err != nil {
+					return nil, err
+				}
+				return &AppendStmt{List: args[0], Value: args[1], ListType: appendSig.ListType, ElemType: appendSig.ElemType}, nil
+			}
 		}
 
 		expr, err := b.buildExpr(stmt.Expr)
@@ -272,9 +362,34 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		return &StringLiteral{Value: expr.Value, Typ: typ}, nil
 	case *ast.BoolLiteral:
 		return &BoolLiteral{Value: expr.Value, Typ: typ}, nil
+	case *ast.ArrayLiteral:
+		elements, err := b.buildExprs(expr.Elements)
+		if err != nil {
+			return nil, err
+		}
+		return &ArrayLiteral{Elements: elements, Typ: typ}, nil
+	case *ast.ListLiteral:
+		elements, err := b.buildExprs(expr.Elements)
+		if err != nil {
+			return nil, err
+		}
+		return &ListLiteral{Elements: elements, Typ: typ}, nil
+	case *ast.MakeExpr:
+		length, err := b.buildExpr(expr.Len)
+		if err != nil {
+			return nil, err
+		}
+		return &MakeExpr{Len: length, Typ: typ}, nil
 	case *ast.IdentExpr:
 		return &IdentExpr{Name: expr.Name, Typ: typ}, nil
 	case *ast.CallExpr:
+		if _, ok := b.info.LenCalls[expr]; ok {
+			arg, err := b.buildExpr(expr.Args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &LenExpr{Value: arg, Typ: typ}, nil
+		}
 		sig, ok := b.info.ResolvedCalls[expr]
 		if !ok {
 			return nil, fmt.Errorf("missing resolved call for %q", expr.Callee)
@@ -294,6 +409,36 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 			return nil, err
 		}
 		return &BinaryExpr{Left: left, Operator: expr.Operator, Right: right, Typ: typ}, nil
+	case *ast.IndexExpr:
+		collection, err := b.buildExpr(expr.Collection)
+		if err != nil {
+			return nil, err
+		}
+		index, err := b.buildExpr(expr.Index)
+		if err != nil {
+			return nil, err
+		}
+		return &IndexExpr{Collection: collection, Index: index, Typ: typ}, nil
+	case *ast.SliceExpr:
+		collection, err := b.buildExpr(expr.Collection)
+		if err != nil {
+			return nil, err
+		}
+		var start Expr
+		if expr.StartIndex != nil {
+			start, err = b.buildExpr(expr.StartIndex)
+			if err != nil {
+				return nil, err
+			}
+		}
+		var end Expr
+		if expr.EndIndex != nil {
+			end, err = b.buildExpr(expr.EndIndex)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return &SliceExpr{Collection: collection, Start: start, End: end, Typ: typ}, nil
 	default:
 		return nil, fmt.Errorf("unsupported AST expression %T", expr)
 	}

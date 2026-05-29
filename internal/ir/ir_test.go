@@ -78,7 +78,7 @@ func ready() bool {
 func main() int {
     let name string = label()
     let ok bool = false
-    print(name, 1)
+    print(name, " ", 1)
     print(ok)
     return 0
 }`)
@@ -117,11 +117,11 @@ func main() int {
 	}
 
 	stringPrint := mainFn.Body[2].(*PrintStmt)
-	if !sameTypes(stringPrint.Types, []ast.Type{ast.StringType, ast.IntType}) {
-		t.Fatalf("string print types = %q, want string and int", stringPrint.Types)
+	if !sameTypes(stringPrint.Types, []ast.Type{ast.StringType, ast.StringType, ast.IntType}) {
+		t.Fatalf("string print types = %q, want string string int", stringPrint.Types)
 	}
-	if len(stringPrint.Args) != 2 || stringPrint.Args[0].Type() != ast.StringType || stringPrint.Args[1].Type() != ast.IntType {
-		t.Fatalf("string print args = %#v, want string and int", stringPrint.Args)
+	if len(stringPrint.Args) != 3 || stringPrint.Args[0].Type() != ast.StringType || stringPrint.Args[1].Type() != ast.StringType || stringPrint.Args[2].Type() != ast.IntType {
+		t.Fatalf("string print args = %#v, want string string int", stringPrint.Args)
 	}
 
 	boolPrint := mainFn.Body[3].(*PrintStmt)
@@ -179,12 +179,85 @@ func main() int {
 	}
 }
 
+func TestBuildCreatesTypedIRForStringConcatenation(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let first string = "tru"
+    let name string = first + "x"
+    print(name)
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := irProgram.Functions[0]
+	nameLet := mainFn.Body[1].(*LetStmt)
+	concat := nameLet.Value.(*BinaryExpr)
+	if concat.Operator != "+" || concat.Type() != ast.StringType {
+		t.Fatalf("concat = %#v, want typed string + expression", concat)
+	}
+}
+
+func TestBuildCreatesTypedIRForV3Collections(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let xs [2]int = [2]int{1, 2}
+    let view []int = xs[:]
+    view[1] = 4
+    let items list[int] = list[int]{view[0]}
+    append(items, view[1])
+    let made []int = make([]int, len(items))
+    made[0] = items[1]
+	print(len(xs), " ", made[0])
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := irProgram.Functions[0]
+	arrayLet := mainFn.Body[0].(*LetStmt)
+	if !ast.TypeEqual(arrayLet.Type, &ast.ArrayType{Length: 2, Elem: ast.IntType}) {
+		t.Fatalf("array let type = %s, want [2]int", arrayLet.Type)
+	}
+	if _, ok := arrayLet.Value.(*ArrayLiteral); !ok {
+		t.Fatalf("array let value = %T, want ArrayLiteral", arrayLet.Value)
+	}
+	if _, ok := mainFn.Body[2].(*IndexAssignStmt); !ok {
+		t.Fatalf("third statement = %T, want IndexAssignStmt", mainFn.Body[2])
+	}
+	if _, ok := mainFn.Body[4].(*AppendStmt); !ok {
+		t.Fatalf("append statement = %T, want AppendStmt", mainFn.Body[4])
+	}
+	makeLet := mainFn.Body[5].(*LetStmt)
+	if _, ok := makeLet.Value.(*MakeExpr); !ok {
+		t.Fatalf("make let value = %T, want MakeExpr", makeLet.Value)
+	}
+	printStmt := mainFn.Body[7].(*PrintStmt)
+	if !sameTypes(printStmt.Types, []ast.Type{ast.IntType, ast.StringType, ast.IntType}) {
+		t.Fatalf("print types = %q, want int string int", printStmt.Types)
+	}
+}
+
 func sameTypes(got []ast.Type, want []ast.Type) bool {
 	if len(got) != len(want) {
 		return false
 	}
 	for i := range got {
-		if got[i] != want[i] {
+		if !ast.TypeEqual(got[i], want[i]) {
 			return false
 		}
 	}

@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/claudioscheer/trux/internal/ast"
@@ -137,6 +138,43 @@ func (p *Parser) parseParams() ([]ast.Param, error) {
 
 func (p *Parser) parseType() (ast.Type, error) {
 	switch {
+	case p.match(token.LBracket):
+		if p.match(token.RBracket) {
+			elem, err := p.parseType()
+			if err != nil {
+				return nil, err
+			}
+			return &ast.SliceType{Elem: elem}, nil
+		}
+
+		lengthTok, err := p.expect(token.Int)
+		if err != nil {
+			return nil, err
+		}
+		length, err := strconv.Atoi(lengthTok.Lexeme)
+		if err != nil || length <= 0 {
+			return nil, p.errorf(lengthTok, "array length must be a positive integer literal")
+		}
+		if _, err := p.expect(token.RBracket); err != nil {
+			return nil, err
+		}
+		elem, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ArrayType{Length: length, Elem: elem}, nil
+	case p.match(token.List):
+		if _, err := p.expect(token.LBracket); err != nil {
+			return nil, err
+		}
+		elem, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(token.RBracket); err != nil {
+			return nil, err
+		}
+		return &ast.ListType{Elem: elem}, nil
 	case p.match(token.IntType):
 		return ast.IntType, nil
 	case p.match(token.FloatType):
@@ -147,7 +185,7 @@ func (p *Parser) parseType() (ast.Type, error) {
 		return ast.BoolType, nil
 	default:
 		tok := p.current()
-		return "", p.errorf(tok, "expected type, got %s", describe(tok))
+		return nil, p.errorf(tok, "expected type, got %s", describe(tok))
 	}
 }
 
@@ -182,10 +220,8 @@ func (p *Parser) parseStatement() (ast.Statement, error) {
 		return p.parseIfStmt()
 	case p.check(token.While):
 		return p.parseWhileStmt()
-	case p.check(token.Ident) && p.peek().Type == token.Assign:
-		return p.parseAssignStmt()
 	default:
-		return p.parseExprStmt()
+		return p.parseAssignOrExprStmt()
 	}
 }
 
@@ -229,24 +265,6 @@ func (p *Parser) parseReturnStmt() (ast.Statement, error) {
 	}
 
 	return &ast.ReturnStmt{Start: start.Pos, Value: value}, nil
-}
-
-func (p *Parser) parseAssignStmt() (ast.Statement, error) {
-	name, err := p.expect(token.Ident)
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := p.expect(token.Assign); err != nil {
-		return nil, err
-	}
-
-	value, err := p.parseExpression(0)
-	if err != nil {
-		return nil, err
-	}
-
-	return &ast.AssignStmt{Start: name.Pos, Name: name.Lexeme, Value: value}, nil
 }
 
 func (p *Parser) parseIfStmt() (ast.Statement, error) {
@@ -296,17 +314,33 @@ func (p *Parser) parseWhileStmt() (ast.Statement, error) {
 	return &ast.WhileStmt{Start: start.Pos, Condition: condition, Body: body}, nil
 }
 
-func (p *Parser) parseExprStmt() (ast.Statement, error) {
+func (p *Parser) parseAssignOrExprStmt() (ast.Statement, error) {
 	expr, err := p.parseExpression(0)
 	if err != nil {
 		return nil, err
+	}
+
+	if p.match(token.Assign) {
+		value, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+
+		switch target := expr.(type) {
+		case *ast.IdentExpr:
+			return &ast.AssignStmt{Start: target.Start, Name: target.Name, Value: value}, nil
+		case *ast.IndexExpr:
+			return &ast.IndexAssignStmt{Start: target.Start, Target: target, Value: value}, nil
+		default:
+			return nil, p.errorf(token.Token{Pos: expr.Pos()}, "invalid assignment target")
+		}
 	}
 
 	return &ast.ExprStmt{Expr: expr}, nil
 }
 
 func (p *Parser) parseExpression(minPrecedence int) (ast.Expression, error) {
-	left, err := p.parsePrimary()
+	left, err := p.parsePostfix()
 	if err != nil {
 		return nil, err
 	}
@@ -332,8 +366,60 @@ func (p *Parser) parseExpression(minPrecedence int) (ast.Expression, error) {
 	}
 }
 
+func (p *Parser) parsePostfix() (ast.Expression, error) {
+	expr, err := p.parsePrimary()
+	if err != nil {
+		return nil, err
+	}
+
+	for p.match(token.LBracket) {
+		if p.match(token.Colon) {
+			var end ast.Expression
+			if !p.check(token.RBracket) {
+				end, err = p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if _, err := p.expect(token.RBracket); err != nil {
+				return nil, err
+			}
+			expr = &ast.SliceExpr{Start: expr.Pos(), Collection: expr, EndIndex: end}
+			continue
+		}
+
+		index, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		if p.match(token.Colon) {
+			var end ast.Expression
+			if !p.check(token.RBracket) {
+				end, err = p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if _, err := p.expect(token.RBracket); err != nil {
+				return nil, err
+			}
+			expr = &ast.SliceExpr{Start: expr.Pos(), Collection: expr, StartIndex: index, EndIndex: end}
+			continue
+		}
+
+		if _, err := p.expect(token.RBracket); err != nil {
+			return nil, err
+		}
+		expr = &ast.IndexExpr{Start: expr.Pos(), Collection: expr, Index: index}
+	}
+
+	return expr, nil
+}
+
 func (p *Parser) parsePrimary() (ast.Expression, error) {
 	switch {
+	case p.check(token.LBracket), p.check(token.List):
+		return p.parseCollectionLiteral()
 	case p.check(token.Int):
 		tok := p.advance()
 		return &ast.IntLiteral{Start: tok.Pos, Value: tok.Lexeme}, nil
@@ -352,6 +438,10 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 	case p.check(token.Ident):
 		ident := p.advance()
 		if p.match(token.LParen) {
+			if ident.Lexeme == "make" {
+				return p.parseMakeExpr(ident)
+			}
+
 			args, err := p.parseArguments()
 			if err != nil {
 				return nil, err
@@ -382,8 +472,61 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 	}
 }
 
+func (p *Parser) parseCollectionLiteral() (ast.Expression, error) {
+	start := p.current().Pos
+	typ, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := p.expect(token.LBrace); err != nil {
+		return nil, err
+	}
+
+	elements, err := p.parseExpressionList(token.RBrace)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := p.expect(token.RBrace); err != nil {
+		return nil, err
+	}
+
+	switch typ.(type) {
+	case *ast.ArrayType:
+		return &ast.ArrayLiteral{Start: start, Type: typ, Elements: elements}, nil
+	case *ast.ListType:
+		return &ast.ListLiteral{Start: start, Type: typ, Elements: elements}, nil
+	default:
+		return nil, p.errorf(token.Token{Pos: start}, "only array and list literals are supported")
+	}
+}
+
+func (p *Parser) parseMakeExpr(ident token.Token) (ast.Expression, error) {
+	typ, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.Comma); err != nil {
+		return nil, err
+	}
+	length, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(token.RParen); err != nil {
+		return nil, err
+	}
+
+	return &ast.MakeExpr{Start: ident.Pos, Type: typ, Len: length}, nil
+}
+
 func (p *Parser) parseArguments() ([]ast.Expression, error) {
-	if p.check(token.RParen) {
+	return p.parseExpressionList(token.RParen)
+}
+
+func (p *Parser) parseExpressionList(end token.Type) ([]ast.Expression, error) {
+	if p.check(end) {
 		return nil, nil
 	}
 
@@ -396,6 +539,9 @@ func (p *Parser) parseArguments() ([]ast.Expression, error) {
 		args = append(args, arg)
 
 		if !p.match(token.Comma) {
+			return args, nil
+		}
+		if p.check(end) {
 			return args, nil
 		}
 	}
@@ -487,7 +633,7 @@ func isLiteralToken(typ token.Type) bool {
 	switch typ {
 	case token.Assign, token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
 		token.Plus, token.Minus, token.Asterisk, token.Slash,
-		token.Comma, token.LParen, token.RParen, token.LBrace, token.RBrace:
+		token.Comma, token.Colon, token.LParen, token.RParen, token.LBrace, token.RBrace, token.LBracket, token.RBracket:
 		return true
 	default:
 		return false

@@ -25,6 +25,7 @@ const (
 	True       Type = "TRUE"
 	False      Type = "FALSE"
 	In         Type = "IN"
+	List       Type = "LIST"
 
 	Assign       Type = "="
 	Equal        Type = "=="
@@ -39,11 +40,14 @@ const (
 	Slash        Type = "/"
 
 	Comma Type = ","
+	Colon Type = ":"
 
-	LParen Type = "("
-	RParen Type = ")"
-	LBrace Type = "{"
-	RBrace Type = "}"
+	LParen   Type = "("
+	RParen   Type = ")"
+	LBrace   Type = "{"
+	RBrace   Type = "}"
+	LBracket Type = "["
+	RBracket Type = "]"
 )
 
 type Position struct {
@@ -73,6 +77,7 @@ var keywords = map[string]Type{
 	"true":    True,
 	"false":   False,
 	"in":      In,
+	"list":    List,
 }
 
 func LookupIdent(ident string) Type {

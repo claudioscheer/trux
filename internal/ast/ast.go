@@ -1,6 +1,10 @@
 package ast
 
-import "github.com/claudioscheer/trux/internal/token"
+import (
+	"fmt"
+
+	"github.com/claudioscheer/trux/internal/token"
+)
 
 type Program struct {
 	PackageName string
@@ -20,14 +24,91 @@ type Param struct {
 	Type Type
 }
 
-type Type string
+type Type interface {
+	fmt.Stringer
+	typeNode()
+}
+
+type ScalarType string
 
 const (
-	IntType    Type = "int"
-	FloatType  Type = "float"
-	StringType Type = "string"
-	BoolType   Type = "bool"
+	IntType    ScalarType = "int"
+	FloatType  ScalarType = "float"
+	StringType ScalarType = "string"
+	BoolType   ScalarType = "bool"
 )
+
+func (t ScalarType) String() string { return string(t) }
+
+func (ScalarType) typeNode() {}
+
+type ArrayType struct {
+	Length int
+	Elem   Type
+}
+
+func (t *ArrayType) String() string {
+	return fmt.Sprintf("[%d]%s", t.Length, t.Elem)
+}
+
+func (*ArrayType) typeNode() {}
+
+type SliceType struct {
+	Elem Type
+}
+
+func (t *SliceType) String() string {
+	return fmt.Sprintf("[]%s", t.Elem)
+}
+
+func (*SliceType) typeNode() {}
+
+type ListType struct {
+	Elem Type
+}
+
+func (t *ListType) String() string {
+	return fmt.Sprintf("list[%s]", t.Elem)
+}
+
+func (*ListType) typeNode() {}
+
+func TypeEqual(left Type, right Type) bool {
+	switch left := left.(type) {
+	case ScalarType:
+		right, ok := right.(ScalarType)
+		return ok && left == right
+	case *ArrayType:
+		right, ok := right.(*ArrayType)
+		return ok && left.Length == right.Length && TypeEqual(left.Elem, right.Elem)
+	case *SliceType:
+		right, ok := right.(*SliceType)
+		return ok && TypeEqual(left.Elem, right.Elem)
+	case *ListType:
+		right, ok := right.(*ListType)
+		return ok && TypeEqual(left.Elem, right.Elem)
+	default:
+		return left == nil && right == nil
+	}
+}
+
+func IsScalarType(typ Type) bool {
+	_, ok := typ.(ScalarType)
+	return ok
+}
+
+func ElementType(typ Type) (Type, bool) {
+	switch typ := typ.(type) {
+	case *ArrayType:
+		return typ.Elem, true
+	case *SliceType:
+		return typ.Elem, true
+	case *ListType:
+		return typ.Elem, true
+	default:
+		return nil, false
+	}
+}
 
 type Block struct {
 	Statements []Statement
@@ -67,6 +148,16 @@ type AssignStmt struct {
 func (s *AssignStmt) Pos() token.Position { return s.Start }
 
 func (*AssignStmt) statementNode() {}
+
+type IndexAssignStmt struct {
+	Start  token.Position
+	Target *IndexExpr
+	Value  Expression
+}
+
+func (s *IndexAssignStmt) Pos() token.Position { return s.Start }
+
+func (*IndexAssignStmt) statementNode() {}
 
 type IfStmt struct {
 	Start     token.Position
@@ -147,6 +238,36 @@ func (e *BoolLiteral) Pos() token.Position { return e.Start }
 
 func (*BoolLiteral) expressionNode() {}
 
+type ArrayLiteral struct {
+	Start    token.Position
+	Type     Type
+	Elements []Expression
+}
+
+func (e *ArrayLiteral) Pos() token.Position { return e.Start }
+
+func (*ArrayLiteral) expressionNode() {}
+
+type ListLiteral struct {
+	Start    token.Position
+	Type     Type
+	Elements []Expression
+}
+
+func (e *ListLiteral) Pos() token.Position { return e.Start }
+
+func (*ListLiteral) expressionNode() {}
+
+type MakeExpr struct {
+	Start token.Position
+	Type  Type
+	Len   Expression
+}
+
+func (e *MakeExpr) Pos() token.Position { return e.Start }
+
+func (*MakeExpr) expressionNode() {}
+
 type CallExpr struct {
 	Start  token.Position
 	Callee string
@@ -167,3 +288,24 @@ type BinaryExpr struct {
 func (e *BinaryExpr) Pos() token.Position { return e.Start }
 
 func (*BinaryExpr) expressionNode() {}
+
+type IndexExpr struct {
+	Start      token.Position
+	Collection Expression
+	Index      Expression
+}
+
+func (e *IndexExpr) Pos() token.Position { return e.Start }
+
+func (*IndexExpr) expressionNode() {}
+
+type SliceExpr struct {
+	Start      token.Position
+	Collection Expression
+	StartIndex Expression
+	EndIndex   Expression
+}
+
+func (e *SliceExpr) Pos() token.Position { return e.Start }
+
+func (*SliceExpr) expressionNode() {}

@@ -31,7 +31,11 @@ func Generate(program *ir.Program) (string, error) {
 	}
 
 	fmt.Fprintln(&out, "int main(void) {")
-	fmt.Fprintln(&out, "    return (int)trux_main();")
+	fmt.Fprintln(&out, "    rt_arena trux_arena;")
+	fmt.Fprintln(&out, "    rt_arena_init(&trux_arena);")
+	fmt.Fprintln(&out, "    int64_t trux_exit_code = trux_main(&trux_arena);")
+	fmt.Fprintln(&out, "    rt_arena_deinit(&trux_arena);")
+	fmt.Fprintln(&out, "    return (int)trux_exit_code;")
 	fmt.Fprintln(&out, "}")
 
 	return out.String(), nil
@@ -62,18 +66,14 @@ func emitSignature(out *bytes.Buffer, fn *ir.Func, prototype bool) error {
 	}
 
 	fmt.Fprintf(out, "%s %s(", cType, mangleFunc(fn.Name))
-	for i, param := range fn.Params {
-		if i > 0 {
-			fmt.Fprint(out, ", ")
-		}
+	fmt.Fprint(out, "rt_arena* trux_arena")
+	for _, param := range fn.Params {
+		fmt.Fprint(out, ", ")
 		paramType, err := emitType(param.Type)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s %s", paramType, param.Name)
-	}
-	if len(fn.Params) == 0 {
-		fmt.Fprint(out, "void")
+		fmt.Fprintf(out, "%s %s", paramType, mangleIdent(param.Name))
 	}
 	fmt.Fprint(out, ")")
 	if prototype {
@@ -95,7 +95,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s%s %s = %s;\n", indent, typ, stmt.Name, value)
+		fmt.Fprintf(out, "%s%s %s = %s;\n", indent, typ, mangleIdent(stmt.Name), value)
 	case *ir.ReturnStmt:
 		value, err := emitExpr(stmt.Value)
 		if err != nil {
@@ -107,7 +107,25 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s%s = %s;\n", indent, stmt.Name, value)
+		fmt.Fprintf(out, "%s%s = %s;\n", indent, mangleIdent(stmt.Name), value)
+	case *ir.IndexAssignStmt:
+		collection, err := emitExpr(stmt.Target.Collection)
+		if err != nil {
+			return err
+		}
+		index, err := emitExpr(stmt.Target.Index)
+		if err != nil {
+			return err
+		}
+		value, err := emitExpr(stmt.Value)
+		if err != nil {
+			return err
+		}
+		setter, err := collectionHelper("set", stmt.Target.Collection.Type())
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s%s(%s, %s, %s);\n", indent, setter, collection, index, value)
 	case *ir.IfStmt:
 		condition, err := emitExpr(stmt.Condition)
 		if err != nil {
@@ -145,20 +163,34 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 			if err != nil {
 				return err
 			}
-			switch stmt.Types[i] {
-			case ast.IntType:
+			switch {
+			case ast.TypeEqual(stmt.Types[i], ast.IntType):
 				fmt.Fprintf(out, "%srt_print_int(%s);\n", indent, arg)
-			case ast.FloatType:
+			case ast.TypeEqual(stmt.Types[i], ast.FloatType):
 				fmt.Fprintf(out, "%srt_print_float(%s);\n", indent, arg)
-			case ast.StringType:
+			case ast.TypeEqual(stmt.Types[i], ast.StringType):
 				fmt.Fprintf(out, "%srt_print_string(%s);\n", indent, arg)
-			case ast.BoolType:
+			case ast.TypeEqual(stmt.Types[i], ast.BoolType):
 				fmt.Fprintf(out, "%srt_print_bool(%s);\n", indent, arg)
 			default:
 				return fmt.Errorf("unsupported print type %s", stmt.Types[i])
 			}
 		}
 		fmt.Fprintf(out, "%srt_print_newline();\n", indent)
+	case *ir.AppendStmt:
+		list, err := emitExpr(stmt.List)
+		if err != nil {
+			return err
+		}
+		value, err := emitExpr(stmt.Value)
+		if err != nil {
+			return err
+		}
+		appendFn, err := listHelper("append", stmt.ListType)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s%s(%s, %s);\n", indent, appendFn, list, value)
 	case *ir.ExprStmt:
 		expr, err := emitExpr(stmt.Expr)
 		if err != nil {
@@ -185,7 +217,7 @@ func emitStmts(out *bytes.Buffer, stmts []ir.Stmt, level int) error {
 func emitExpr(expr ir.Expr) (string, error) {
 	switch expr := expr.(type) {
 	case *ir.IdentExpr:
-		return expr.Name, nil
+		return mangleIdent(expr.Name), nil
 	case *ir.IntLiteral:
 		return expr.Value, nil
 	case *ir.FloatLiteral:
@@ -197,8 +229,47 @@ func emitExpr(expr ir.Expr) (string, error) {
 			return "true", nil
 		}
 		return "false", nil
+	case *ir.ArrayLiteral:
+		arrayType, ok := expr.Type().(*ast.ArrayType)
+		if !ok {
+			return "", fmt.Errorf("array literal has non-array type %s", expr.Type())
+		}
+		values, err := emitValueArray(arrayType.Elem, expr.Elements)
+		if err != nil {
+			return "", err
+		}
+		ctor, err := collectionHelper("from_values", expr.Type())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s(trux_arena, %s, %d)", ctor, values, len(expr.Elements)), nil
+	case *ir.ListLiteral:
+		listType, ok := expr.Type().(*ast.ListType)
+		if !ok {
+			return "", fmt.Errorf("list literal has non-list type %s", expr.Type())
+		}
+		values, err := emitValueArray(listType.Elem, expr.Elements)
+		if err != nil {
+			return "", err
+		}
+		ctor, err := listHelper("from_values", expr.Type())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s(trux_arena, %s, %d)", ctor, values, len(expr.Elements)), nil
+	case *ir.MakeExpr:
+		length, err := emitExpr(expr.Len)
+		if err != nil {
+			return "", err
+		}
+		makeFn, err := sliceMakeHelper(expr.Type())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s(trux_arena, %s)", makeFn, length), nil
 	case *ir.CallExpr:
-		args := make([]string, 0, len(expr.Args))
+		args := make([]string, 0, len(expr.Args)+1)
+		args = append(args, "trux_arena")
 		for _, arg := range expr.Args {
 			emitArg, err := emitExpr(arg)
 			if err != nil {
@@ -219,7 +290,10 @@ func emitExpr(expr ir.Expr) (string, error) {
 		if expr.Operator == "in" {
 			return fmt.Sprintf("rt_string_contains(%s, %s)", left, right), nil
 		}
-		if expr.Left.Type() == ast.StringType && (expr.Operator == "==" || expr.Operator == "!=") {
+		if expr.Operator == "+" && ast.TypeEqual(expr.Left.Type(), ast.StringType) {
+			return fmt.Sprintf("rt_string_concat(trux_arena, %s, %s)", left, right), nil
+		}
+		if ast.TypeEqual(expr.Left.Type(), ast.StringType) && (expr.Operator == "==" || expr.Operator == "!=") {
 			equal := fmt.Sprintf("rt_string_equal(%s, %s)", left, right)
 			if expr.Operator == "!=" {
 				return fmt.Sprintf("!%s", equal), nil
@@ -227,28 +301,210 @@ func emitExpr(expr ir.Expr) (string, error) {
 			return equal, nil
 		}
 		return fmt.Sprintf("(%s %s %s)", left, expr.Operator, right), nil
+	case *ir.LenExpr:
+		value, err := emitExpr(expr.Value)
+		if err != nil {
+			return "", err
+		}
+		if ast.TypeEqual(expr.Value.Type(), ast.StringType) {
+			return fmt.Sprintf("((int64_t)%s.len)", value), nil
+		}
+		if _, ok := expr.Value.Type().(*ast.ListType); ok {
+			return fmt.Sprintf("((int64_t)%s->len)", value), nil
+		}
+		return fmt.Sprintf("((int64_t)%s.len)", value), nil
+	case *ir.IndexExpr:
+		collection, err := emitExpr(expr.Collection)
+		if err != nil {
+			return "", err
+		}
+		index, err := emitExpr(expr.Index)
+		if err != nil {
+			return "", err
+		}
+		if ast.TypeEqual(expr.Collection.Type(), ast.StringType) {
+			return fmt.Sprintf("rt_string_index(%s, %s)", collection, index), nil
+		}
+		getter, err := collectionHelper("get", expr.Collection.Type())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s(%s, %s)", getter, collection, index), nil
+	case *ir.SliceExpr:
+		collection, err := emitExpr(expr.Collection)
+		if err != nil {
+			return "", err
+		}
+		hasStart, start, err := emitOptionalBound(expr.Start)
+		if err != nil {
+			return "", err
+		}
+		hasEnd, end, err := emitOptionalBound(expr.End)
+		if err != nil {
+			return "", err
+		}
+		if ast.TypeEqual(expr.Collection.Type(), ast.StringType) {
+			return fmt.Sprintf("rt_string_slice(%s, %s, %s, %s, %s)", collection, hasStart, start, hasEnd, end), nil
+		}
+		sliceFn, err := collectionHelper("slice", expr.Collection.Type())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s(%s, %s, %s, %s, %s)", sliceFn, collection, hasStart, start, hasEnd, end), nil
 	default:
 		return "", fmt.Errorf("unsupported IR expression %T", expr)
 	}
 }
 
 func emitType(typ ast.Type) (string, error) {
-	switch typ {
-	case ast.IntType:
+	switch typ := typ.(type) {
+	case ast.ScalarType:
+		switch {
+		case ast.TypeEqual(typ, ast.IntType):
+			return "int64_t", nil
+		case ast.TypeEqual(typ, ast.FloatType):
+			return "double", nil
+		case ast.TypeEqual(typ, ast.StringType):
+			return "rt_string", nil
+		case ast.TypeEqual(typ, ast.BoolType):
+			return "bool", nil
+		default:
+			return "", fmt.Errorf("unsupported type %s", typ)
+		}
+	case *ast.ArrayType:
+		name, err := elemRuntimeName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "rt_array_" + name, nil
+	case *ast.SliceType:
+		name, err := elemRuntimeName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "rt_slice_" + name, nil
+	case *ast.ListType:
+		name, err := elemRuntimeName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "rt_list_" + name + "*", nil
+	default:
+		return "", fmt.Errorf("unsupported type %s", typ)
+	}
+}
+
+func emitScalarType(typ ast.Type) (string, error) {
+	switch {
+	case ast.TypeEqual(typ, ast.IntType):
 		return "int64_t", nil
-	case ast.FloatType:
+	case ast.TypeEqual(typ, ast.FloatType):
 		return "double", nil
-	case ast.StringType:
+	case ast.TypeEqual(typ, ast.StringType):
 		return "rt_string", nil
-	case ast.BoolType:
+	case ast.TypeEqual(typ, ast.BoolType):
 		return "bool", nil
 	default:
 		return "", fmt.Errorf("unsupported type %s", typ)
 	}
 }
 
+func emitValueArray(elemType ast.Type, elements []ir.Expr) (string, error) {
+	if len(elements) == 0 {
+		return "NULL", nil
+	}
+	cType, err := emitScalarType(elemType)
+	if err != nil {
+		return "", err
+	}
+	values := make([]string, 0, len(elements))
+	for _, elem := range elements {
+		value, err := emitExpr(elem)
+		if err != nil {
+			return "", err
+		}
+		values = append(values, value)
+	}
+	return fmt.Sprintf("(%s[]){%s}", cType, strings.Join(values, ", ")), nil
+}
+
+func emitOptionalBound(expr ir.Expr) (string, string, error) {
+	if expr == nil {
+		return "false", "0", nil
+	}
+	value, err := emitExpr(expr)
+	if err != nil {
+		return "", "", err
+	}
+	return "true", value, nil
+}
+
+func collectionHelper(op string, typ ast.Type) (string, error) {
+	switch typ := typ.(type) {
+	case *ast.ArrayType:
+		name, err := elemRuntimeName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "rt_array_" + name + "_" + op, nil
+	case *ast.SliceType:
+		name, err := elemRuntimeName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "rt_slice_" + name + "_" + op, nil
+	case *ast.ListType:
+		return listHelper(op, typ)
+	default:
+		return "", fmt.Errorf("unsupported collection type %s", typ)
+	}
+}
+
+func listHelper(op string, typ ast.Type) (string, error) {
+	listType, ok := typ.(*ast.ListType)
+	if !ok {
+		return "", fmt.Errorf("unsupported list type %s", typ)
+	}
+	name, err := elemRuntimeName(listType.Elem)
+	if err != nil {
+		return "", err
+	}
+	return "rt_list_" + name + "_" + op, nil
+}
+
+func sliceMakeHelper(typ ast.Type) (string, error) {
+	sliceType, ok := typ.(*ast.SliceType)
+	if !ok {
+		return "", fmt.Errorf("make expects slice type, got %s", typ)
+	}
+	name, err := elemRuntimeName(sliceType.Elem)
+	if err != nil {
+		return "", err
+	}
+	return "rt_make_slice_" + name, nil
+}
+
+func elemRuntimeName(typ ast.Type) (string, error) {
+	switch {
+	case ast.TypeEqual(typ, ast.IntType):
+		return "int", nil
+	case ast.TypeEqual(typ, ast.FloatType):
+		return "float", nil
+	case ast.TypeEqual(typ, ast.BoolType):
+		return "bool", nil
+	case ast.TypeEqual(typ, ast.StringType):
+		return "string", nil
+	default:
+		return "", fmt.Errorf("unsupported element type %s", typ)
+	}
+}
+
 func mangleFunc(name string) string {
 	return "trux_" + name
+}
+
+func mangleIdent(name string) string {
+	return fmt.Sprintf("trux_v_%d_%s", len(name), name)
 }
 
 func cStringLiteral(value string) string {

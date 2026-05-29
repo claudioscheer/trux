@@ -116,6 +116,9 @@ func formatResolvedCalls(out *bytes.Buffer, statements []ast.Statement, info *se
 			formatExprCalls(out, stmt.Value, info)
 		case *ast.AssignStmt:
 			formatExprCalls(out, stmt.Value, info)
+		case *ast.IndexAssignStmt:
+			formatExprCalls(out, stmt.Target, info)
+			formatExprCalls(out, stmt.Value, info)
 		case *ast.IfStmt:
 			formatExprCalls(out, stmt.Condition, info)
 			formatResolvedCalls(out, stmt.Then.Statements, info)
@@ -133,6 +136,16 @@ func formatResolvedCalls(out *bytes.Buffer, statements []ast.Statement, info *se
 
 func formatExprCalls(out *bytes.Buffer, expr ast.Expression, info *semtypes.Info) {
 	switch expr := expr.(type) {
+	case *ast.ArrayLiteral:
+		for _, elem := range expr.Elements {
+			formatExprCalls(out, elem, info)
+		}
+	case *ast.ListLiteral:
+		for _, elem := range expr.Elements {
+			formatExprCalls(out, elem, info)
+		}
+	case *ast.MakeExpr:
+		formatExprCalls(out, expr.Len, info)
 	case *ast.CallExpr:
 		if sig, ok := info.ResolvedCalls[expr]; ok {
 			fmt.Fprintf(out, "  %d:%d %s -> %s\n", expr.Start.Line, expr.Start.Column, expr.Callee, sig.ReturnType)
@@ -153,5 +166,16 @@ func formatExprCalls(out *bytes.Buffer, expr ast.Expression, info *semtypes.Info
 	case *ast.BinaryExpr:
 		formatExprCalls(out, expr.Left, info)
 		formatExprCalls(out, expr.Right, info)
+	case *ast.IndexExpr:
+		formatExprCalls(out, expr.Collection, info)
+		formatExprCalls(out, expr.Index, info)
+	case *ast.SliceExpr:
+		formatExprCalls(out, expr.Collection, info)
+		if expr.StartIndex != nil {
+			formatExprCalls(out, expr.StartIndex, info)
+		}
+		if expr.EndIndex != nil {
+			formatExprCalls(out, expr.EndIndex, info)
+		}
 	}
 }

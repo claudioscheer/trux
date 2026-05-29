@@ -55,7 +55,7 @@ func ready() bool {
 func main() int {
     let name string = label()
     let ok bool = ready()
-    print(name, 1)
+    print(name, " ", 1)
     print(ok)
     print(1)
     return 0
@@ -74,7 +74,7 @@ func main() int {
 	}
 
 	stringPrint := mainFn.Body.Statements[2].(*ast.ExprStmt).Expr.(*ast.CallExpr)
-	wantStringPrint := []ast.Type{ast.StringType, ast.IntType}
+	wantStringPrint := []ast.Type{ast.StringType, ast.StringType, ast.IntType}
 	if !sameTypes(info.PrintCalls[stringPrint], wantStringPrint) {
 		t.Fatalf("string print types = %q, want %q", info.PrintCalls[stringPrint], wantStringPrint)
 	}
@@ -107,7 +107,7 @@ func main() int {
         i = i + 1
     }
 
-    print(total, i == 3, text != "other")
+    print(total, " ", i == 3, " ", text != "other")
     return 0
 }`)
 
@@ -128,8 +128,75 @@ func main() int {
 	}
 
 	printCall := mainFn.Body.Statements[6].(*ast.ExprStmt).Expr.(*ast.CallExpr)
-	if !sameTypes(info.PrintCalls[printCall], []ast.Type{ast.FloatType, ast.BoolType, ast.BoolType}) {
-		t.Fatalf("print call types = %q, want float bool bool", info.PrintCalls[printCall])
+	if !sameTypes(info.PrintCalls[printCall], []ast.Type{ast.FloatType, ast.StringType, ast.BoolType, ast.StringType, ast.BoolType}) {
+		t.Fatalf("print call types = %q, want float string bool string bool", info.PrintCalls[printCall])
+	}
+}
+
+func TestCheckAllowsStringConcatenation(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let first string = "tru"
+    let second string = "x"
+    let name string = first + second
+    print(name)
+    return 0
+}`)
+
+	info, err := Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := program.Functions[0]
+	nameLet := mainFn.Body.Statements[2].(*ast.LetStmt)
+	if !ast.TypeEqual(info.ExprTypes[nameLet.Value], ast.StringType) {
+		t.Fatalf("concat type = %q, want string", info.ExprTypes[nameLet.Value])
+	}
+}
+
+func TestCheckAllowsV3Collections(t *testing.T) {
+	program := mustParse(t, `package main
+func push(xs list[int], value int) list[int] {
+    append(xs, value)
+    return xs
+}
+
+func main() int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let ys []int = xs[1:]
+    ys[0] = 9
+    let zs list[int] = list[int]{xs[1]}
+    append(zs, ys[0])
+    let made []int = make([]int, len(zs))
+    made[0] = zs[1]
+    let ch string = "abc"[1]
+    let sub string = "abcd"[1:3]
+    print(len(xs), " ", len(ys), " ", len(zs), " ", xs[1], " ", made[0], " ", ch, " ", sub)
+    return 0
+}`)
+
+	info, err := Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := program.Functions[1]
+	sliceLet := mainFn.Body.Statements[1].(*ast.LetStmt)
+	if !ast.TypeEqual(info.ExprTypes[sliceLet.Value], &ast.SliceType{Elem: ast.IntType}) {
+		t.Fatalf("slice expression type = %s, want []int", info.ExprTypes[sliceLet.Value])
+	}
+	listLet := mainFn.Body.Statements[3].(*ast.LetStmt)
+	if !ast.TypeEqual(info.ExprTypes[listLet.Value], &ast.ListType{Elem: ast.IntType}) {
+		t.Fatalf("list literal type = %s, want list[int]", info.ExprTypes[listLet.Value])
+	}
+	appendCall := mainFn.Body.Statements[4].(*ast.ExprStmt).Expr.(*ast.CallExpr)
+	if !ast.TypeEqual(info.AppendCalls[appendCall].ElemType, ast.IntType) {
+		t.Fatalf("append elem type = %s, want int", info.AppendCalls[appendCall].ElemType)
+	}
+	chLet := mainFn.Body.Statements[7].(*ast.LetStmt)
+	if !ast.TypeEqual(info.ExprTypes[chLet.Value], ast.StringType) {
+		t.Fatalf("string index type = %s, want string", info.ExprTypes[chLet.Value])
 	}
 }
 
@@ -270,13 +337,13 @@ func main() int {
 			want: `argument 1 to takesString has type bool, want string`,
 		},
 		{
-			name: "string arithmetic",
+			name: "mixed string concatenation",
 			src: `package main
 func main() int {
-    let x int = "a" + "b"
-    return x
+    let x string = "a" + 1
+    return 0
 }`,
-			want: `operator "+" requires matching numeric operands, got string and string`,
+			want: `operator "+" requires matching numeric operands or string operands, got string and int`,
 		},
 		{
 			name: "bool arithmetic",
@@ -285,7 +352,7 @@ func main() int {
     let x int = true + false
     return x
 }`,
-			want: `operator "+" requires matching numeric operands, got bool and bool`,
+			want: `operator "+" requires matching numeric operands or string operands, got bool and bool`,
 		},
 		{
 			name: "if condition not bool",
@@ -335,7 +402,7 @@ func main() int {
     let x float = 1.0 + 1
     return 0
 }`,
-			want: `operator "+" requires matching numeric operands, got float and int`,
+			want: `operator "+" requires matching numeric operands or string operands, got float and int`,
 		},
 		{
 			name: "mixed numeric comparison",
@@ -354,6 +421,81 @@ func main() int {
     return 0
 }`,
 			want: `operator "in" requires string operands, got string and int`,
+		},
+		{
+			name: "nested collection element",
+			src: `package main
+func main() int {
+    let xs [][]int = make([][]int, 1)
+    return 0
+}`,
+			want: `collection element type must be scalar, got []int`,
+		},
+		{
+			name: "array literal length mismatch",
+			src: `package main
+func main() int {
+    let xs [2]int = [2]int{1}
+    return 0
+}`,
+			want: `array literal for [2]int has 1 elements, want 2`,
+		},
+		{
+			name: "invalid index type",
+			src: `package main
+func main() int {
+    let xs [1]int = [1]int{1}
+    return xs[true]
+}`,
+			want: `index must be int, got bool`,
+		},
+		{
+			name: "invalid slice bound type",
+			src: `package main
+func main() int {
+    let xs [1]int = [1]int{1}
+    let ys []int = xs["bad":]
+    return 0
+}`,
+			want: `slice start must be int, got string`,
+		},
+		{
+			name: "append wrong value type",
+			src: `package main
+func main() int {
+    let xs list[int] = list[int]{}
+    append(xs, "bad")
+    return 0
+}`,
+			want: `append value has type string, want int`,
+		},
+		{
+			name: "append expression",
+			src: `package main
+func main() int {
+    let xs list[int] = list[int]{}
+    return append(xs, 1)
+}`,
+			want: `append can only be used as a statement`,
+		},
+		{
+			name: "string index assignment",
+			src: `package main
+func main() int {
+    let text string = "abc"
+    text[0] = "x"
+    return 0
+}`,
+			want: `cannot assign through string index`,
+		},
+		{
+			name: "make non-slice",
+			src: `package main
+func main() int {
+    let x int = make(int, 1)
+    return x
+}`,
+			want: `make expects slice type, got int`,
 		},
 	}
 
@@ -376,7 +518,7 @@ func sameTypes(got []ast.Type, want []ast.Type) bool {
 		return false
 	}
 	for i := range got {
-		if got[i] != want[i] {
+		if !ast.TypeEqual(got[i], want[i]) {
 			return false
 		}
 	}

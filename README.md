@@ -32,11 +32,14 @@ The compiler currently supports:
 - assignment to existing variables
 - string and boolean literals
 - string containment with `needle in haystack`
+- string concatenation with `+`
+- fixed arrays `[N]T`, slices `[]T`, and mutable lists `list[T]` for scalar element types
+- array and list literals, `make([]T, n)`, `len(x)`, indexing, slicing, list `append`, and indexed assignment
 - typed IR
 - C code generation and execution through `cc` or `$CC`
 - `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
 
-Imports, modules, and string concatenation are not implemented yet.
+Nested collections, imports, and modules are not implemented yet.
 
 ## Building
 

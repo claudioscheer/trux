@@ -4,7 +4,7 @@
 
 **Trux uses arena-based (region-based) allocation as the primary strategy for dynamic memory.**
 
-All heap-allocated data — strings, slices, and future compound types — will be allocated from arenas rather than through individual `malloc`/`free` or a garbage collector.
+Most dynamic data is allocated from arenas rather than through individual `malloc`/`free` or a garbage collector. Lists are the current exception: growable buffers use heap allocation and `realloc`, with list allocations tracked by the runtime owner and freed at program exit.
 
 ## Why Arenas
 
@@ -26,19 +26,21 @@ Under these constraints, arenas are the best fit:
 
 ## Current State
 
-As of the early implementation:
+As of the current early implementation:
 
 - v0 only supports `int`. No dynamic allocation exists.
 - v1 adds `string` literals and `print(string)`. These are backed by static storage (`const uint8_t*` pointing into read-only data).
-- No arenas are present in the runtime or generated code yet.
+- v2 adds string concatenation. Concatenated strings are backed by an explicit program arena threaded through generated functions.
+- v3 adds arrays, slices, and lists. Arrays and `make([]T, n)` storage are arena-backed. Slices are borrowed views. Lists are heap-backed shared handles so growth does not leave obsolete buffers in the arena.
 
-The first pressure appears when the language gains operations that produce *new* dynamic string data at runtime (concatenation, formatting, etc.).
+The first dynamic string operation is concatenation. Formatting and other operations that produce new string data should use the same arena-backed model unless the language adds a more specific lifetime mechanism.
 
 ## Planned Runtime Shape
 
-When dynamic allocation is introduced:
+Now that dynamic allocation has been introduced:
 
-- A single primary `rt_program_arena` (or a small number of well-known arenas) will back dynamic values.
+- A single primary program arena backs dynamic values.
+- The same runtime owner also tracks heap-backed list handles for teardown at generated `main` exit.
 - `rt_string` remains a length-based immutable view:
 
   ```c
@@ -52,18 +54,18 @@ When dynamic allocation is introduced:
 
 - String literals continue to use static storage for efficiency.
 - Dynamic strings are allocated by copying into the arena.
-- There is **no individual `free`** for strings or other heap objects.
+- There is **no individual `free`** for strings, arrays, or slices. List buffers are the exception and are released by runtime teardown, not by user code.
 
 A recommended separation is to keep `rt_string` strictly immutable and introduce a separate builder type for construction (e.g. `rt_string_builder` with capacity). This avoids giving the language-level string type surprising mutability behavior depending on provenance.
 
-Early generated code will likely look like:
+Early generated code follows this shape:
 
 ```c
-rt_string greet(rt_string name, rt_arena* arena) {
+rt_string greet(rt_arena* arena, rt_string name) {
     rt_string lit1 = rt_string_lit("Hello, ");
     rt_string lit2 = rt_string_lit("!");
-    rt_string tmp = rt_string_concat(lit1, name, arena);
-    return rt_string_concat(tmp, lit2, arena);
+    rt_string tmp = rt_string_concat(arena, lit1, name);
+    return rt_string_concat(arena, tmp, lit2);
 }
 ```
 
@@ -88,6 +90,7 @@ Two important details must be decided before heavy use of dynamic strings:
 - The language must define clear rules about when values allocated into an arena become invalid. These invalidation rules should be specified *before* introducing aggressive temp-arena resets.
 - Some patterns (mixing very different lifetimes without multiple arenas) become awkward.
 - "Graveyard" waste can occur when growing containers (dynamic arrays, string builders) inside an arena.
+- Lists avoid arena graveyard waste by using heap buffers, but that costs a slightly larger runtime and means list handles have shared mutable state.
 
 The biggest risk is **under-specifying lifetimes in the language semantics**. If the language does not clearly state when a string returned from a function may become invalid, every C representation is just a temporary workaround. The hard problem is not the arena implementation — it is defining when allocated values become invalid.
 

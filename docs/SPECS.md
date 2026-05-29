@@ -341,6 +341,7 @@ boolean conditions
 variable assignment
 float
 string containment with in
+string concatenation with +
 ```
 
 ## Example
@@ -456,6 +457,18 @@ The left operand is the needle. The right operand is the haystack.
 
 `in` requires `string` operands and returns `bool`.
 
+## String Concatenation
+
+v2 supports string concatenation:
+
+```go
+let name string = "trux" + " compiler"
+```
+
+`+` requires matching `string` operands and returns `string`.
+
+Concatenated strings are dynamic strings allocated in the generated program arena. String literals continue to point at static storage. Dynamic strings live until the generated program arena is destroyed at program exit.
+
 ## If / Else
 
 `if` requires a `bool` condition.
@@ -513,6 +526,74 @@ let x int = 1
 x = "hello"
 ```
 
+## v3 Collections
+
+v3 adds scalar-element collections:
+
+```go
+let xs [3]int = [3]int{1, 2, 3}
+let view []int = xs[1:]
+let items list[int] = list[int]{1, 2}
+```
+
+Element types are limited to `int`, `float`, `bool`, and `string`. Nested collections are rejected.
+
+Arrays use `[N]T`, where `N` is a positive integer literal. Array literals must provide exactly `N` elements:
+
+```go
+let xs [3]int = [3]int{1, 2, 3}
+```
+
+Slices use `[]T` and are borrowed views over arrays, slices, or lists:
+
+```go
+let tail []int = xs[1:]
+let all []int = xs[:]
+```
+
+Lists use `list[T]` and are growable shared handles:
+
+```go
+let items list[int] = list[int]{1}
+append(items, 2)
+```
+
+Assigning or passing a list copies the handle. Mutating through any alias observes the same list header and backing buffer.
+
+`make([]T, n)` creates zero-filled arena-backed storage and returns a slice view:
+
+```go
+let scratch []int = make([]int, 10)
+```
+
+`len(x)` returns an `int` for strings, arrays, slices, and lists.
+
+Indexing works for strings, arrays, slices, and lists:
+
+```go
+let first int = xs[0]
+let ch string = "abc"[1]
+```
+
+String indexing returns a one-byte `string` view. Strings are immutable, so string index assignment is rejected.
+
+Slicing works for strings, arrays, slices, and lists:
+
+```go
+let sub []int = xs[1:3]
+let prefix string = "trux"[:2]
+```
+
+Indexed assignment works for arrays, slices, and lists:
+
+```go
+xs[0] = 42
+view[1] = 7
+items[0] = 9
+```
+
+Runtime bounds checks trap invalid indexes and slices with a `trux runtime error`.
+
 ## v2 Compiler Checks
 
 The compiler must reject:
@@ -524,6 +605,24 @@ assignment to undefined variable
 assignment with wrong type
 comparison between incompatible types
 using in with non-string operands
+```
+
+## v3 Compiler Checks
+
+The compiler must reject:
+
+```text
+nested collection element types
+array literals with the wrong element count
+collection literal elements with the wrong type
+index expressions whose index is not int
+slice bounds that are not int
+indexing or slicing non-collection values
+string index assignment
+append outside statement position
+append with a non-list first argument
+append values with the wrong element type
+make with a non-slice type or non-int length
 ```
 
 ---
@@ -578,13 +677,29 @@ comparisons
 assignment
 float
 string containment
+string concatenation
+```
+
+## v3
+
+```text
+arrays
+slices
+lists
+len
+make([]T, n)
+indexing
+slicing
+indexed assignment
+append for lists
+runtime bounds traps
 ```
 
 ---
 
 # Memory Model
 
-Dynamic allocation (starting with strings that are not literals) uses arenas rather than individual `malloc`/`free` or a garbage collector.
+Dynamic allocation uses arenas for strings, arrays, and slice backing storage. Lists are heap-backed shared handles tracked by the runtime owner and freed at program exit.
 
 See [ARENAS.md](ARENAS.md) for the full rationale, tradeoffs, staged evolution plan, and why GC was deferred.
 

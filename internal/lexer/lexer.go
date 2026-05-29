@@ -83,6 +83,9 @@ func (l *Lexer) NextToken() token.Token {
 	case ',':
 		l.advance()
 		return token.Token{Type: token.Comma, Lexeme: ",", Pos: pos}
+	case ':':
+		l.advance()
+		return token.Token{Type: token.Colon, Lexeme: ":", Pos: pos}
 	case '(':
 		l.advance()
 		return token.Token{Type: token.LParen, Lexeme: "(", Pos: pos}
@@ -95,6 +98,12 @@ func (l *Lexer) NextToken() token.Token {
 	case '}':
 		l.advance()
 		return token.Token{Type: token.RBrace, Lexeme: "}", Pos: pos}
+	case '[':
+		l.advance()
+		return token.Token{Type: token.LBracket, Lexeme: "[", Pos: pos}
+	case ']':
+		l.advance()
+		return token.Token{Type: token.RBracket, Lexeme: "]", Pos: pos}
 	}
 
 	if isIdentStart(ch) {

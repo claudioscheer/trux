@@ -1,0 +1,24 @@
+package main
+
+func greet(name string) string {
+    return "hello, " + name
+}
+
+func bang(value string) string {
+    return value + "!"
+}
+
+func main() int {
+    let language string = "trux"
+    let noun string = "compiler"
+    let name string = language + " " + noun
+    let empty string = ""
+
+    print(name)
+    print(greet(name))
+    print(bang(name))
+    print(empty + "empty")
+    print((language + noun) == "truxcompiler")
+
+    return 0
+}

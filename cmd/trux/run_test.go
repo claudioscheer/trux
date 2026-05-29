@@ -69,7 +69,7 @@ func ready() bool {
 func main() int {
     let name string = label()
     let ok bool = ready()
-    print(name, 1)
+    print(name, " ", 1)
     print(ok)
     print("line\nquote: \"")
     return 0
@@ -81,7 +81,7 @@ func main() int {
 		t.Fatal(err)
 	}
 
-	want := "Kern1\ntrue\nline\nquote: \"\n"
+	want := "Kern 1\ntrue\nline\nquote: \"\n"
 	if out.String() != want {
 		t.Fatalf("output = %q, want %q", out.String(), want)
 	}
@@ -114,6 +114,10 @@ func TestRunFileCompilesAndExecutesV2Examples(t *testing.T) {
 			path: "../../examples/v2/strings_in.tx",
 			want: "true\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\n",
 		},
+		{
+			path: "../../examples/v2/strings_concat.tx",
+			want: "trux compiler\nhello, trux compiler\ntrux compiler!\nempty\ntrue\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -127,6 +131,64 @@ func TestRunFileCompilesAndExecutesV2Examples(t *testing.T) {
 				t.Fatalf("output = %q, want %q", out.String(), tt.want)
 			}
 		})
+	}
+}
+
+func TestRunFileCompilesAndExecutesV3Examples(t *testing.T) {
+	requireCC(t)
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{
+			path: "../../examples/v3/arrays.tx",
+			want: "3\n1 3\n9 2\n",
+		},
+		{
+			path: "../../examples/v3/slices.tx",
+			want: "8 8 2\n5 0 7\ne er 4\n",
+		},
+		{
+			path: "../../examples/v3/lists.tx",
+			want: "2 2\n3 2 3\n8 2\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			var out bytes.Buffer
+			err := runFile(&out, tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != tt.want {
+				t.Fatalf("output = %q, want %q", out.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestRunFileReturnsRuntimeBoundsError(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func main() int {
+    let xs [1]int = [1]int{1}
+    print(xs[1])
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if out.String() != "" {
+		t.Fatalf("output = %q, want empty output", out.String())
+	}
+	if !strings.Contains(err.Error(), "trux runtime error: index 1 out of bounds for length 1") {
+		t.Fatalf("error = %q, want bounds error", err.Error())
 	}
 }
 
@@ -186,7 +248,7 @@ func main() int {
 	}
 
 	cSource := readFile(t, filepath.Join(debugDir, "05-c.c"))
-	if !strings.Contains(cSource, "rt_print_int(x);") || !strings.Contains(cSource, "rt_print_newline();") {
+	if !strings.Contains(cSource, "rt_print_int(trux_v_1_x);") || !strings.Contains(cSource, "rt_print_newline();") {
 		t.Fatalf("generated C = %q, want int print call with newline", cSource)
 	}
 }

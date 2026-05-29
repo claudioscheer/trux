@@ -191,6 +191,65 @@ func main() int {
 	}
 }
 
+func TestParsesV3Collections(t *testing.T) {
+	program := mustParse(t, `package main
+func head(xs []int) int {
+    return xs[0]
+}
+
+func main() int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let ys []int = xs[1:]
+    let zs list[int] = list[int]{head(ys), xs[:2][1]}
+    let made []int = make([]int, len(xs))
+    xs[0] = head(made)
+    append(zs, xs[0])
+    return head(ys)
+}`)
+
+	head := program.Functions[0]
+	if !ast.TypeEqual(head.Params[0].Type, &ast.SliceType{Elem: ast.IntType}) {
+		t.Fatalf("head param type = %s, want []int", head.Params[0].Type)
+	}
+
+	mainFn := program.Functions[1]
+	arrayLet := mainFn.Body.Statements[0].(*ast.LetStmt)
+	if !ast.TypeEqual(arrayLet.Type, &ast.ArrayType{Length: 3, Elem: ast.IntType}) {
+		t.Fatalf("array let type = %s, want [3]int", arrayLet.Type)
+	}
+	if _, ok := arrayLet.Value.(*ast.ArrayLiteral); !ok {
+		t.Fatalf("array let value = %T, want ast.ArrayLiteral", arrayLet.Value)
+	}
+
+	sliceLet := mainFn.Body.Statements[1].(*ast.LetStmt)
+	if !ast.TypeEqual(sliceLet.Type, &ast.SliceType{Elem: ast.IntType}) {
+		t.Fatalf("slice let type = %s, want []int", sliceLet.Type)
+	}
+	if _, ok := sliceLet.Value.(*ast.SliceExpr); !ok {
+		t.Fatalf("slice let value = %T, want ast.SliceExpr", sliceLet.Value)
+	}
+
+	listLet := mainFn.Body.Statements[2].(*ast.LetStmt)
+	if !ast.TypeEqual(listLet.Type, &ast.ListType{Elem: ast.IntType}) {
+		t.Fatalf("list let type = %s, want list[int]", listLet.Type)
+	}
+	if _, ok := listLet.Value.(*ast.ListLiteral); !ok {
+		t.Fatalf("list let value = %T, want ast.ListLiteral", listLet.Value)
+	}
+
+	makeLet := mainFn.Body.Statements[3].(*ast.LetStmt)
+	if _, ok := makeLet.Value.(*ast.MakeExpr); !ok {
+		t.Fatalf("make let value = %T, want ast.MakeExpr", makeLet.Value)
+	}
+	if _, ok := mainFn.Body.Statements[4].(*ast.IndexAssignStmt); !ok {
+		t.Fatalf("statement = %T, want ast.IndexAssignStmt", mainFn.Body.Statements[4])
+	}
+	appendStmt := mainFn.Body.Statements[5].(*ast.ExprStmt)
+	if call, ok := appendStmt.Expr.(*ast.CallExpr); !ok || call.Callee != "append" {
+		t.Fatalf("append statement = %#v, want append call", appendStmt.Expr)
+	}
+}
+
 func TestReportsSyntaxErrorWithExpectedActualAndPosition(t *testing.T) {
 	_, err := Parse(`package main
 func main( int {

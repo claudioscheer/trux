@@ -103,6 +103,10 @@ func TestRunFileCompilesAndExecutesV2Examples(t *testing.T) {
 			want: "2\n5\nhigh\n",
 		},
 		{
+			path: "../../examples/v2/fibonacci.tx",
+			want: "iterative\n0\n1\n1\n2\n3\n5\n8\n13\n21\n34\nrecursive\n0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n",
+		},
+		{
 			path: "../../examples/v2/mixed.tx",
 			want: "3.75\ntrue true\n",
 		},

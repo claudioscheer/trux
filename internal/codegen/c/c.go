@@ -13,9 +13,6 @@ import (
 func Generate(program *ir.Program) (string, error) {
 	var out bytes.Buffer
 
-	fmt.Fprintln(&out, "#include <stdint.h>")
-	fmt.Fprintln(&out, "#include <stdbool.h>")
-	fmt.Fprintln(&out)
 	out.WriteString(runtimec.Source)
 	fmt.Fprintln(&out)
 

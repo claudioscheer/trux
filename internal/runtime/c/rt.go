@@ -1,7 +1,11 @@
 package c
 
-const Source = `#include <stdio.h>
+const Source = `#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 typedef struct {
     const uint8_t* data;
@@ -9,7 +13,7 @@ typedef struct {
 } rt_string;
 
 static void rt_print_int(int64_t value) {
-    printf("%lld", (long long)value);
+    printf("%" PRId64, value);
 }
 
 static void rt_print_float(double value) {

@@ -2,14 +2,37 @@
 
 `trux` is a small Go-inspired language that compiles to C.
 
-The goal is to learn.
+The goal is to learn compiler construction by building the full pipeline by hand:
+
+```text
+source code
+  -> lexer
+  -> parser
+  -> AST
+  -> type checker
+  -> typed IR
+  -> C code
+  -> cc (or $CC)
+  -> executable
+```
+
+`trux` is not Go-compatible. It only borrows simple syntax ideas from Go.
 
 ## Current Status
 
-The lexer is implemented and functional.  
-`trux run` currently lexes source files and prints tokens (useful for early development and testing).
+The compiler currently supports:
 
-Full parsing, type checking, and C code generation are not yet implemented.
+- `package main`
+- `func`, parameters, return types, and function calls
+- `let` bindings with explicit types
+- `int`, `string`, and `bool`
+- integer arithmetic with `+`, `-`, `*`, and `/`
+- string and boolean literals
+- typed IR
+- C code generation and execution through `cc` or `$CC`
+- `print(...)` with one or more `int`, `string`, or `bool` arguments
+
+Assignment, control flow, comparisons, imports, modules, and string concatenation are not implemented yet.
 
 ## Building
 
@@ -21,23 +44,25 @@ This produces `bin/trux`.
 
 ## Running
 
-The primary command right now is `run`, which lexes a `.tx` file and dumps tokens:
+Run a source file:
 
 ```bash
-./bin/trux run examples/v0/hello.tx
+make run FILE=examples/v1/functions.tx
 ```
 
-Or using make:
+Run with debug output for each compiler phase:
 
 ```bash
-make run FILE=examples/v0/hello.tx
+make run FILE=examples/v1/functions.tx DEBUG=1
 ```
 
-### Example
+Debug files are written to `tmp/trux-debug/<source-name>/`.
 
-Given this source ([examples/v0/hello.tx](examples/v0/hello.tx)):
+## Examples
 
-```go
+Minimal integer program:
+
+```trux
 package main
 
 func add(a int, b int) int {
@@ -51,17 +76,53 @@ func main() int {
 }
 ```
 
-`trux run` will output tokens like:
+Expected output:
 
-```
-1:1 PACKAGE "package"
-1:9 IDENT "main"
-2:1 EOF ""
-...
+```text
+3
 ```
 
-It will also report errors on illegal characters.
+Strings, booleans, and multi-argument print:
+
+```trux
+package main
+
+func project() string {
+    return "trux"
+}
+
+func stable() bool {
+    return false
+}
+
+func main() int {
+    let name string = project()
+    let isStable bool = stable()
+
+    print(name, " ", 1, " ", isStable)
+    print(isStable)
+
+    return 0
+}
+```
+
+Expected output:
+
+```text
+trux 1 false
+false
+```
+
+More examples live in [examples/](examples/).
+
+## Commands
+
+```bash
+make test
+make emit-c FILE=examples/v1/functions.tx
+make build-bin FILE=examples/v1/functions.tx OUT=bin/functions
+```
 
 ## Documentation
 
-See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions (arenas, modules, GPU support, etc.).
+See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including arenas, modules, and GPU support.

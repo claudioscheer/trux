@@ -139,6 +139,8 @@ func (p *Parser) parseType() (ast.Type, error) {
 	switch {
 	case p.match(token.IntType):
 		return ast.IntType, nil
+	case p.match(token.FloatType):
+		return ast.FloatType, nil
 	case p.match(token.StringType):
 		return ast.StringType, nil
 	case p.match(token.BoolType):
@@ -176,6 +178,12 @@ func (p *Parser) parseStatement() (ast.Statement, error) {
 		return p.parseLetStmt()
 	case p.check(token.Return):
 		return p.parseReturnStmt()
+	case p.check(token.If):
+		return p.parseIfStmt()
+	case p.check(token.While):
+		return p.parseWhileStmt()
+	case p.check(token.Ident) && p.peek().Type == token.Assign:
+		return p.parseAssignStmt()
 	default:
 		return p.parseExprStmt()
 	}
@@ -223,6 +231,71 @@ func (p *Parser) parseReturnStmt() (ast.Statement, error) {
 	return &ast.ReturnStmt{Start: start.Pos, Value: value}, nil
 }
 
+func (p *Parser) parseAssignStmt() (ast.Statement, error) {
+	name, err := p.expect(token.Ident)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := p.expect(token.Assign); err != nil {
+		return nil, err
+	}
+
+	value, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ast.AssignStmt{Start: name.Pos, Name: name.Lexeme, Value: value}, nil
+}
+
+func (p *Parser) parseIfStmt() (ast.Statement, error) {
+	start, err := p.expect(token.If)
+	if err != nil {
+		return nil, err
+	}
+
+	condition, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+
+	thenBlock, err := p.parseBlock()
+	if err != nil {
+		return nil, err
+	}
+
+	var elseBlock *ast.Block
+	if p.match(token.Else) {
+		block, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		elseBlock = &block
+	}
+
+	return &ast.IfStmt{Start: start.Pos, Condition: condition, Then: thenBlock, Else: elseBlock}, nil
+}
+
+func (p *Parser) parseWhileStmt() (ast.Statement, error) {
+	start, err := p.expect(token.While)
+	if err != nil {
+		return nil, err
+	}
+
+	condition, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := p.parseBlock()
+	if err != nil {
+		return nil, err
+	}
+
+	return &ast.WhileStmt{Start: start.Pos, Condition: condition, Body: body}, nil
+}
+
 func (p *Parser) parseExprStmt() (ast.Statement, error) {
 	expr, err := p.parseExpression(0)
 	if err != nil {
@@ -264,6 +337,9 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 	case p.check(token.Int):
 		tok := p.advance()
 		return &ast.IntLiteral{Start: tok.Pos, Value: tok.Lexeme}, nil
+	case p.check(token.Float):
+		tok := p.advance()
+		return &ast.FloatLiteral{Start: tok.Pos, Value: tok.Lexeme}, nil
 	case p.check(token.String):
 		tok := p.advance()
 		return &ast.StringLiteral{Start: tok.Pos, Value: tok.Lexeme}, nil
@@ -327,6 +403,8 @@ func (p *Parser) parseArguments() ([]ast.Expression, error) {
 
 func (p *Parser) precedence(typ token.Type) int {
 	switch typ {
+	case token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual, token.In:
+		return 0
 	case token.Plus, token.Minus:
 		return 1
 	case token.Asterisk, token.Slash:
@@ -370,6 +448,14 @@ func (p *Parser) current() token.Token {
 	return p.tokens[p.pos]
 }
 
+func (p *Parser) peek() token.Token {
+	if p.pos+1 >= len(p.tokens) {
+		return p.current()
+	}
+
+	return p.tokens[p.pos+1]
+}
+
 func (p *Parser) errorf(tok token.Token, format string, args ...any) error {
 	return &ParseError{
 		Pos: tok.Pos,
@@ -399,7 +485,8 @@ func describe(tok token.Token) string {
 
 func isLiteralToken(typ token.Type) bool {
 	switch typ {
-	case token.Assign, token.Plus, token.Minus, token.Asterisk, token.Slash,
+	case token.Assign, token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
+		token.Plus, token.Minus, token.Asterisk, token.Slash,
 		token.Comma, token.LParen, token.RParen, token.LBrace, token.RBrace:
 		return true
 	default:

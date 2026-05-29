@@ -25,14 +25,18 @@ The compiler currently supports:
 - `package main`
 - `func`, parameters, return types, and function calls
 - `let` bindings with explicit types
-- `int`, `string`, and `bool`
-- integer arithmetic with `+`, `-`, `*`, and `/`
+- `int`, `float`, `string`, and `bool`
+- integer and float arithmetic with `+`, `-`, `*`, and `/`
+- comparison operators with `==`, `!=`, `<`, `<=`, `>`, and `>=`
+- `if`, `else`, and `while`
+- assignment to existing variables
 - string and boolean literals
+- string containment with `needle in haystack`
 - typed IR
 - C code generation and execution through `cc` or `$CC`
-- `print(...)` with one or more `int`, `string`, or `bool` arguments
+- `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
 
-Assignment, control flow, comparisons, imports, modules, and string concatenation are not implemented yet.
+Imports, modules, and string concatenation are not implemented yet.
 
 ## Building
 

@@ -113,6 +113,37 @@ func TestLexesV1LiteralsAndTypes(t *testing.T) {
 	})
 }
 
+func TestLexesV2Tokens(t *testing.T) {
+	assertTokens(t, Lex(`if x <= 10 { y = 1.5 } else { while "x" in name != false { y = y + 1.0 } }`), []expectedToken{
+		{token.If, "if"},
+		{token.Ident, "x"},
+		{token.LessEqual, "<="},
+		{token.Int, "10"},
+		{token.LBrace, "{"},
+		{token.Ident, "y"},
+		{token.Assign, "="},
+		{token.Float, "1.5"},
+		{token.RBrace, "}"},
+		{token.Else, "else"},
+		{token.LBrace, "{"},
+		{token.While, "while"},
+		{token.String, "x"},
+		{token.In, "in"},
+		{token.Ident, "name"},
+		{token.NotEqual, "!="},
+		{token.False, "false"},
+		{token.LBrace, "{"},
+		{token.Ident, "y"},
+		{token.Assign, "="},
+		{token.Ident, "y"},
+		{token.Plus, "+"},
+		{token.Float, "1.0"},
+		{token.RBrace, "}"},
+		{token.RBrace, "}"},
+		{token.EOF, ""},
+	})
+}
+
 func TestLexesStringEscapes(t *testing.T) {
 	assertTokens(t, Lex(`"quote: \" slash: \\ tab:\t"`), []expectedToken{
 		{token.String, "quote: \" slash: \\ tab:\t"},

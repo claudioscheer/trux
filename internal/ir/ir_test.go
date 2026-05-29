@@ -130,6 +130,55 @@ func main() int {
 	}
 }
 
+func TestBuildCreatesTypedIRForV2Program(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let text string = "trux"
+    let x float = 1.5
+    if "ru" in text {
+        x = x + 1.0
+    }
+    while x > 0.0 {
+        x = x - 1.0
+    }
+    print(x)
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := irProgram.Functions[0]
+	floatLet := mainFn.Body[1].(*LetStmt)
+	if floatLet.Type != ast.FloatType || floatLet.Value.Type() != ast.FloatType {
+		t.Fatalf("float let = %#v, want float", floatLet)
+	}
+
+	ifStmt := mainFn.Body[2].(*IfStmt)
+	if ifStmt.Condition.Type() != ast.BoolType {
+		t.Fatalf("if condition type = %q, want bool", ifStmt.Condition.Type())
+	}
+	if _, ok := ifStmt.Then[0].(*AssignStmt); !ok {
+		t.Fatalf("then statement = %T, want AssignStmt", ifStmt.Then[0])
+	}
+
+	whileStmt := mainFn.Body[3].(*WhileStmt)
+	if whileStmt.Condition.Type() != ast.BoolType {
+		t.Fatalf("while condition type = %q, want bool", whileStmt.Condition.Type())
+	}
+
+	printStmt := mainFn.Body[4].(*PrintStmt)
+	if !sameTypes(printStmt.Types, []ast.Type{ast.FloatType}) {
+		t.Fatalf("print types = %q, want float", printStmt.Types)
+	}
+}
+
 func sameTypes(got []ast.Type, want []ast.Type) bool {
 	if len(got) != len(want) {
 		return false

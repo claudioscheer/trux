@@ -151,6 +151,46 @@ func main() int {
 	}
 }
 
+func TestParsesV2ControlFlowAssignmentFloatAndIn(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let text string = "trux"
+    let x float = 1.5
+    if "ru" in text {
+        x = x + 1.0
+    } else {
+        x = 0.0
+    }
+    while x >= 1.0 {
+        x = x - 1.0
+    }
+    return 0
+}`)
+
+	mainFn := program.Functions[0]
+	ifStmt, ok := mainFn.Body.Statements[2].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("statement = %T, want ast.IfStmt", mainFn.Body.Statements[2])
+	}
+	if _, ok := ifStmt.Condition.(*ast.BinaryExpr); !ok {
+		t.Fatalf("if condition = %T, want ast.BinaryExpr", ifStmt.Condition)
+	}
+	if len(ifStmt.Then.Statements) != 1 || len(ifStmt.Else.Statements) != 1 {
+		t.Fatalf("if branches = %#v/%#v, want one statement each", ifStmt.Then, ifStmt.Else)
+	}
+	if _, ok := ifStmt.Then.Statements[0].(*ast.AssignStmt); !ok {
+		t.Fatalf("then statement = %T, want ast.AssignStmt", ifStmt.Then.Statements[0])
+	}
+
+	whileStmt, ok := mainFn.Body.Statements[3].(*ast.WhileStmt)
+	if !ok {
+		t.Fatalf("statement = %T, want ast.WhileStmt", mainFn.Body.Statements[3])
+	}
+	if _, ok := whileStmt.Condition.(*ast.BinaryExpr); !ok {
+		t.Fatalf("while condition = %T, want ast.BinaryExpr", whileStmt.Condition)
+	}
+}
+
 func TestReportsSyntaxErrorWithExpectedActualAndPosition(t *testing.T) {
 	_, err := Parse(`package main
 func main( int {

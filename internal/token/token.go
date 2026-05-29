@@ -8,23 +8,35 @@ const (
 
 	Ident  Type = "IDENT"
 	Int    Type = "INT"
+	Float  Type = "FLOAT"
 	String Type = "STRING"
 
 	Package    Type = "PACKAGE"
 	Func       Type = "FUNC"
 	Return     Type = "RETURN"
 	Let        Type = "LET"
+	If         Type = "IF"
+	Else       Type = "ELSE"
+	While      Type = "WHILE"
 	IntType    Type = "INT_TYPE"
+	FloatType  Type = "FLOAT_TYPE"
 	StringType Type = "STRING_TYPE"
 	BoolType   Type = "BOOL_TYPE"
 	True       Type = "TRUE"
 	False      Type = "FALSE"
+	In         Type = "IN"
 
-	Assign   Type = "="
-	Plus     Type = "+"
-	Minus    Type = "-"
-	Asterisk Type = "*"
-	Slash    Type = "/"
+	Assign       Type = "="
+	Equal        Type = "=="
+	NotEqual     Type = "!="
+	Less         Type = "<"
+	LessEqual    Type = "<="
+	Greater      Type = ">"
+	GreaterEqual Type = ">="
+	Plus         Type = "+"
+	Minus        Type = "-"
+	Asterisk     Type = "*"
+	Slash        Type = "/"
 
 	Comma Type = ","
 
@@ -51,11 +63,16 @@ var keywords = map[string]Type{
 	"func":    Func,
 	"return":  Return,
 	"let":     Let,
+	"if":      If,
+	"else":    Else,
+	"while":   While,
 	"int":     IntType,
+	"float":   FloatType,
 	"string":  StringType,
 	"bool":    BoolType,
 	"true":    True,
 	"false":   False,
+	"in":      In,
 }
 
 func LookupIdent(ident string) Type {

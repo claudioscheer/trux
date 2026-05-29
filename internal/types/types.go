@@ -132,6 +132,19 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals map[string]ast.Type, stmt a
 
 		locals[stmt.Name] = stmt.Type
 		return nil
+	case *ast.AssignStmt:
+		varType, ok := locals[stmt.Name]
+		if !ok {
+			return typeError(stmt.Start, "undefined variable %q", stmt.Name)
+		}
+		valueType, err := c.checkExpr(locals, stmt.Value, false)
+		if err != nil {
+			return err
+		}
+		if valueType != varType {
+			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, varType)
+		}
+		return nil
 	case *ast.ReturnStmt:
 		valueType, err := c.checkExpr(locals, stmt.Value, false)
 		if err != nil {
@@ -139,6 +152,41 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals map[string]ast.Type, stmt a
 		}
 		if valueType != fn.ReturnType {
 			return typeError(stmt.Value.Pos(), "cannot return %s from function returning %s", valueType, fn.ReturnType)
+		}
+		return nil
+	case *ast.IfStmt:
+		conditionType, err := c.checkExpr(locals, stmt.Condition, false)
+		if err != nil {
+			return err
+		}
+		if conditionType != ast.BoolType {
+			return typeError(stmt.Condition.Pos(), "if condition must be bool, got %s", conditionType)
+		}
+		for _, inner := range stmt.Then.Statements {
+			if err := c.checkStmt(fn, locals, inner); err != nil {
+				return err
+			}
+		}
+		if stmt.Else != nil {
+			for _, inner := range stmt.Else.Statements {
+				if err := c.checkStmt(fn, locals, inner); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case *ast.WhileStmt:
+		conditionType, err := c.checkExpr(locals, stmt.Condition, false)
+		if err != nil {
+			return err
+		}
+		if conditionType != ast.BoolType {
+			return typeError(stmt.Condition.Pos(), "while condition must be bool, got %s", conditionType)
+		}
+		for _, inner := range stmt.Body.Statements {
+			if err := c.checkStmt(fn, locals, inner); err != nil {
+				return err
+			}
 		}
 		return nil
 	case *ast.ExprStmt:
@@ -154,6 +202,9 @@ func (c *checker) checkExpr(locals map[string]ast.Type, expr ast.Expression, all
 	case *ast.IntLiteral:
 		c.info.ExprTypes[expr] = ast.IntType
 		return ast.IntType, nil
+	case *ast.FloatLiteral:
+		c.info.ExprTypes[expr] = ast.FloatType
+		return ast.FloatType, nil
 	case *ast.StringLiteral:
 		c.info.ExprTypes[expr] = ast.StringType
 		return ast.StringType, nil
@@ -176,11 +227,12 @@ func (c *checker) checkExpr(locals map[string]ast.Type, expr ast.Expression, all
 		if err != nil {
 			return "", err
 		}
-		if leftType != ast.IntType || rightType != ast.IntType {
-			return "", typeError(expr.Start, "operator %q requires int operands", expr.Operator)
+		typ, err := binaryType(expr.Start, expr.Operator, leftType, rightType)
+		if err != nil {
+			return "", err
 		}
-		c.info.ExprTypes[expr] = ast.IntType
-		return ast.IntType, nil
+		c.info.ExprTypes[expr] = typ
+		return typ, nil
 	case *ast.CallExpr:
 		return c.checkCall(locals, expr, allowPrint)
 	default:
@@ -227,6 +279,45 @@ func (c *checker) checkCall(locals map[string]ast.Type, expr *ast.CallExpr, allo
 	c.info.ResolvedCalls[expr] = sig
 	c.info.ExprTypes[expr] = sig.ReturnType
 	return sig.ReturnType, nil
+}
+
+func binaryType(pos token.Position, operator string, leftType ast.Type, rightType ast.Type) (ast.Type, error) {
+	switch operator {
+	case "+", "-", "*", "/":
+		if leftType == ast.IntType && rightType == ast.IntType {
+			return ast.IntType, nil
+		}
+		if leftType == ast.FloatType && rightType == ast.FloatType {
+			return ast.FloatType, nil
+		}
+		return "", typeError(pos, "operator %q requires matching numeric operands, got %s and %s", operator, leftType, rightType)
+	case "==", "!=":
+		if leftType == rightType && comparableType(leftType) {
+			return ast.BoolType, nil
+		}
+		return "", typeError(pos, "operator %q requires matching comparable operands, got %s and %s", operator, leftType, rightType)
+	case "<", "<=", ">", ">=":
+		if leftType == rightType && (leftType == ast.IntType || leftType == ast.FloatType) {
+			return ast.BoolType, nil
+		}
+		return "", typeError(pos, "operator %q requires matching numeric operands, got %s and %s", operator, leftType, rightType)
+	case "in":
+		if leftType == ast.StringType && rightType == ast.StringType {
+			return ast.BoolType, nil
+		}
+		return "", typeError(pos, "operator %q requires string operands, got %s and %s", operator, leftType, rightType)
+	default:
+		return "", typeError(pos, "unsupported operator %q", operator)
+	}
+}
+
+func comparableType(typ ast.Type) bool {
+	switch typ {
+	case ast.IntType, ast.FloatType, ast.StringType, ast.BoolType:
+		return true
+	default:
+		return false
+	}
 }
 
 func typeError(pos token.Position, format string, args ...any) error {

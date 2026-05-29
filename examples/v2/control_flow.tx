@@ -1,0 +1,23 @@
+package main
+
+func main() int {
+    let x int = 10
+
+    if x > 5 {
+        print("big")
+    } else {
+        print("small")
+    }
+
+    let i int = 0
+    while i < 3 {
+        print(i)
+        i = i + 1
+    }
+
+    if i == 3 {
+        print("done")
+    }
+
+    return 0
+}

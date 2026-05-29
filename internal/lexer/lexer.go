@@ -46,7 +46,28 @@ func (l *Lexer) NextToken() token.Token {
 		return l.readString(pos)
 	case '=':
 		l.advance()
+		if l.match('=') {
+			return token.Token{Type: token.Equal, Lexeme: "==", Pos: pos}
+		}
 		return token.Token{Type: token.Assign, Lexeme: "=", Pos: pos}
+	case '!':
+		l.advance()
+		if l.match('=') {
+			return token.Token{Type: token.NotEqual, Lexeme: "!=", Pos: pos}
+		}
+		return token.Token{Type: token.Illegal, Lexeme: "!", Pos: pos}
+	case '<':
+		l.advance()
+		if l.match('=') {
+			return token.Token{Type: token.LessEqual, Lexeme: "<=", Pos: pos}
+		}
+		return token.Token{Type: token.Less, Lexeme: "<", Pos: pos}
+	case '>':
+		l.advance()
+		if l.match('=') {
+			return token.Token{Type: token.GreaterEqual, Lexeme: ">=", Pos: pos}
+		}
+		return token.Token{Type: token.Greater, Lexeme: ">", Pos: pos}
 	case '+':
 		l.advance()
 		return token.Token{Type: token.Plus, Lexeme: "+", Pos: pos}
@@ -82,8 +103,7 @@ func (l *Lexer) NextToken() token.Token {
 	}
 
 	if isDigit(ch) {
-		lit := l.readInteger()
-		return token.Token{Type: token.Int, Lexeme: lit, Pos: pos}
+		return l.readNumber(pos)
 	}
 
 	l.advance()
@@ -108,6 +128,24 @@ func (l *Lexer) readInteger() string {
 	}
 
 	return l.input[start:l.offset]
+}
+
+func (l *Lexer) readNumber(pos token.Position) token.Token {
+	start := l.offset
+
+	for !l.atEnd() && isDigit(l.current()) {
+		l.advance()
+	}
+
+	if !l.atEnd() && l.current() == '.' && l.hasNext() && isDigit(l.peek()) {
+		l.advance()
+		for !l.atEnd() && isDigit(l.current()) {
+			l.advance()
+		}
+		return token.Token{Type: token.Float, Lexeme: l.input[start:l.offset], Pos: pos}
+	}
+
+	return token.Token{Type: token.Int, Lexeme: l.input[start:l.offset], Pos: pos}
 }
 
 func (l *Lexer) readString(pos token.Position) token.Token {
@@ -175,8 +213,25 @@ func (l *Lexer) advance() byte {
 	return ch
 }
 
+func (l *Lexer) match(ch byte) bool {
+	if l.atEnd() || l.current() != ch {
+		return false
+	}
+
+	l.advance()
+	return true
+}
+
 func (l *Lexer) current() byte {
 	return l.input[l.offset]
+}
+
+func (l *Lexer) peek() byte {
+	return l.input[l.offset+1]
+}
+
+func (l *Lexer) hasNext() bool {
+	return l.offset+1 < len(l.input)
 }
 
 func (l *Lexer) atEnd() bool {

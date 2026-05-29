@@ -50,7 +50,7 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func) error {
 	}
 	fmt.Fprintln(out, " {")
 	for _, stmt := range fn.Body {
-		if err := emitStmt(out, stmt); err != nil {
+		if err := emitStmt(out, stmt, 1); err != nil {
 			return err
 		}
 	}
@@ -86,7 +86,8 @@ func emitSignature(out *bytes.Buffer, fn *ir.Func, prototype bool) error {
 	return nil
 }
 
-func emitStmt(out *bytes.Buffer, stmt ir.Stmt) error {
+func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
+	indent := strings.Repeat("    ", level)
 	switch stmt := stmt.(type) {
 	case *ir.LetStmt:
 		typ, err := emitType(stmt.Type)
@@ -97,13 +98,47 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "    %s %s = %s;\n", typ, stmt.Name, value)
+		fmt.Fprintf(out, "%s%s %s = %s;\n", indent, typ, stmt.Name, value)
 	case *ir.ReturnStmt:
 		value, err := emitExpr(stmt.Value)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "    return %s;\n", value)
+		fmt.Fprintf(out, "%sreturn %s;\n", indent, value)
+	case *ir.AssignStmt:
+		value, err := emitExpr(stmt.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s%s = %s;\n", indent, stmt.Name, value)
+	case *ir.IfStmt:
+		condition, err := emitExpr(stmt.Condition)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%sif (%s) {\n", indent, condition)
+		if err := emitStmts(out, stmt.Then, level+1); err != nil {
+			return err
+		}
+		if len(stmt.Else) == 0 {
+			fmt.Fprintf(out, "%s}\n", indent)
+			break
+		}
+		fmt.Fprintf(out, "%s} else {\n", indent)
+		if err := emitStmts(out, stmt.Else, level+1); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s}\n", indent)
+	case *ir.WhileStmt:
+		condition, err := emitExpr(stmt.Condition)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%swhile (%s) {\n", indent, condition)
+		if err := emitStmts(out, stmt.Body, level+1); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s}\n", indent)
 	case *ir.PrintStmt:
 		if len(stmt.Args) != len(stmt.Types) {
 			return fmt.Errorf("print arg/type count mismatch")
@@ -115,24 +150,36 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt) error {
 			}
 			switch stmt.Types[i] {
 			case ast.IntType:
-				fmt.Fprintf(out, "    rt_print_int(%s);\n", arg)
+				fmt.Fprintf(out, "%srt_print_int(%s);\n", indent, arg)
+			case ast.FloatType:
+				fmt.Fprintf(out, "%srt_print_float(%s);\n", indent, arg)
 			case ast.StringType:
-				fmt.Fprintf(out, "    rt_print_string(%s);\n", arg)
+				fmt.Fprintf(out, "%srt_print_string(%s);\n", indent, arg)
 			case ast.BoolType:
-				fmt.Fprintf(out, "    rt_print_bool(%s);\n", arg)
+				fmt.Fprintf(out, "%srt_print_bool(%s);\n", indent, arg)
 			default:
 				return fmt.Errorf("unsupported print type %s", stmt.Types[i])
 			}
 		}
-		fmt.Fprintln(out, "    rt_print_newline();")
+		fmt.Fprintf(out, "%srt_print_newline();\n", indent)
 	case *ir.ExprStmt:
 		expr, err := emitExpr(stmt.Expr)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "    %s;\n", expr)
+		fmt.Fprintf(out, "%s%s;\n", indent, expr)
 	default:
 		return fmt.Errorf("unsupported IR statement %T", stmt)
+	}
+
+	return nil
+}
+
+func emitStmts(out *bytes.Buffer, stmts []ir.Stmt, level int) error {
+	for _, stmt := range stmts {
+		if err := emitStmt(out, stmt, level); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -143,6 +190,8 @@ func emitExpr(expr ir.Expr) (string, error) {
 	case *ir.IdentExpr:
 		return expr.Name, nil
 	case *ir.IntLiteral:
+		return expr.Value, nil
+	case *ir.FloatLiteral:
 		return expr.Value, nil
 	case *ir.StringLiteral:
 		return fmt.Sprintf("(rt_string){(const uint8_t*)%s, %d}", cStringLiteral(expr.Value), len(expr.Value)), nil
@@ -170,6 +219,16 @@ func emitExpr(expr ir.Expr) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if expr.Operator == "in" {
+			return fmt.Sprintf("rt_string_contains(%s, %s)", left, right), nil
+		}
+		if expr.Left.Type() == ast.StringType && (expr.Operator == "==" || expr.Operator == "!=") {
+			equal := fmt.Sprintf("rt_string_equal(%s, %s)", left, right)
+			if expr.Operator == "!=" {
+				return fmt.Sprintf("!%s", equal), nil
+			}
+			return equal, nil
+		}
 		return fmt.Sprintf("(%s %s %s)", left, expr.Operator, right), nil
 	default:
 		return "", fmt.Errorf("unsupported IR expression %T", expr)
@@ -180,6 +239,8 @@ func emitType(typ ast.Type) (string, error) {
 	switch typ {
 	case ast.IntType:
 		return "int64_t", nil
+	case ast.FloatType:
+		return "double", nil
 	case ast.StringType:
 		return "rt_string", nil
 	case ast.BoolType:

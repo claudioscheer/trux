@@ -339,6 +339,8 @@ while
 comparison operators
 boolean conditions
 variable assignment
+float
+string containment with in
 ```
 
 ## Example
@@ -392,6 +394,23 @@ Expected output:
 
 ## Comparison Operators
 
+v2 supports these types:
+
+```text
+int
+float
+string
+bool
+```
+
+`float` maps to C as:
+
+```c
+double
+```
+
+Trux does not implicitly promote `int` to `float`. Mixed numeric arithmetic, comparisons, function calls, and assignments are rejected.
+
 v2 supports:
 
 ```text
@@ -409,6 +428,33 @@ Example:
 ```go
 let result bool = 1 < 2
 ```
+
+Numeric comparisons require matching numeric operands:
+
+```go
+let a bool = 1 < 2
+let b bool = 1.0 < 2.0
+```
+
+Invalid:
+
+```go
+let bad bool = 1 < 2.0
+```
+
+Equality supports matching `int`, `float`, `string`, and `bool` operands.
+
+## String Containment
+
+v2 supports string containment:
+
+```go
+let found bool = "ux" in "trux"
+```
+
+The left operand is the needle. The right operand is the haystack.
+
+`in` requires `string` operands and returns `bool`.
 
 ## If / Else
 
@@ -477,6 +523,7 @@ while condition that is not bool
 assignment to undefined variable
 assignment with wrong type
 comparison between incompatible types
+using in with non-string operands
 ```
 
 ---
@@ -529,6 +576,8 @@ else
 while
 comparisons
 assignment
+float
+string containment
 ```
 
 ---

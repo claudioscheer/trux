@@ -87,6 +87,45 @@ func main() int {
 	}
 }
 
+func TestRunFileCompilesAndExecutesV2Examples(t *testing.T) {
+	requireCC(t)
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{
+			path: "../../examples/v2/control_flow.tx",
+			want: "big\n0\n1\n2\ndone\n",
+		},
+		{
+			path: "../../examples/v2/floats.tx",
+			want: "2\n5\nhigh\n",
+		},
+		{
+			path: "../../examples/v2/mixed.tx",
+			want: "3.75\ntrue true\n",
+		},
+		{
+			path: "../../examples/v2/strings_in.tx",
+			want: "true\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			var out bytes.Buffer
+			err := runFile(&out, tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != tt.want {
+				t.Fatalf("output = %q, want %q", out.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestRunFileWithDebugWritesPhaseFiles(t *testing.T) {
 	requireCC(t)
 

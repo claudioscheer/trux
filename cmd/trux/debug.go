@@ -114,6 +114,17 @@ func formatResolvedCalls(out *bytes.Buffer, statements []ast.Statement, info *se
 			formatExprCalls(out, stmt.Value, info)
 		case *ast.ReturnStmt:
 			formatExprCalls(out, stmt.Value, info)
+		case *ast.AssignStmt:
+			formatExprCalls(out, stmt.Value, info)
+		case *ast.IfStmt:
+			formatExprCalls(out, stmt.Condition, info)
+			formatResolvedCalls(out, stmt.Then.Statements, info)
+			if stmt.Else != nil {
+				formatResolvedCalls(out, stmt.Else.Statements, info)
+			}
+		case *ast.WhileStmt:
+			formatExprCalls(out, stmt.Condition, info)
+			formatResolvedCalls(out, stmt.Body.Statements, info)
 		case *ast.ExprStmt:
 			formatExprCalls(out, stmt.Expr, info)
 		}

@@ -42,6 +42,28 @@ type ReturnStmt struct {
 
 func (*ReturnStmt) stmtNode() {}
 
+type AssignStmt struct {
+	Name  string
+	Value Expr
+}
+
+func (*AssignStmt) stmtNode() {}
+
+type IfStmt struct {
+	Condition Expr
+	Then      []Stmt
+	Else      []Stmt
+}
+
+func (*IfStmt) stmtNode() {}
+
+type WhileStmt struct {
+	Condition Expr
+	Body      []Stmt
+}
+
+func (*WhileStmt) stmtNode() {}
+
 type PrintStmt struct {
 	Args  []Expr
 	Types []ast.Type
@@ -77,6 +99,15 @@ type IntLiteral struct {
 func (e *IntLiteral) Type() ast.Type { return e.Typ }
 
 func (*IntLiteral) exprNode() {}
+
+type FloatLiteral struct {
+	Value string
+	Typ   ast.Type
+}
+
+func (e *FloatLiteral) Type() ast.Type { return e.Typ }
+
+func (*FloatLiteral) exprNode() {}
 
 type StringLiteral struct {
 	Value string
@@ -172,6 +203,39 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 			return nil, err
 		}
 		return &ReturnStmt{Value: value}, nil
+	case *ast.AssignStmt:
+		value, err := b.buildExpr(stmt.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &AssignStmt{Name: stmt.Name, Value: value}, nil
+	case *ast.IfStmt:
+		condition, err := b.buildExpr(stmt.Condition)
+		if err != nil {
+			return nil, err
+		}
+		thenStmts, err := b.buildStmts(stmt.Then.Statements)
+		if err != nil {
+			return nil, err
+		}
+		var elseStmts []Stmt
+		if stmt.Else != nil {
+			elseStmts, err = b.buildStmts(stmt.Else.Statements)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return &IfStmt{Condition: condition, Then: thenStmts, Else: elseStmts}, nil
+	case *ast.WhileStmt:
+		condition, err := b.buildExpr(stmt.Condition)
+		if err != nil {
+			return nil, err
+		}
+		body, err := b.buildStmts(stmt.Body.Statements)
+		if err != nil {
+			return nil, err
+		}
+		return &WhileStmt{Condition: condition, Body: body}, nil
 	case *ast.ExprStmt:
 		if call, ok := stmt.Expr.(*ast.CallExpr); ok {
 			if printTypes, ok := b.info.PrintCalls[call]; ok {
@@ -202,6 +266,8 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 	switch expr := expr.(type) {
 	case *ast.IntLiteral:
 		return &IntLiteral{Value: expr.Value, Typ: typ}, nil
+	case *ast.FloatLiteral:
+		return &FloatLiteral{Value: expr.Value, Typ: typ}, nil
 	case *ast.StringLiteral:
 		return &StringLiteral{Value: expr.Value, Typ: typ}, nil
 	case *ast.BoolLiteral:
@@ -231,6 +297,19 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 	default:
 		return nil, fmt.Errorf("unsupported AST expression %T", expr)
 	}
+}
+
+func (b builder) buildStmts(stmts []ast.Statement) ([]Stmt, error) {
+	out := make([]Stmt, 0, len(stmts))
+	for _, stmt := range stmts {
+		irStmt, err := b.buildStmt(stmt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, irStmt)
+	}
+
+	return out, nil
 }
 
 func (b builder) buildExprs(exprs []ast.Expression) ([]Expr, error) {

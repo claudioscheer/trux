@@ -118,3 +118,57 @@ func main() int {
 		}
 	}
 }
+
+func TestGenerateCreatesCForV2Program(t *testing.T) {
+	program, err := parser.Parse(`package main
+func main() int {
+    let text string = "trux"
+    let x float = 1.5
+    if "ru" in text {
+        x = x + 1.0
+    } else {
+        x = 0.0
+    }
+    while x > 0.0 {
+        x = x - 1.0
+    }
+    print(x, text == "trux")
+    return 0
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantParts := []string{
+		"static void rt_print_float(double value)",
+		"static bool rt_string_contains(rt_string needle, rt_string haystack)",
+		"static bool rt_string_equal(rt_string left, rt_string right)",
+		"double x = 1.5;",
+		"if (rt_string_contains((rt_string){(const uint8_t*)\"ru\", 2}, text)) {",
+		"x = (x + 1.0);",
+		"} else {",
+		"x = 0.0;",
+		"while ((x > 0.0)) {",
+		"x = (x - 1.0);",
+		"rt_print_float(x);",
+		"rt_print_bool(rt_string_equal(text, (rt_string){(const uint8_t*)\"trux\", 4}));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}

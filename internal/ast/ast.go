@@ -24,6 +24,7 @@ type Type string
 
 const (
 	IntType    Type = "int"
+	FloatType  Type = "float"
 	StringType Type = "string"
 	BoolType   Type = "bool"
 )
@@ -57,6 +58,37 @@ func (s *ReturnStmt) Pos() token.Position { return s.Start }
 
 func (*ReturnStmt) statementNode() {}
 
+type AssignStmt struct {
+	Start token.Position
+	Name  string
+	Value Expression
+}
+
+func (s *AssignStmt) Pos() token.Position { return s.Start }
+
+func (*AssignStmt) statementNode() {}
+
+type IfStmt struct {
+	Start     token.Position
+	Condition Expression
+	Then      Block
+	Else      *Block
+}
+
+func (s *IfStmt) Pos() token.Position { return s.Start }
+
+func (*IfStmt) statementNode() {}
+
+type WhileStmt struct {
+	Start     token.Position
+	Condition Expression
+	Body      Block
+}
+
+func (s *WhileStmt) Pos() token.Position { return s.Start }
+
+func (*WhileStmt) statementNode() {}
+
 type ExprStmt struct {
 	Expr Expression
 }
@@ -87,6 +119,15 @@ type IntLiteral struct {
 func (e *IntLiteral) Pos() token.Position { return e.Start }
 
 func (*IntLiteral) expressionNode() {}
+
+type FloatLiteral struct {
+	Start token.Position
+	Value string
+}
+
+func (e *FloatLiteral) Pos() token.Position { return e.Start }
+
+func (*FloatLiteral) expressionNode() {}
 
 type StringLiteral struct {
 	Start token.Position

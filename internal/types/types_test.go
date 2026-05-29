@@ -85,6 +85,54 @@ func main() int {
 	}
 }
 
+func TestCheckValidV2Program(t *testing.T) {
+	program := mustParse(t, `package main
+func more(value float) float {
+    return value + 1.25
+}
+
+func main() int {
+    let text string = "trux compiler"
+    let ok bool = "compiler" in text
+    let total float = more(1.5)
+    let i int = 0
+
+    if ok {
+        total = total * 2.0
+    } else {
+        total = 0.0
+    }
+
+    while i < 3 {
+        i = i + 1
+    }
+
+    print(total, i == 3, text != "other")
+    return 0
+}`)
+
+	info, err := Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := program.Functions[1]
+	okLet := mainFn.Body.Statements[1].(*ast.LetStmt)
+	if info.ExprTypes[okLet.Value] != ast.BoolType {
+		t.Fatalf("in expression type = %q, want bool", info.ExprTypes[okLet.Value])
+	}
+
+	totalLet := mainFn.Body.Statements[2].(*ast.LetStmt)
+	if info.ExprTypes[totalLet.Value] != ast.FloatType {
+		t.Fatalf("float call type = %q, want float", info.ExprTypes[totalLet.Value])
+	}
+
+	printCall := mainFn.Body.Statements[6].(*ast.ExprStmt).Expr.(*ast.CallExpr)
+	if !sameTypes(info.PrintCalls[printCall], []ast.Type{ast.FloatType, ast.BoolType, ast.BoolType}) {
+		t.Fatalf("print call types = %q, want float bool bool", info.PrintCalls[printCall])
+	}
+}
+
 func TestCheckRejectsV0SemanticErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -228,7 +276,7 @@ func main() int {
     let x int = "a" + "b"
     return x
 }`,
-			want: `operator "+" requires int operands`,
+			want: `operator "+" requires matching numeric operands, got string and string`,
 		},
 		{
 			name: "bool arithmetic",
@@ -237,7 +285,75 @@ func main() int {
     let x int = true + false
     return x
 }`,
-			want: `operator "+" requires int operands`,
+			want: `operator "+" requires matching numeric operands, got bool and bool`,
+		},
+		{
+			name: "if condition not bool",
+			src: `package main
+func main() int {
+    if 1 {
+        print("bad")
+    }
+    return 0
+}`,
+			want: `if condition must be bool, got int`,
+		},
+		{
+			name: "while condition not bool",
+			src: `package main
+func main() int {
+    while "bad" {
+        print("bad")
+    }
+    return 0
+}`,
+			want: `while condition must be bool, got string`,
+		},
+		{
+			name: "assignment undefined variable",
+			src: `package main
+func main() int {
+    missing = 1
+    return 0
+}`,
+			want: `undefined variable "missing"`,
+		},
+		{
+			name: "assignment wrong type",
+			src: `package main
+func main() int {
+    let x float = 1.0
+    x = 1
+    return 0
+}`,
+			want: `cannot assign int to float`,
+		},
+		{
+			name: "mixed numeric arithmetic",
+			src: `package main
+func main() int {
+    let x float = 1.0 + 1
+    return 0
+}`,
+			want: `operator "+" requires matching numeric operands, got float and int`,
+		},
+		{
+			name: "mixed numeric comparison",
+			src: `package main
+func main() int {
+    let ok bool = 1.0 == 1
+    return 0
+}`,
+			want: `operator "==" requires matching comparable operands, got float and int`,
+		},
+		{
+			name: "string in wrong type",
+			src: `package main
+func main() int {
+    let ok bool = "x" in 1
+    return 0
+}`,
+			want: `operator "in" requires string operands, got string and int`,
 		},
 	}
 

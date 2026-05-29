@@ -58,7 +58,7 @@ func main() int {
 		t.Fatalf("statement count = %d, want 1", len(mainFn.Body.Statements))
 	}
 
-	stmt, ok := mainFn.Body.Statements[0].(ast.LetStmt)
+	stmt, ok := mainFn.Body.Statements[0].(*ast.LetStmt)
 	if !ok {
 		t.Fatalf("statement = %T, want ast.LetStmt", mainFn.Body.Statements[0])
 	}
@@ -66,7 +66,7 @@ func main() int {
 		t.Fatalf("let statement = %#v, want name x and int type", stmt)
 	}
 
-	call, ok := stmt.Value.(ast.CallExpr)
+	call, ok := stmt.Value.(*ast.CallExpr)
 	if !ok {
 		t.Fatalf("let value = %T, want ast.CallExpr", stmt.Value)
 	}
@@ -84,8 +84,8 @@ func main() int {
     return a + b * 2
 }`)
 
-	stmt := program.Functions[0].Body.Statements[0].(ast.ReturnStmt)
-	expr, ok := stmt.Value.(ast.BinaryExpr)
+	stmt := program.Functions[0].Body.Statements[0].(*ast.ReturnStmt)
+	expr, ok := stmt.Value.(*ast.BinaryExpr)
 	if !ok {
 		t.Fatalf("return value = %T, want ast.BinaryExpr", stmt.Value)
 	}
@@ -93,7 +93,7 @@ func main() int {
 		t.Fatalf("root operator = %q, want +", expr.Operator)
 	}
 
-	right, ok := expr.Right.(ast.BinaryExpr)
+	right, ok := expr.Right.(*ast.BinaryExpr)
 	if !ok {
 		t.Fatalf("right expression = %T, want ast.BinaryExpr", expr.Right)
 	}

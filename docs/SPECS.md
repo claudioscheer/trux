@@ -24,7 +24,7 @@ source code
   → type checker
   → typed IR
   → C code
-  → clang/gcc
+  → cc (or $CC)
   → executable
 ```
 
@@ -530,6 +530,16 @@ while
 comparisons
 assignment
 ```
+
+---
+
+# Memory Model
+
+Dynamic allocation (starting with strings that are not literals) uses arenas rather than individual `malloc`/`free` or a garbage collector.
+
+See [arenas.md](arenas.md) for the full rationale, tradeoffs, staged evolution plan, and why GC was deferred.
+
+This is a deliberate design choice aligned with the project's goals of a small compiler, readable generated C, and learning compiler construction and systems language tradeoffs.
 
 ---
 

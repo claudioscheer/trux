@@ -60,40 +60,42 @@ func (p *Parser) parseProgram() (*ast.Program, error) {
 	return program, nil
 }
 
-func (p *Parser) parseFuncDecl() (ast.FuncDecl, error) {
-	if _, err := p.expect(token.Func); err != nil {
-		return ast.FuncDecl{}, err
+func (p *Parser) parseFuncDecl() (*ast.FuncDecl, error) {
+	start, err := p.expect(token.Func)
+	if err != nil {
+		return nil, err
 	}
 
 	name, err := p.expect(token.Ident)
 	if err != nil {
-		return ast.FuncDecl{}, err
+		return nil, err
 	}
 
 	if _, err := p.expect(token.LParen); err != nil {
-		return ast.FuncDecl{}, err
+		return nil, err
 	}
 
 	params, err := p.parseParams()
 	if err != nil {
-		return ast.FuncDecl{}, err
+		return nil, err
 	}
 
 	if _, err := p.expect(token.RParen); err != nil {
-		return ast.FuncDecl{}, err
+		return nil, err
 	}
 
 	returnType, err := p.parseType()
 	if err != nil {
-		return ast.FuncDecl{}, err
+		return nil, err
 	}
 
 	body, err := p.parseBlock()
 	if err != nil {
-		return ast.FuncDecl{}, err
+		return nil, err
 	}
 
-	return ast.FuncDecl{
+	return &ast.FuncDecl{
+		Pos:        start.Pos,
 		Name:       name.Lexeme,
 		Params:     params,
 		ReturnType: returnType,
@@ -167,7 +169,8 @@ func (p *Parser) parseStatement() (ast.Statement, error) {
 }
 
 func (p *Parser) parseLetStmt() (ast.Statement, error) {
-	if _, err := p.expect(token.Let); err != nil {
+	start, err := p.expect(token.Let)
+	if err != nil {
 		return nil, err
 	}
 
@@ -190,11 +193,12 @@ func (p *Parser) parseLetStmt() (ast.Statement, error) {
 		return nil, err
 	}
 
-	return ast.LetStmt{Name: name.Lexeme, Type: typ, Value: value}, nil
+	return &ast.LetStmt{Start: start.Pos, Name: name.Lexeme, Type: typ, Value: value}, nil
 }
 
 func (p *Parser) parseReturnStmt() (ast.Statement, error) {
-	if _, err := p.expect(token.Return); err != nil {
+	start, err := p.expect(token.Return)
+	if err != nil {
 		return nil, err
 	}
 
@@ -203,7 +207,7 @@ func (p *Parser) parseReturnStmt() (ast.Statement, error) {
 		return nil, err
 	}
 
-	return ast.ReturnStmt{Value: value}, nil
+	return &ast.ReturnStmt{Start: start.Pos, Value: value}, nil
 }
 
 func (p *Parser) parseExprStmt() (ast.Statement, error) {
@@ -212,7 +216,7 @@ func (p *Parser) parseExprStmt() (ast.Statement, error) {
 		return nil, err
 	}
 
-	return ast.ExprStmt{Expr: expr}, nil
+	return &ast.ExprStmt{Expr: expr}, nil
 }
 
 func (p *Parser) parseExpression(minPrecedence int) (ast.Expression, error) {
@@ -233,7 +237,8 @@ func (p *Parser) parseExpression(minPrecedence int) (ast.Expression, error) {
 			return nil, err
 		}
 
-		left = ast.BinaryExpr{
+		left = &ast.BinaryExpr{
+			Start:    left.Pos(),
 			Left:     left,
 			Operator: operator.Lexeme,
 			Right:    right,
@@ -245,7 +250,7 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 	switch {
 	case p.check(token.Int):
 		tok := p.advance()
-		return ast.IntLiteral{Value: tok.Lexeme}, nil
+		return &ast.IntLiteral{Start: tok.Pos, Value: tok.Lexeme}, nil
 	case p.check(token.Ident):
 		ident := p.advance()
 		if p.match(token.LParen) {
@@ -258,10 +263,10 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 				return nil, err
 			}
 
-			return ast.CallExpr{Callee: ident.Lexeme, Args: args}, nil
+			return &ast.CallExpr{Start: ident.Pos, Callee: ident.Lexeme, Args: args}, nil
 		}
 
-		return ast.IdentExpr{Name: ident.Lexeme}, nil
+		return &ast.IdentExpr{Start: ident.Pos, Name: ident.Lexeme}, nil
 	case p.match(token.LParen):
 		expr, err := p.parseExpression(0)
 		if err != nil {

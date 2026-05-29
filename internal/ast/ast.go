@@ -1,11 +1,14 @@
 package ast
 
+import "github.com/claudioscheer/trux/internal/token"
+
 type Program struct {
 	PackageName string
-	Functions   []FuncDecl
+	Functions   []*FuncDecl
 }
 
 type FuncDecl struct {
+	Pos        token.Position
 	Name       string
 	Params     []Param
 	ReturnType Type
@@ -26,56 +29,78 @@ type Block struct {
 }
 
 type Statement interface {
+	Pos() token.Position
 	statementNode()
 }
 
 type LetStmt struct {
+	Start token.Position
 	Name  string
 	Type  Type
 	Value Expression
 }
 
-func (LetStmt) statementNode() {}
+func (s *LetStmt) Pos() token.Position { return s.Start }
+
+func (*LetStmt) statementNode() {}
 
 type ReturnStmt struct {
+	Start token.Position
 	Value Expression
 }
 
-func (ReturnStmt) statementNode() {}
+func (s *ReturnStmt) Pos() token.Position { return s.Start }
+
+func (*ReturnStmt) statementNode() {}
 
 type ExprStmt struct {
 	Expr Expression
 }
 
-func (ExprStmt) statementNode() {}
+func (s *ExprStmt) Pos() token.Position { return s.Expr.Pos() }
+
+func (*ExprStmt) statementNode() {}
 
 type Expression interface {
+	Pos() token.Position
 	expressionNode()
 }
 
 type IdentExpr struct {
-	Name string
+	Start token.Position
+	Name  string
 }
 
-func (IdentExpr) expressionNode() {}
+func (e *IdentExpr) Pos() token.Position { return e.Start }
+
+func (*IdentExpr) expressionNode() {}
 
 type IntLiteral struct {
+	Start token.Position
 	Value string
 }
 
-func (IntLiteral) expressionNode() {}
+func (e *IntLiteral) Pos() token.Position { return e.Start }
+
+func (*IntLiteral) expressionNode() {}
 
 type CallExpr struct {
+	Start  token.Position
 	Callee string
 	Args   []Expression
 }
 
-func (CallExpr) expressionNode() {}
+func (e *CallExpr) Pos() token.Position { return e.Start }
+
+func (*CallExpr) expressionNode() {}
 
 type BinaryExpr struct {
+	Start    token.Position
 	Left     Expression
 	Operator string
 	Right    Expression
 }
 
-func (BinaryExpr) expressionNode() {}
+func (e *BinaryExpr) Pos() token.Position { return e.Start }
+
+func (*BinaryExpr) expressionNode() {}

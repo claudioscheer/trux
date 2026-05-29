@@ -4,4 +4,4 @@
 
 The goal is to learn.
 
-See [SPECS.md](SPECS.md).
+See [docs/SPECS.md](docs/SPECS.md) and [docs/](docs/) for design decisions (including the arena-based memory model).

@@ -14,7 +14,7 @@ build:
 # Usage: make run FILE=examples/v0/hello.tx
 run: build
 	@if [ -z "$(FILE)" ]; then echo "Usage: make run FILE=path/to/file.tx"; exit 1; fi
-	./bin/$(BINARY) run $(FILE)
+	./bin/$(BINARY) run $(if $(DEBUG),--debug )$(RUN_FLAGS) $(FILE)
 
 # Usage: make build-bin FILE=examples/v0/hello.tx
 build-bin: build

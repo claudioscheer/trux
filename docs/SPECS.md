@@ -196,7 +196,7 @@ typed IR
 package main
 
 func main() int {
-    let name string = "Kern"
+    let name string = "trux"
     let ready bool = true
 
     print(name)
@@ -209,7 +209,7 @@ func main() int {
 Expected output:
 
 ```text
-Kern
+trux
 true
 ```
 
@@ -297,7 +297,7 @@ resolved print calls
 Example source:
 
 ```go
-let name string = "Kern"
+let name string = "trux"
 print(name)
 ```
 

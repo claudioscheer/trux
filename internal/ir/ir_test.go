@@ -68,7 +68,7 @@ func main() int {
 func TestBuildCreatesTypedIRForV1Program(t *testing.T) {
 	program := mustParse(t, `package main
 func label() string {
-    return "Kern"
+    return "trux"
 }
 
 func ready() bool {
@@ -98,8 +98,8 @@ func main() int {
 	}
 	stringReturn := label.Body[0].(*ReturnStmt)
 	stringLiteral := stringReturn.Value.(*StringLiteral)
-	if stringLiteral.Value != "Kern" || stringLiteral.Type() != ast.StringType {
-		t.Fatalf("string literal = %#v, want typed Kern", stringLiteral)
+	if stringLiteral.Value != "trux" || stringLiteral.Type() != ast.StringType {
+		t.Fatalf("string literal = %#v, want typed trux", stringLiteral)
 	}
 
 	ready := irProgram.Functions[1]

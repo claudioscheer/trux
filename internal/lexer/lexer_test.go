@@ -97,12 +97,12 @@ func TestPrintIsIdentifier(t *testing.T) {
 }
 
 func TestLexesV1LiteralsAndTypes(t *testing.T) {
-	assertTokens(t, Lex(`let name string = "Kern\n" let ready bool = true false`), []expectedToken{
+	assertTokens(t, Lex(`let name string = "trux\n" let ready bool = true false`), []expectedToken{
 		{token.Let, "let"},
 		{token.Ident, "name"},
 		{token.StringType, "string"},
 		{token.Assign, "="},
-		{token.String, "Kern\n"},
+		{token.String, "trux\n"},
 		{token.Let, "let"},
 		{token.Ident, "ready"},
 		{token.BoolType, "bool"},

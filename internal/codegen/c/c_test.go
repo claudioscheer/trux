@@ -68,7 +68,7 @@ func main() int {
 func TestGenerateCreatesCForV1Program(t *testing.T) {
 	program, err := parser.Parse(`package main
 func label() string {
-    return "Kern"
+    return "trux"
 }
 
 func ready() bool {
@@ -110,7 +110,7 @@ func main() int {
 		"static void rt_print_bool(bool value)",
 		"rt_string trux_label(rt_arena* trux_arena);",
 		"bool trux_ready(rt_arena* trux_arena);",
-		"return (rt_string){(const uint8_t*)\"Kern\", 4};",
+		"return (rt_string){(const uint8_t*)\"trux\", 4};",
 		"return true;",
 		"rt_string trux_v_4_name = trux_label(trux_arena);",
 		"bool trux_v_2_ok = false;",

@@ -105,7 +105,7 @@ func main() int {
 func TestParsesV1TypesAndLiterals(t *testing.T) {
 	program := mustParse(t, `package main
 func label() string {
-    return "Kern"
+    return "trux"
 }
 
 func ready() bool {
@@ -126,8 +126,8 @@ func main() int {
 	}
 	stringReturn := label.Body.Statements[0].(*ast.ReturnStmt)
 	stringLiteral, ok := stringReturn.Value.(*ast.StringLiteral)
-	if !ok || stringLiteral.Value != "Kern" {
-		t.Fatalf("label return = %#v, want string literal Kern", stringReturn.Value)
+	if !ok || stringLiteral.Value != "trux" {
+		t.Fatalf("label return = %#v, want string literal trux", stringReturn.Value)
 	}
 
 	ready := program.Functions[1]

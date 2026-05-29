@@ -59,7 +59,7 @@ func TestRunFileCompilesAndExecutesV1Program(t *testing.T) {
 
 	path := writeTempSource(t, `package main
 func label() string {
-    return "Kern"
+    return "trux"
 }
 
 func ready() bool {
@@ -81,7 +81,7 @@ func main() int {
 		t.Fatal(err)
 	}
 
-	want := "Kern 1\ntrue\nline\nquote: \"\n"
+	want := "trux 1\ntrue\nline\nquote: \"\n"
 	if out.String() != want {
 		t.Fatalf("output = %q, want %q", out.String(), want)
 	}
@@ -147,7 +147,7 @@ func TestRunFileCompilesAndExecutesV3Examples(t *testing.T) {
 		},
 		{
 			path: "../../examples/v3/slices.tx",
-			want: "8 8 2\n5 0 7\ne er 4\n",
+			want: "8 8 2\n5 0 7\nr ru 4\n",
 		},
 		{
 			path: "../../examples/v3/lists.tx",

@@ -45,7 +45,7 @@ func main() int {
 func TestCheckValidV1Program(t *testing.T) {
 	program := mustParse(t, `package main
 func label() string {
-    return "Kern"
+    return "trux"
 }
 
 func ready() bool {

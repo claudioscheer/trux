@@ -11,7 +11,7 @@ func main() int {
     zs[2] = 7
     print(zs[0], " ", zs[1], " ", zs[2])
 
-    let text string = "kern"
+    let text string = "trux"
     print(text[1], " ", text[1:3], " ", len(text))
 
     return 0

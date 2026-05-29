@@ -8,8 +8,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "trux",
-	Short: "trux is a small Go-inspired language that compiles to C",
+	Use:           "trux",
+	Short:         "trux is a small Go-inspired language that compiles to C",
+	SilenceErrors: true,
 	Long: `trux is a small Go-inspired language that compiles to C.
 The goal is to learn.
 

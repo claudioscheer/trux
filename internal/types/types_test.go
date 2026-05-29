@@ -37,8 +37,51 @@ func main() int {
 
 	printStmt := mainFn.Body.Statements[1].(*ast.ExprStmt)
 	printCall := printStmt.Expr.(*ast.CallExpr)
-	if info.PrintCalls[printCall] != ast.IntType {
-		t.Fatalf("print call type = %q, want %q", info.PrintCalls[printCall], ast.IntType)
+	if !sameTypes(info.PrintCalls[printCall], []ast.Type{ast.IntType}) {
+		t.Fatalf("print call types = %q, want %q", info.PrintCalls[printCall], []ast.Type{ast.IntType})
+	}
+}
+
+func TestCheckValidV1Program(t *testing.T) {
+	program := mustParse(t, `package main
+func label() string {
+    return "Kern"
+}
+
+func ready() bool {
+    return true
+}
+
+func main() int {
+    let name string = label()
+    let ok bool = ready()
+    print(name, 1)
+    print(ok)
+    print(1)
+    return 0
+}`)
+
+	info, err := Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := program.Functions[2]
+	nameLet := mainFn.Body.Statements[0].(*ast.LetStmt)
+	labelCall := nameLet.Value.(*ast.CallExpr)
+	if info.ExprTypes[labelCall] != ast.StringType {
+		t.Fatalf("label call type = %q, want %q", info.ExprTypes[labelCall], ast.StringType)
+	}
+
+	stringPrint := mainFn.Body.Statements[2].(*ast.ExprStmt).Expr.(*ast.CallExpr)
+	wantStringPrint := []ast.Type{ast.StringType, ast.IntType}
+	if !sameTypes(info.PrintCalls[stringPrint], wantStringPrint) {
+		t.Fatalf("string print types = %q, want %q", info.PrintCalls[stringPrint], wantStringPrint)
+	}
+
+	boolPrint := mainFn.Body.Statements[3].(*ast.ExprStmt).Expr.(*ast.CallExpr)
+	if !sameTypes(info.PrintCalls[boolPrint], []ast.Type{ast.BoolType}) {
+		t.Fatalf("bool print types = %q, want %q", info.PrintCalls[boolPrint], []ast.Type{ast.BoolType})
 	}
 }
 
@@ -119,7 +162,7 @@ func main() int {
     print()
     return 0
 }`,
-			want: `print expects 1 argument, got 0`,
+			want: `print expects at least 1 argument, got 0`,
 		},
 		{
 			name: "print expression",
@@ -128,6 +171,73 @@ func main() int {
     return print(1)
 }`,
 			want: `print can only be used as a statement`,
+		},
+		{
+			name: "assign string to int",
+			src: `package main
+func main() int {
+    let x int = "bad"
+    return x
+}`,
+			want: `cannot assign string to int`,
+		},
+		{
+			name: "assign int to string",
+			src: `package main
+func main() int {
+    let x string = 1
+    return 0
+}`,
+			want: `cannot assign int to string`,
+		},
+		{
+			name: "assign bool to int",
+			src: `package main
+func main() int {
+    let x int = true
+    return x
+}`,
+			want: `cannot assign bool to int`,
+		},
+		{
+			name: "return wrong type",
+			src: `package main
+func bad() bool {
+    return "bad"
+}
+func main() int {
+    return 0
+}`,
+			want: `cannot return string from function returning bool`,
+		},
+		{
+			name: "wrong argument type",
+			src: `package main
+func takesString(value string) int {
+    return 0
+}
+func main() int {
+    return takesString(true)
+}`,
+			want: `argument 1 to takesString has type bool, want string`,
+		},
+		{
+			name: "string arithmetic",
+			src: `package main
+func main() int {
+    let x int = "a" + "b"
+    return x
+}`,
+			want: `operator "+" requires int operands`,
+		},
+		{
+			name: "bool arithmetic",
+			src: `package main
+func main() int {
+    let x int = true + false
+    return x
+}`,
+			want: `operator "+" requires int operands`,
 		},
 	}
 
@@ -143,6 +253,18 @@ func main() int {
 			}
 		})
 	}
+}
+
+func sameTypes(got []ast.Type, want []ast.Type) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func mustParse(t *testing.T, src string) *ast.Program {

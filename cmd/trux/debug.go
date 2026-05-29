@@ -126,8 +126,15 @@ func formatExprCalls(out *bytes.Buffer, expr ast.Expression, info *semtypes.Info
 		if sig, ok := info.ResolvedCalls[expr]; ok {
 			fmt.Fprintf(out, "  %d:%d %s -> %s\n", expr.Start.Line, expr.Start.Column, expr.Callee, sig.ReturnType)
 		}
-		if typ, ok := info.PrintCalls[expr]; ok {
-			fmt.Fprintf(out, "  %d:%d print -> print(%s)\n", expr.Start.Line, expr.Start.Column, typ)
+		if types, ok := info.PrintCalls[expr]; ok {
+			fmt.Fprintf(out, "  %d:%d print -> print(", expr.Start.Line, expr.Start.Column)
+			for i, typ := range types {
+				if i > 0 {
+					fmt.Fprint(out, ", ")
+				}
+				fmt.Fprint(out, typ)
+			}
+			fmt.Fprintln(out, ")")
 		}
 		for _, arg := range expr.Args {
 			formatExprCalls(out, arg, info)

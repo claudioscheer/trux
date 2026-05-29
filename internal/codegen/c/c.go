@@ -14,8 +14,9 @@ func Generate(program *ir.Program) (string, error) {
 	var out bytes.Buffer
 
 	fmt.Fprintln(&out, "#include <stdint.h>")
+	fmt.Fprintln(&out, "#include <stdbool.h>")
 	fmt.Fprintln(&out)
-	fmt.Fprint(&out, runtimec.Source)
+	out.WriteString(runtimec.Source)
 	fmt.Fprintln(&out)
 
 	for _, fn := range program.Functions {
@@ -104,14 +105,26 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt) error {
 		}
 		fmt.Fprintf(out, "    return %s;\n", value)
 	case *ir.PrintStmt:
-		if stmt.Type != ast.IntType {
-			return fmt.Errorf("unsupported print type %s", stmt.Type)
+		if len(stmt.Args) != len(stmt.Types) {
+			return fmt.Errorf("print arg/type count mismatch")
 		}
-		arg, err := emitExpr(stmt.Arg)
-		if err != nil {
-			return err
+		for i, argExpr := range stmt.Args {
+			arg, err := emitExpr(argExpr)
+			if err != nil {
+				return err
+			}
+			switch stmt.Types[i] {
+			case ast.IntType:
+				fmt.Fprintf(out, "    rt_print_int(%s);\n", arg)
+			case ast.StringType:
+				fmt.Fprintf(out, "    rt_print_string(%s);\n", arg)
+			case ast.BoolType:
+				fmt.Fprintf(out, "    rt_print_bool(%s);\n", arg)
+			default:
+				return fmt.Errorf("unsupported print type %s", stmt.Types[i])
+			}
 		}
-		fmt.Fprintf(out, "    rt_print_int(%s);\n", arg)
+		fmt.Fprintln(out, "    rt_print_newline();")
 	case *ir.ExprStmt:
 		expr, err := emitExpr(stmt.Expr)
 		if err != nil {
@@ -131,6 +144,13 @@ func emitExpr(expr ir.Expr) (string, error) {
 		return expr.Name, nil
 	case *ir.IntLiteral:
 		return expr.Value, nil
+	case *ir.StringLiteral:
+		return fmt.Sprintf("(rt_string){(const uint8_t*)%s, %d}", cStringLiteral(expr.Value), len(expr.Value)), nil
+	case *ir.BoolLiteral:
+		if expr.Value {
+			return "true", nil
+		}
+		return "false", nil
 	case *ir.CallExpr:
 		args := make([]string, 0, len(expr.Args))
 		for _, arg := range expr.Args {
@@ -160,6 +180,10 @@ func emitType(typ ast.Type) (string, error) {
 	switch typ {
 	case ast.IntType:
 		return "int64_t", nil
+	case ast.StringType:
+		return "rt_string", nil
+	case ast.BoolType:
+		return "bool", nil
 	default:
 		return "", fmt.Errorf("unsupported type %s", typ)
 	}
@@ -167,4 +191,30 @@ func emitType(typ ast.Type) (string, error) {
 
 func mangleFunc(name string) string {
 	return "trux_" + name
+}
+
+func cStringLiteral(value string) string {
+	var out strings.Builder
+	out.WriteByte('"')
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		switch ch {
+		case '"':
+			out.WriteString("\\\"")
+		case '\\':
+			out.WriteString("\\\\")
+		case '\n':
+			out.WriteString("\\n")
+		case '\t':
+			out.WriteString("\\t")
+		default:
+			if ch >= 32 && ch <= 126 {
+				out.WriteByte(ch)
+			} else {
+				fmt.Fprintf(&out, "\\%03o", ch)
+			}
+		}
+	}
+	out.WriteByte('"')
+	return out.String()
 }

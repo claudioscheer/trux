@@ -54,6 +54,39 @@ func main() int {
 	}
 }
 
+func TestRunFileCompilesAndExecutesV1Program(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func label() string {
+    return "Kern"
+}
+
+func ready() bool {
+    return true
+}
+
+func main() int {
+    let name string = label()
+    let ok bool = ready()
+    print(name, 1)
+    print(ok)
+    print("line\nquote: \"")
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "Kern1\ntrue\nline\nquote: \"\n"
+	if out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
+	}
+}
+
 func TestRunFileWithDebugWritesPhaseFiles(t *testing.T) {
 	requireCC(t)
 
@@ -110,8 +143,8 @@ func main() int {
 	}
 
 	cSource := readFile(t, filepath.Join(debugDir, "05-c.c"))
-	if !strings.Contains(cSource, "rt_print_int(x);") {
-		t.Fatalf("generated C = %q, want int print call", cSource)
+	if !strings.Contains(cSource, "rt_print_int(x);") || !strings.Contains(cSource, "rt_print_newline();") {
+		t.Fatalf("generated C = %q, want int print call with newline", cSource)
 	}
 }
 
@@ -228,7 +261,7 @@ func main() int {
 	}
 
 	wantParts := []string{
-		path + ":4:5: print expects 1 argument, got 0",
+		path + ":4:5: print expects at least 1 argument, got 0",
 		"2 | ",
 		"3 | func main() int {",
 		"4 |     print()",

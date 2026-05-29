@@ -43,8 +43,8 @@ type ReturnStmt struct {
 func (*ReturnStmt) stmtNode() {}
 
 type PrintStmt struct {
-	Arg  Expr
-	Type ast.Type
+	Args  []Expr
+	Types []ast.Type
 }
 
 func (*PrintStmt) stmtNode() {}
@@ -77,6 +77,24 @@ type IntLiteral struct {
 func (e *IntLiteral) Type() ast.Type { return e.Typ }
 
 func (*IntLiteral) exprNode() {}
+
+type StringLiteral struct {
+	Value string
+	Typ   ast.Type
+}
+
+func (e *StringLiteral) Type() ast.Type { return e.Typ }
+
+func (*StringLiteral) exprNode() {}
+
+type BoolLiteral struct {
+	Value bool
+	Typ   ast.Type
+}
+
+func (e *BoolLiteral) Type() ast.Type { return e.Typ }
+
+func (*BoolLiteral) exprNode() {}
 
 type CallExpr struct {
 	Callee     string
@@ -156,12 +174,12 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 		return &ReturnStmt{Value: value}, nil
 	case *ast.ExprStmt:
 		if call, ok := stmt.Expr.(*ast.CallExpr); ok {
-			if printType, ok := b.info.PrintCalls[call]; ok {
-				arg, err := b.buildExpr(call.Args[0])
+			if printTypes, ok := b.info.PrintCalls[call]; ok {
+				args, err := b.buildExprs(call.Args)
 				if err != nil {
 					return nil, err
 				}
-				return &PrintStmt{Arg: arg, Type: printType}, nil
+				return &PrintStmt{Args: args, Types: printTypes}, nil
 			}
 		}
 
@@ -184,6 +202,10 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 	switch expr := expr.(type) {
 	case *ast.IntLiteral:
 		return &IntLiteral{Value: expr.Value, Typ: typ}, nil
+	case *ast.StringLiteral:
+		return &StringLiteral{Value: expr.Value, Typ: typ}, nil
+	case *ast.BoolLiteral:
+		return &BoolLiteral{Value: expr.Value, Typ: typ}, nil
 	case *ast.IdentExpr:
 		return &IdentExpr{Name: expr.Name, Typ: typ}, nil
 	case *ast.CallExpr:

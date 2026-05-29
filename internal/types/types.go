@@ -27,7 +27,7 @@ type Info struct {
 	Locals        map[*ast.FuncDecl]map[string]ast.Type
 	ExprTypes     map[ast.Expression]ast.Type
 	ResolvedCalls map[*ast.CallExpr]FuncSig
-	PrintCalls    map[*ast.CallExpr]ast.Type
+	PrintCalls    map[*ast.CallExpr][]ast.Type
 }
 
 type checker struct {
@@ -41,7 +41,7 @@ func Check(program *ast.Program) (*Info, error) {
 			Locals:        map[*ast.FuncDecl]map[string]ast.Type{},
 			ExprTypes:     map[ast.Expression]ast.Type{},
 			ResolvedCalls: map[*ast.CallExpr]FuncSig{},
-			PrintCalls:    map[*ast.CallExpr]ast.Type{},
+			PrintCalls:    map[*ast.CallExpr][]ast.Type{},
 		},
 	}
 
@@ -154,6 +154,12 @@ func (c *checker) checkExpr(locals map[string]ast.Type, expr ast.Expression, all
 	case *ast.IntLiteral:
 		c.info.ExprTypes[expr] = ast.IntType
 		return ast.IntType, nil
+	case *ast.StringLiteral:
+		c.info.ExprTypes[expr] = ast.StringType
+		return ast.StringType, nil
+	case *ast.BoolLiteral:
+		c.info.ExprTypes[expr] = ast.BoolType
+		return ast.BoolType, nil
 	case *ast.IdentExpr:
 		typ, ok := locals[expr.Name]
 		if !ok {
@@ -196,15 +202,12 @@ func (c *checker) checkCall(locals map[string]ast.Type, expr *ast.CallExpr, allo
 		if !allowPrint {
 			return "", typeError(expr.Start, "print can only be used as a statement")
 		}
-		if len(argTypes) != 1 {
-			return "", typeError(expr.Start, "print expects 1 argument, got %d", len(argTypes))
+		if len(argTypes) == 0 {
+			return "", typeError(expr.Start, "print expects at least 1 argument, got 0")
 		}
-		if argTypes[0] != ast.IntType {
-			return "", typeError(expr.Args[0].Pos(), "print expects int, got %s", argTypes[0])
-		}
-		c.info.PrintCalls[expr] = ast.IntType
-		c.info.ExprTypes[expr] = ast.IntType
-		return ast.IntType, nil
+		c.info.PrintCalls[expr] = argTypes
+		c.info.ExprTypes[expr] = argTypes[len(argTypes)-1]
+		return argTypes[len(argTypes)-1], nil
 	}
 
 	sig, ok := c.info.Funcs[expr.Callee]

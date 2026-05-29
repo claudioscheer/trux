@@ -174,6 +174,7 @@ Using arenas forces the project to confront lifetime reasoning, escape analysis,
 - Odin, Jai, and C3 memory models (for examples of successful arena-centric designs)
 - Region-based memory management literature (Cyclone, ML Kit, Tofte-Talpin)
 - CUDA memory pools and async allocation patterns (for host-side GPU resource management)
+- [MODULES.md](MODULES.md) — impact of modules on generated C output strategy
 
 ---
 

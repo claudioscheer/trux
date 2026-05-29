@@ -102,6 +102,55 @@ func main() int {
 	}
 }
 
+func TestParsesV1TypesAndLiterals(t *testing.T) {
+	program := mustParse(t, `package main
+func label() string {
+    return "Kern"
+}
+
+func ready() bool {
+    return true
+}
+
+func main() int {
+    let name string = label()
+    let ok bool = false
+    print(name)
+    print(ok)
+    return 0
+}`)
+
+	label := program.Functions[0]
+	if label.ReturnType != ast.StringType {
+		t.Fatalf("label return type = %q, want %q", label.ReturnType, ast.StringType)
+	}
+	stringReturn := label.Body.Statements[0].(*ast.ReturnStmt)
+	stringLiteral, ok := stringReturn.Value.(*ast.StringLiteral)
+	if !ok || stringLiteral.Value != "Kern" {
+		t.Fatalf("label return = %#v, want string literal Kern", stringReturn.Value)
+	}
+
+	ready := program.Functions[1]
+	if ready.ReturnType != ast.BoolType {
+		t.Fatalf("ready return type = %q, want %q", ready.ReturnType, ast.BoolType)
+	}
+	boolReturn := ready.Body.Statements[0].(*ast.ReturnStmt)
+	boolLiteral, ok := boolReturn.Value.(*ast.BoolLiteral)
+	if !ok || !boolLiteral.Value {
+		t.Fatalf("ready return = %#v, want true bool literal", boolReturn.Value)
+	}
+
+	mainFn := program.Functions[2]
+	nameLet := mainFn.Body.Statements[0].(*ast.LetStmt)
+	if nameLet.Type != ast.StringType {
+		t.Fatalf("name type = %q, want %q", nameLet.Type, ast.StringType)
+	}
+	okLet := mainFn.Body.Statements[1].(*ast.LetStmt)
+	if okLet.Type != ast.BoolType {
+		t.Fatalf("ok type = %q, want %q", okLet.Type, ast.BoolType)
+	}
+}
+
 func TestReportsSyntaxErrorWithExpectedActualAndPosition(t *testing.T) {
 	_, err := Parse(`package main
 func main( int {
@@ -125,6 +174,21 @@ func TestReportsIllegalTokenAsLexError(t *testing.T) {
 
 	if !strings.Contains(err.Error(), `lex error: illegal character "@"`) {
 		t.Fatalf("error = %q, want lex error", err.Error())
+	}
+}
+
+func TestReportsStringLexErrors(t *testing.T) {
+	_, err := Parse(`package main
+func main() int {
+    print("bad\x")
+    return 0
+}`)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	if !strings.Contains(err.Error(), `unknown escape \x`) {
+		t.Fatalf("error = %q, want unknown escape", err.Error())
 	}
 }
 

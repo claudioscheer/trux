@@ -96,6 +96,30 @@ func TestPrintIsIdentifier(t *testing.T) {
 	})
 }
 
+func TestLexesV1LiteralsAndTypes(t *testing.T) {
+	assertTokens(t, Lex(`let name string = "Kern\n" let ready bool = true false`), []expectedToken{
+		{token.Let, "let"},
+		{token.Ident, "name"},
+		{token.StringType, "string"},
+		{token.Assign, "="},
+		{token.String, "Kern\n"},
+		{token.Let, "let"},
+		{token.Ident, "ready"},
+		{token.BoolType, "bool"},
+		{token.Assign, "="},
+		{token.True, "true"},
+		{token.False, "false"},
+		{token.EOF, ""},
+	})
+}
+
+func TestLexesStringEscapes(t *testing.T) {
+	assertTokens(t, Lex(`"quote: \" slash: \\ tab:\t"`), []expectedToken{
+		{token.String, "quote: \" slash: \\ tab:\t"},
+		{token.EOF, ""},
+	})
+}
+
 func TestIllegalToken(t *testing.T) {
 	tokens := Lex("@")
 
@@ -106,6 +130,28 @@ func TestIllegalToken(t *testing.T) {
 	}
 	if tokens[0] != want {
 		t.Fatalf("first token = %#v, want %#v", tokens[0], want)
+	}
+}
+
+func TestIllegalStringLiterals(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "single quote", input: `'bad'`, want: "'"},
+		{name: "unknown escape", input: `"bad\x"`, want: `error: unknown escape \x`},
+		{name: "unterminated", input: `"bad`, want: "error: unterminated string literal"},
+		{name: "newline", input: "\"bad\n\"", want: "error: newline in string literal"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens := Lex(tt.input)
+			if tokens[0].Type != token.Illegal || tokens[0].Lexeme != tt.want {
+				t.Fatalf("first token = %#v, want illegal %q", tokens[0], tt.want)
+			}
+		})
 	}
 }
 

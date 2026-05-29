@@ -42,6 +42,8 @@ func (l *Lexer) NextToken() token.Token {
 	ch := l.current()
 
 	switch ch {
+	case '"':
+		return l.readString(pos)
 	case '=':
 		l.advance()
 		return token.Token{Type: token.Assign, Lexeme: "=", Pos: pos}
@@ -106,6 +108,46 @@ func (l *Lexer) readInteger() string {
 	}
 
 	return l.input[start:l.offset]
+}
+
+func (l *Lexer) readString(pos token.Position) token.Token {
+	l.advance()
+
+	value := []byte{}
+	for !l.atEnd() {
+		ch := l.current()
+		switch ch {
+		case '"':
+			l.advance()
+			return token.Token{Type: token.String, Lexeme: string(value), Pos: pos}
+		case '\n', '\r':
+			return token.Token{Type: token.Illegal, Lexeme: "error: newline in string literal", Pos: pos}
+		case '\\':
+			l.advance()
+			if l.atEnd() {
+				return token.Token{Type: token.Illegal, Lexeme: "error: unterminated string literal", Pos: pos}
+			}
+			escaped := l.current()
+			switch escaped {
+			case '"':
+				value = append(value, '"')
+			case '\\':
+				value = append(value, '\\')
+			case 'n':
+				value = append(value, '\n')
+			case 't':
+				value = append(value, '\t')
+			default:
+				return token.Token{Type: token.Illegal, Lexeme: "error: unknown escape \\" + string(escaped), Pos: pos}
+			}
+			l.advance()
+		default:
+			value = append(value, ch)
+			l.advance()
+		}
+	}
+
+	return token.Token{Type: token.Illegal, Lexeme: "error: unterminated string literal", Pos: pos}
 }
 
 func (l *Lexer) skipWhitespace() {

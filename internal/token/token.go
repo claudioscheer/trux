@@ -6,14 +6,19 @@ const (
 	Illegal Type = "ILLEGAL"
 	EOF     Type = "EOF"
 
-	Ident Type = "IDENT"
-	Int   Type = "INT"
+	Ident  Type = "IDENT"
+	Int    Type = "INT"
+	String Type = "STRING"
 
-	Package Type = "PACKAGE"
-	Func    Type = "FUNC"
-	Return  Type = "RETURN"
-	Let     Type = "LET"
-	IntType Type = "INT_TYPE"
+	Package    Type = "PACKAGE"
+	Func       Type = "FUNC"
+	Return     Type = "RETURN"
+	Let        Type = "LET"
+	IntType    Type = "INT_TYPE"
+	StringType Type = "STRING_TYPE"
+	BoolType   Type = "BOOL_TYPE"
+	True       Type = "TRUE"
+	False      Type = "FALSE"
 
 	Assign   Type = "="
 	Plus     Type = "+"
@@ -47,6 +52,10 @@ var keywords = map[string]Type{
 	"return":  Return,
 	"let":     Let,
 	"int":     IntType,
+	"string":  StringType,
+	"bool":    BoolType,
+	"true":    True,
+	"false":   False,
 }
 
 func LookupIdent(ident string) Type {

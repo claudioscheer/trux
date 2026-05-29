@@ -57,12 +57,89 @@ func main() int {
 	}
 
 	printStmt := mainFn.Body[1].(*PrintStmt)
-	if printStmt.Type != ast.IntType {
-		t.Fatalf("print type = %q, want %q", printStmt.Type, ast.IntType)
+	if !sameTypes(printStmt.Types, []ast.Type{ast.IntType}) {
+		t.Fatalf("print types = %q, want %q", printStmt.Types, []ast.Type{ast.IntType})
 	}
-	if printStmt.Arg.Type() != ast.IntType {
-		t.Fatalf("print arg type = %q, want %q", printStmt.Arg.Type(), ast.IntType)
+	if len(printStmt.Args) != 1 || printStmt.Args[0].Type() != ast.IntType {
+		t.Fatalf("print args = %#v, want one int arg", printStmt.Args)
 	}
+}
+
+func TestBuildCreatesTypedIRForV1Program(t *testing.T) {
+	program := mustParse(t, `package main
+func label() string {
+    return "Kern"
+}
+
+func ready() bool {
+    return true
+}
+
+func main() int {
+    let name string = label()
+    let ok bool = false
+    print(name, 1)
+    print(ok)
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	label := irProgram.Functions[0]
+	if label.ReturnType != ast.StringType {
+		t.Fatalf("label return type = %q, want %q", label.ReturnType, ast.StringType)
+	}
+	stringReturn := label.Body[0].(*ReturnStmt)
+	stringLiteral := stringReturn.Value.(*StringLiteral)
+	if stringLiteral.Value != "Kern" || stringLiteral.Type() != ast.StringType {
+		t.Fatalf("string literal = %#v, want typed Kern", stringLiteral)
+	}
+
+	ready := irProgram.Functions[1]
+	boolReturn := ready.Body[0].(*ReturnStmt)
+	boolLiteral := boolReturn.Value.(*BoolLiteral)
+	if !boolLiteral.Value || boolLiteral.Type() != ast.BoolType {
+		t.Fatalf("bool literal = %#v, want typed true", boolLiteral)
+	}
+
+	mainFn := irProgram.Functions[2]
+	nameLet := mainFn.Body[0].(*LetStmt)
+	nameCall := nameLet.Value.(*CallExpr)
+	if nameLet.Type != ast.StringType || nameCall.Type() != ast.StringType {
+		t.Fatalf("name let/call = %#v/%#v, want string", nameLet, nameCall)
+	}
+
+	stringPrint := mainFn.Body[2].(*PrintStmt)
+	if !sameTypes(stringPrint.Types, []ast.Type{ast.StringType, ast.IntType}) {
+		t.Fatalf("string print types = %q, want string and int", stringPrint.Types)
+	}
+	if len(stringPrint.Args) != 2 || stringPrint.Args[0].Type() != ast.StringType || stringPrint.Args[1].Type() != ast.IntType {
+		t.Fatalf("string print args = %#v, want string and int", stringPrint.Args)
+	}
+
+	boolPrint := mainFn.Body[3].(*PrintStmt)
+	if !sameTypes(boolPrint.Types, []ast.Type{ast.BoolType}) || len(boolPrint.Args) != 1 || boolPrint.Args[0].Type() != ast.BoolType {
+		t.Fatalf("bool print = %#v, want bool print", boolPrint)
+	}
+}
+
+func sameTypes(got []ast.Type, want []ast.Type) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func mustParse(t *testing.T, src string) *ast.Program {

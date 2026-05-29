@@ -537,7 +537,11 @@ assignment
 
 Dynamic allocation (starting with strings that are not literals) uses arenas rather than individual `malloc`/`free` or a garbage collector.
 
-See [arenas.md](arenas.md) for the full rationale, tradeoffs, staged evolution plan, and why GC was deferred.
+See [ARENAS.md](ARENAS.md) for the full rationale, tradeoffs, staged evolution plan, and why GC was deferred.
+
+GPU support uses explicit memory copies via `gpu.Buffer[T]`. See [GPU.md](GPU.md) for the programming model.
+
+Module support will eventually require moving beyond single-file C generation. See [MODULES.md](MODULES.md).
 
 This is a deliberate design choice aligned with the project's goals of a small compiler, readable generated C, and learning compiler construction and systems language tradeoffs.
 

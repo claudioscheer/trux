@@ -22,7 +22,11 @@ type Param struct {
 
 type Type string
 
-const IntType Type = "int"
+const (
+	IntType    Type = "int"
+	StringType Type = "string"
+	BoolType   Type = "bool"
+)
 
 type Block struct {
 	Statements []Statement
@@ -83,6 +87,24 @@ type IntLiteral struct {
 func (e *IntLiteral) Pos() token.Position { return e.Start }
 
 func (*IntLiteral) expressionNode() {}
+
+type StringLiteral struct {
+	Start token.Position
+	Value string
+}
+
+func (e *StringLiteral) Pos() token.Position { return e.Start }
+
+func (*StringLiteral) expressionNode() {}
+
+type BoolLiteral struct {
+	Start token.Position
+	Value bool
+}
+
+func (e *BoolLiteral) Pos() token.Position { return e.Start }
+
+func (*BoolLiteral) expressionNode() {}
 
 type CallExpr struct {
 	Start  token.Position

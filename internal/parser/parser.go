@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/claudioscheer/trux/internal/ast"
 	"github.com/claudioscheer/trux/internal/lexer"
@@ -26,6 +27,12 @@ func Parse(input string) (*ast.Program, error) {
 	tokens := lexer.Lex(input)
 	for _, tok := range tokens {
 		if tok.Type == token.Illegal {
+			if strings.HasPrefix(tok.Lexeme, "error: ") {
+				return nil, &ParseError{
+					Pos: tok.Pos,
+					Msg: strings.TrimPrefix(tok.Lexeme, "error: "),
+				}
+			}
 			return nil, &ParseError{
 				Pos: tok.Pos,
 				Msg: fmt.Sprintf("lex error: illegal character %q", tok.Lexeme),
@@ -129,11 +136,17 @@ func (p *Parser) parseParams() ([]ast.Param, error) {
 }
 
 func (p *Parser) parseType() (ast.Type, error) {
-	if _, err := p.expect(token.IntType); err != nil {
-		return "", err
+	switch {
+	case p.match(token.IntType):
+		return ast.IntType, nil
+	case p.match(token.StringType):
+		return ast.StringType, nil
+	case p.match(token.BoolType):
+		return ast.BoolType, nil
+	default:
+		tok := p.current()
+		return "", p.errorf(tok, "expected type, got %s", describe(tok))
 	}
-
-	return ast.IntType, nil
 }
 
 func (p *Parser) parseBlock() (ast.Block, error) {
@@ -251,6 +264,15 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 	case p.check(token.Int):
 		tok := p.advance()
 		return &ast.IntLiteral{Start: tok.Pos, Value: tok.Lexeme}, nil
+	case p.check(token.String):
+		tok := p.advance()
+		return &ast.StringLiteral{Start: tok.Pos, Value: tok.Lexeme}, nil
+	case p.check(token.True):
+		tok := p.advance()
+		return &ast.BoolLiteral{Start: tok.Pos, Value: true}, nil
+	case p.check(token.False):
+		tok := p.advance()
+		return &ast.BoolLiteral{Start: tok.Pos, Value: false}, nil
 	case p.check(token.Ident):
 		ident := p.advance()
 		if p.match(token.LParen) {

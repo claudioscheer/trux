@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/claudioscheer/trux/internal/ir"
-	"github.com/claudioscheer/trux/internal/lexer"
 	"github.com/claudioscheer/trux/internal/parser"
 	"github.com/claudioscheer/trux/internal/token"
 	semtypes "github.com/claudioscheer/trux/internal/types"
@@ -44,55 +43,27 @@ func runFile(out io.Writer, path string) error {
 }
 
 func runFileWithOptions(out io.Writer, path string, opts runOptions) error {
-	src, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-
-	var debug *debugWriter
-	if opts.Debug {
-		debug, err = newDebugWriter(path)
-		if err != nil {
-			return err
-		}
-		if err := debug.writeText("00-source.tx", string(src)); err != nil {
-			return err
-		}
-		tokens := lexer.Lex(string(src))
-		if err := debug.writeText("01-tokens.txt", formatTokens(tokens)); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "debug files: %s\n", debug.dir)
-	}
-
-	program, err := parser.Parse(string(src))
-	if err != nil {
-		return formatSourceError(path, string(src), err)
-	}
-	if debug != nil {
-		if err := debug.writeJSON("02-ast.json", program); err != nil {
-			return err
-		}
-	}
-	info, err := semtypes.Check(program)
-	if err != nil {
-		return formatSourceError(path, string(src), err)
-	}
-	if debug != nil {
-		if err := debug.writeText("03-types.txt", formatTypeInfo(program, info)); err != nil {
-			return err
-		}
-	}
-	typedIR, err := ir.Build(program, info)
+	result, err := compileFile(path, compileOptions{Debug: opts.Debug, DebugOut: out})
 	if err != nil {
 		return err
 	}
-	if debug != nil {
-		if err := debug.writeJSON("04-ir.json", typedIR); err != nil {
-			return err
-		}
+
+	tmpDir, err := os.MkdirTemp("", "trux-run-*")
+	if err != nil {
+		return fmt.Errorf("create run temp dir: %w", err)
 	}
-	return nil
+	defer os.RemoveAll(tmpDir)
+
+	cPath := filepath.Join(tmpDir, "main.c")
+	if err := os.WriteFile(cPath, []byte(result.CSource), 0o644); err != nil {
+		return fmt.Errorf("write generated C: %w", err)
+	}
+	executablePath := filepath.Join(tmpDir, "main")
+	if err := compileC(cPath, executablePath); err != nil {
+		return err
+	}
+
+	return runExecutable(out, executablePath)
 }
 
 func formatSourceError(path string, src string, err error) error {

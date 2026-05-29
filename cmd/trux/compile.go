@@ -1,0 +1,149 @@
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	codegenc "github.com/claudioscheer/trux/internal/codegen/c"
+	"github.com/claudioscheer/trux/internal/ir"
+	"github.com/claudioscheer/trux/internal/lexer"
+	"github.com/claudioscheer/trux/internal/parser"
+	semtypes "github.com/claudioscheer/trux/internal/types"
+)
+
+type compileOptions struct {
+	Debug    bool
+	DebugOut io.Writer
+}
+
+type compileResult struct {
+	CSource string
+}
+
+func compileFile(path string, opts compileOptions) (*compileResult, error) {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	var debug *debugWriter
+	if opts.Debug {
+		debug, err = newDebugWriter(path)
+		if err != nil {
+			return nil, err
+		}
+		if err := debug.writeText("00-source.tx", string(src)); err != nil {
+			return nil, err
+		}
+		tokens := lexer.Lex(string(src))
+		if err := debug.writeText("01-tokens.txt", formatTokens(tokens)); err != nil {
+			return nil, err
+		}
+		if opts.DebugOut != nil {
+			fmt.Fprintf(opts.DebugOut, "debug files: %s\n", debug.dir)
+		}
+	}
+
+	program, err := parser.Parse(string(src))
+	if err != nil {
+		return nil, formatSourceError(path, string(src), err)
+	}
+	if debug != nil {
+		if err := debug.writeJSON("02-ast.json", program); err != nil {
+			return nil, err
+		}
+	}
+
+	info, err := semtypes.Check(program)
+	if err != nil {
+		return nil, formatSourceError(path, string(src), err)
+	}
+	if debug != nil {
+		if err := debug.writeText("03-types.txt", formatTypeInfo(program, info)); err != nil {
+			return nil, err
+		}
+	}
+
+	typedIR, err := ir.Build(program, info)
+	if err != nil {
+		return nil, err
+	}
+	if debug != nil {
+		if err := debug.writeJSON("04-ir.json", typedIR); err != nil {
+			return nil, err
+		}
+	}
+
+	cSource, err := codegenc.Generate(typedIR)
+	if err != nil {
+		return nil, err
+	}
+	if debug != nil {
+		if err := debug.writeText("05-c.c", cSource); err != nil {
+			return nil, err
+		}
+	}
+
+	return &compileResult{CSource: cSource}, nil
+}
+
+func buildFile(sourcePath string, outputPath string) error {
+	result, err := compileFile(sourcePath, compileOptions{})
+	if err != nil {
+		return err
+	}
+
+	tmpDir, err := os.MkdirTemp("", "trux-build-*")
+	if err != nil {
+		return fmt.Errorf("create build temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cPath := filepath.Join(tmpDir, "main.c")
+	if err := os.WriteFile(cPath, []byte(result.CSource), 0o644); err != nil {
+		return fmt.Errorf("write generated C: %w", err)
+	}
+
+	return compileC(cPath, outputPath)
+}
+
+func compileC(sourcePath string, outputPath string) error {
+	compiler := os.Getenv("CC")
+	if compiler == "" {
+		compiler = "cc"
+	}
+
+	cmd := exec.Command(compiler, sourcePath, "-o", outputPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(output))
+		if msg == "" {
+			return fmt.Errorf("%s failed: %w", compiler, err)
+		}
+		return fmt.Errorf("%s failed: %w\n%s", compiler, err, msg)
+	}
+
+	return nil
+}
+
+func runExecutable(out io.Writer, executablePath string) error {
+	cmd := exec.Command(executablePath)
+	cmd.Stdout = out
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			return fmt.Errorf("execute %s: %w", executablePath, err)
+		}
+		return fmt.Errorf("execute %s: %w\n%s", executablePath, err, msg)
+	}
+
+	return nil
+}

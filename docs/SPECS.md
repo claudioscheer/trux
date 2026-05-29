@@ -492,7 +492,7 @@ trux run main.tx
 Optional commands:
 
 ```bash
-trux build main.tx
+trux build -o main main.tx
 trux emit-c main.tx
 ```
 

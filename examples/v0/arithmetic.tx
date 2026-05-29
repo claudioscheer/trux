@@ -1,0 +1,31 @@
+package main
+
+func add(a int, b int) int {
+    return a + b
+}
+
+func double(x int) int {
+    return x * 2
+}
+
+func square(x int) int {
+    return x * x
+}
+
+func weighted(a int, b int, c int) int {
+    return add(square(a), add(double(b), c))
+}
+
+func main() int {
+    let width int = 7
+    let height int = 4
+    let area int = width * height
+    let perimeter int = double(add(width, height))
+    let score int = weighted(5, 6, area)
+
+    print(area)
+    print(perimeter)
+    print(score)
+
+    return 0
+}

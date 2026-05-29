@@ -23,8 +23,6 @@ Hardcode a specific compiler only for narrow, documented reasons (e.g. a sanitiz
 Long: "Compile the given .tx file to C, invoke the C compiler, execute the resulting binary, and print its output.",
 ```
 
-(The actual C compiler invocation does not exist yet. `run.go:31` only parses, `internal/codegen/c/c.go` is an empty package, and there are zero uses of `os/exec` in the 16 Go files.)
-
 ## Tradeoffs
 
 | Approach                  | Benefit                                         | Cost                                              |

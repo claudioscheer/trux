@@ -16,10 +16,11 @@ run: build
 	@if [ -z "$(FILE)" ]; then echo "Usage: make run FILE=path/to/file.tx"; exit 1; fi
 	./bin/$(BINARY) run $(if $(DEBUG),--debug )$(RUN_FLAGS) $(FILE)
 
-# Usage: make build-bin FILE=examples/v0/hello.tx
+# Usage: make build-bin FILE=examples/v0/hello.tx OUT=bin/hello
 build-bin: build
 	@if [ -z "$(FILE)" ]; then echo "Usage: make build-bin FILE=path/to/file.tx"; exit 1; fi
-	./bin/$(BINARY) build $(FILE)
+	@if [ -z "$(OUT)" ]; then echo "Usage: make build-bin FILE=path/to/file.tx OUT=path/to/output"; exit 1; fi
+	./bin/$(BINARY) build -o $(OUT) $(FILE)
 
 # Usage: make emit-c FILE=examples/v0/hello.tx
 emit-c: build

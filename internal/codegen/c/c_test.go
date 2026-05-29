@@ -42,9 +42,9 @@ func main() int {
 		"typedef struct {",
 		"rt_arena_block* blocks;",
 		"} rt_arena;",
-		"static void rt_arena_init(rt_arena* arena)",
-		"static void rt_arena_deinit(rt_arena* arena)",
-		"static void rt_print_int(int64_t value)",
+		"static RT_UNUSED void rt_arena_init(rt_arena* arena)",
+		"static RT_UNUSED void rt_arena_deinit(rt_arena* arena)",
+		"static RT_UNUSED void rt_print_int(int64_t value)",
 		"int64_t trux_add(rt_arena* trux_arena, int64_t trux_v_1_a, int64_t trux_v_1_b);",
 		"int64_t trux_main(rt_arena* trux_arena);",
 		"int64_t trux_add(rt_arena* trux_arena, int64_t trux_v_1_a, int64_t trux_v_1_b) {",
@@ -62,6 +62,12 @@ func main() int {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
+	}
+	if !strings.Contains(cSource, "int64_t trux_add(rt_arena* trux_arena, int64_t trux_v_1_a, int64_t trux_v_1_b) {\n    (void)trux_arena;") {
+		t.Fatalf("generated C should mark unused arena in trux_add:\n%s", cSource)
+	}
+	if strings.Contains(cSource, "int64_t trux_main(rt_arena* trux_arena) {\n    (void)trux_arena;") {
+		t.Fatalf("generated C should not mark used arena in trux_main:\n%s", cSource)
 	}
 }
 
@@ -106,8 +112,8 @@ func main() int {
 		"const uint8_t* data;",
 		"size_t len;",
 		"} rt_string;",
-		"static void rt_print_string(rt_string value)",
-		"static void rt_print_bool(bool value)",
+		"static RT_UNUSED void rt_print_string(rt_string value)",
+		"static RT_UNUSED void rt_print_bool(bool value)",
 		"rt_string trux_label(rt_arena* trux_arena);",
 		"bool trux_ready(rt_arena* trux_arena);",
 		"return (rt_string){(const uint8_t*)\"trux\", 4};",
@@ -125,6 +131,9 @@ func main() int {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
+	}
+	if strings.Contains(cSource, "int64_t trux_main(rt_arena* trux_arena) {\n    (void)trux_arena;") {
+		t.Fatalf("generated C should not mark used arena in trux_main:\n%s", cSource)
 	}
 }
 
@@ -162,15 +171,15 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"static void rt_print_float(double value)",
-		"static bool rt_string_contains(rt_string needle, rt_string haystack)",
-		"static bool rt_string_equal(rt_string left, rt_string right)",
+		"static RT_UNUSED void rt_print_float(double value)",
+		"static RT_UNUSED bool rt_string_contains(rt_string needle, rt_string haystack)",
+		"static RT_UNUSED bool rt_string_equal(rt_string left, rt_string right)",
 		"double trux_v_1_x = 1.5;",
 		"if (rt_string_contains((rt_string){(const uint8_t*)\"ru\", 2}, trux_v_4_text)) {",
 		"trux_v_1_x = (trux_v_1_x + 1.0);",
 		"} else {",
 		"trux_v_1_x = 0.0;",
-		"while ((trux_v_1_x > 0.0)) {",
+		"while (trux_v_1_x > 0.0) {",
 		"trux_v_1_x = (trux_v_1_x - 1.0);",
 		"rt_print_float(trux_v_1_x);",
 		"rt_print_bool(rt_string_equal(trux_v_4_text, (rt_string){(const uint8_t*)\"trux\", 4}));",
@@ -211,7 +220,7 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"static rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_string right)",
+		"static RT_UNUSED rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_string right)",
 		"rt_string trux_greet(rt_arena* trux_arena, rt_string trux_v_4_name);",
 		"return rt_string_concat(trux_arena, (rt_string){(const uint8_t*)\"hello \", 6}, trux_v_4_name);",
 		"rt_string trux_v_4_name = trux_greet(trux_arena, (rt_string){(const uint8_t*)\"trux\", 4});",

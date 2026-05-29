@@ -118,7 +118,7 @@ func compileC(sourcePath string, outputPath string) error {
 		compiler = "cc"
 	}
 
-	cmd := exec.Command(compiler, sourcePath, "-o", outputPath)
+	cmd := exec.Command(compiler, "-std=c11", sourcePath, "-o", outputPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(output))

@@ -439,11 +439,55 @@ func main() int {
 	}
 
 	log := readFile(t, logPath)
+	if !strings.Contains(log, "-std=c11") {
+		t.Fatalf("compiler args = %q, want C11 standard flag", log)
+	}
 	if !strings.Contains(log, "-o "+outputPath) {
 		t.Fatalf("compiler args = %q, want output path", log)
 	}
 	if _, err := os.Stat(outputPath); err != nil {
 		t.Fatalf("expected output executable: %v", err)
+	}
+}
+
+func TestGeneratedExamplesCompileWithStrictCWarnings(t *testing.T) {
+	requireCC(t)
+
+	paths, err := filepath.Glob("../../examples/*/*.tx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no example programs found")
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			result, err := compileFile(path, compileOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			dir := t.TempDir()
+			cPath := filepath.Join(dir, "main.c")
+			if err := os.WriteFile(cPath, []byte(result.CSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			compiler := os.Getenv("CC")
+			if compiler == "" {
+				compiler = "cc"
+			}
+			objPath := filepath.Join(dir, "main.o")
+			cmd := exec.Command(compiler, "-std=c11", "-Wall", "-Wextra", "-pedantic", "-c", cPath, "-o", objPath)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("compile generated C: %v\n%s", err, output)
+			}
+			if strings.TrimSpace(string(output)) != "" {
+				t.Fatalf("strict C compiler emitted warnings:\n%s", output)
+			}
+		})
 	}
 }
 

@@ -50,6 +50,9 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func) error {
 		return err
 	}
 	fmt.Fprintln(out, " {")
+	if !funcUsesArena(fn) {
+		fmt.Fprintln(out, "    (void)trux_arena;")
+	}
 	for _, stmt := range fn.Body {
 		if err := emitStmt(out, stmt, 1); err != nil {
 			return err
@@ -127,7 +130,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 		}
 		fmt.Fprintf(out, "%s%s(%s, %s, %s);\n", indent, setter, collection, index, value)
 	case *ir.IfStmt:
-		condition, err := emitExpr(stmt.Condition)
+		condition, err := emitCondition(stmt.Condition)
 		if err != nil {
 			return err
 		}
@@ -145,7 +148,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 		}
 		fmt.Fprintf(out, "%s}\n", indent)
 	case *ir.WhileStmt:
-		condition, err := emitExpr(stmt.Condition)
+		condition, err := emitCondition(stmt.Condition)
 		if err != nil {
 			return err
 		}
@@ -212,6 +215,82 @@ func emitStmts(out *bytes.Buffer, stmts []ir.Stmt, level int) error {
 	}
 
 	return nil
+}
+
+func funcUsesArena(fn *ir.Func) bool {
+	return stmtsUseArena(fn.Body)
+}
+
+func stmtsUseArena(stmts []ir.Stmt) bool {
+	for _, stmt := range stmts {
+		if stmtUsesArena(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtUsesArena(stmt ir.Stmt) bool {
+	switch stmt := stmt.(type) {
+	case *ir.LetStmt:
+		return exprUsesArena(stmt.Value)
+	case *ir.ReturnStmt:
+		return exprUsesArena(stmt.Value)
+	case *ir.AssignStmt:
+		return exprUsesArena(stmt.Value)
+	case *ir.IndexAssignStmt:
+		return exprUsesArena(stmt.Target) || exprUsesArena(stmt.Value)
+	case *ir.IfStmt:
+		return exprUsesArena(stmt.Condition) || stmtsUseArena(stmt.Then) || stmtsUseArena(stmt.Else)
+	case *ir.WhileStmt:
+		return exprUsesArena(stmt.Condition) || stmtsUseArena(stmt.Body)
+	case *ir.PrintStmt:
+		return exprsUseArena(stmt.Args)
+	case *ir.AppendStmt:
+		return exprUsesArena(stmt.List) || exprUsesArena(stmt.Value)
+	case *ir.ExprStmt:
+		return exprUsesArena(stmt.Expr)
+	default:
+		return false
+	}
+}
+
+func exprsUseArena(exprs []ir.Expr) bool {
+	for _, expr := range exprs {
+		if exprUsesArena(expr) {
+			return true
+		}
+	}
+	return false
+}
+
+func exprUsesArena(expr ir.Expr) bool {
+	switch expr := expr.(type) {
+	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CallExpr:
+		return true
+	case *ir.BinaryExpr:
+		return exprUsesArena(expr.Left) || exprUsesArena(expr.Right) ||
+			(expr.Operator == "+" && ast.TypeEqual(expr.Left.Type(), ast.StringType))
+	case *ir.LenExpr:
+		return exprUsesArena(expr.Value)
+	case *ir.IndexExpr:
+		return exprUsesArena(expr.Collection) || exprUsesArena(expr.Index)
+	case *ir.SliceExpr:
+		return exprUsesArena(expr.Collection) || exprUsesArena(expr.Start) || exprUsesArena(expr.End)
+	default:
+		return false
+	}
+}
+
+func emitCondition(expr ir.Expr) (string, error) {
+	condition, err := emitExpr(expr)
+	if err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(condition, "(") && strings.HasSuffix(condition, ")") {
+		return condition[1 : len(condition)-1], nil
+	}
+	return condition, nil
 }
 
 func emitExpr(expr ir.Expr) (string, error) {

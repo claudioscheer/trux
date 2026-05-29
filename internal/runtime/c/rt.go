@@ -8,6 +8,12 @@ const Source = `#include <stdbool.h>
 #include <string.h>
 #include <inttypes.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+#define RT_UNUSED __attribute__((unused))
+#else
+#define RT_UNUSED
+#endif
+
 typedef struct {
     const uint8_t* data;
     size_t len;
@@ -34,17 +40,17 @@ typedef struct {
     size_t end;
 } rt_range;
 
-static void rt_runtime_fail(const char* message) {
+static RT_UNUSED void rt_runtime_fail(const char* message) {
     fprintf(stderr, "trux runtime error: %s\n", message);
     exit(1);
 }
 
-static void rt_arena_init(rt_arena* arena) {
+static RT_UNUSED void rt_arena_init(rt_arena* arena) {
     arena->blocks = NULL;
     arena->lists = NULL;
 }
 
-static void rt_arena_deinit(rt_arena* arena) {
+static RT_UNUSED void rt_arena_deinit(rt_arena* arena) {
     rt_list_allocation* list = arena->lists;
     while (list != NULL) {
         rt_list_allocation* next = list->next;
@@ -63,7 +69,7 @@ static void rt_arena_deinit(rt_arena* arena) {
     arena->blocks = NULL;
 }
 
-static void rt_arena_register_list(rt_arena* arena, void* list, void (*free_list)(void*)) {
+static RT_UNUSED void rt_arena_register_list(rt_arena* arena, void* list, void (*free_list)(void*)) {
     rt_list_allocation* node = malloc(sizeof(rt_list_allocation));
     if (node == NULL) {
         rt_runtime_fail("allocation failed");
@@ -74,7 +80,7 @@ static void rt_arena_register_list(rt_arena* arena, void* list, void (*free_list
     arena->lists = node;
 }
 
-static void* rt_arena_alloc(rt_arena* arena, size_t size) {
+static RT_UNUSED void* rt_arena_alloc(rt_arena* arena, size_t size) {
     if (size == 0) {
         return NULL;
     }
@@ -92,7 +98,7 @@ static void* rt_arena_alloc(rt_arena* arena, size_t size) {
     return block->data;
 }
 
-static size_t rt_checked_count(int64_t count, const char* what) {
+static RT_UNUSED size_t rt_checked_count(int64_t count, const char* what) {
     if (count < 0) {
         fprintf(stderr, "trux runtime error: %s must be non-negative, got %" PRId64 "\n", what, count);
         exit(1);
@@ -100,14 +106,14 @@ static size_t rt_checked_count(int64_t count, const char* what) {
     return (size_t)count;
 }
 
-static size_t rt_checked_bytes(size_t count, size_t elem_size) {
+static RT_UNUSED size_t rt_checked_bytes(size_t count, size_t elem_size) {
     if (elem_size != 0 && count > SIZE_MAX / elem_size) {
         rt_runtime_fail("allocation size overflow");
     }
     return count * elem_size;
 }
 
-static void* rt_arena_alloc_count(rt_arena* arena, size_t count, size_t elem_size, bool zeroed) {
+static RT_UNUSED void* rt_arena_alloc_count(rt_arena* arena, size_t count, size_t elem_size, bool zeroed) {
     size_t bytes = rt_checked_bytes(count, elem_size);
     void* data = rt_arena_alloc(arena, bytes);
     if (zeroed && data != NULL) {
@@ -116,7 +122,7 @@ static void* rt_arena_alloc_count(rt_arena* arena, size_t count, size_t elem_siz
     return data;
 }
 
-static size_t rt_check_index(size_t len, int64_t index) {
+static RT_UNUSED size_t rt_check_index(size_t len, int64_t index) {
     if (index < 0 || (uint64_t)index >= len) {
         fprintf(stderr, "trux runtime error: index %" PRId64 " out of bounds for length %zu\n", index, len);
         exit(1);
@@ -124,7 +130,7 @@ static size_t rt_check_index(size_t len, int64_t index) {
     return (size_t)index;
 }
 
-static rt_range rt_check_slice(size_t len, bool has_start, int64_t start_value, bool has_end, int64_t end_value) {
+static RT_UNUSED rt_range rt_check_slice(size_t len, bool has_start, int64_t start_value, bool has_end, int64_t end_value) {
     int64_t start = has_start ? start_value : 0;
     int64_t end = has_end ? end_value : (int64_t)len;
     if (start < 0 || end < 0 || start > end || (uint64_t)end > len) {
@@ -134,27 +140,27 @@ static rt_range rt_check_slice(size_t len, bool has_start, int64_t start_value, 
     return (rt_range){(size_t)start, (size_t)end};
 }
 
-static void rt_print_int(int64_t value) {
+static RT_UNUSED void rt_print_int(int64_t value) {
     printf("%" PRId64, value);
 }
 
-static void rt_print_float(double value) {
+static RT_UNUSED void rt_print_float(double value) {
     printf("%.15g", value);
 }
 
-static void rt_print_string(rt_string value) {
+static RT_UNUSED void rt_print_string(rt_string value) {
     fwrite(value.data, 1, value.len, stdout);
 }
 
-static void rt_print_bool(bool value) {
+static RT_UNUSED void rt_print_bool(bool value) {
     printf("%s", value ? "true" : "false");
 }
 
-static void rt_print_newline(void) {
+static RT_UNUSED void rt_print_newline(void) {
     putchar('\n');
 }
 
-static bool rt_string_equal(rt_string left, rt_string right) {
+static RT_UNUSED bool rt_string_equal(rt_string left, rt_string right) {
     if (left.len != right.len) {
         return false;
     }
@@ -164,7 +170,7 @@ static bool rt_string_equal(rt_string left, rt_string right) {
     return memcmp(left.data, right.data, left.len) == 0;
 }
 
-static rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_string right) {
+static RT_UNUSED rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_string right) {
     if (left.len == 0) {
         return right;
     }
@@ -182,18 +188,18 @@ static rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_string rig
     return (rt_string){data, len};
 }
 
-static rt_string rt_string_index(rt_string value, int64_t index) {
+static RT_UNUSED rt_string rt_string_index(rt_string value, int64_t index) {
     size_t checked = rt_check_index(value.len, index);
     return (rt_string){value.data + checked, 1};
 }
 
-static rt_string rt_string_slice(rt_string value, bool has_start, int64_t start, bool has_end, int64_t end) {
+static RT_UNUSED rt_string rt_string_slice(rt_string value, bool has_start, int64_t start, bool has_end, int64_t end) {
     rt_range range = rt_check_slice(value.len, has_start, start, has_end, end);
     const uint8_t* data = value.data == NULL ? NULL : value.data + range.start;
     return (rt_string){data, range.end - range.start};
 }
 
-static bool rt_string_contains(rt_string needle, rt_string haystack) {
+static RT_UNUSED bool rt_string_contains(rt_string needle, rt_string haystack) {
     if (needle.len == 0) {
         return true;
     }
@@ -233,57 +239,57 @@ typedef struct { \
     size_t len; \
     size_t cap; \
 } rt_list_##NAME; \
-static rt_array_##NAME rt_array_##NAME##_from_values(rt_arena* arena, const CTYPE* values, size_t len) { \
+static RT_UNUSED rt_array_##NAME rt_array_##NAME##_from_values(rt_arena* arena, const CTYPE* values, size_t len) { \
     CTYPE* data = rt_arena_alloc_count(arena, len, sizeof(CTYPE), false); \
     if (len > 0) { \
         memcpy(data, values, len * sizeof(CTYPE)); \
     } \
     return (rt_array_##NAME){data, len}; \
 } \
-static rt_slice_##NAME rt_make_slice_##NAME(rt_arena* arena, int64_t count) { \
+static RT_UNUSED rt_slice_##NAME rt_make_slice_##NAME(rt_arena* arena, int64_t count) { \
     size_t len = rt_checked_count(count, "slice length"); \
     CTYPE* data = rt_arena_alloc_count(arena, len, sizeof(CTYPE), true); \
     return (rt_slice_##NAME){data, len}; \
 } \
-static CTYPE rt_array_##NAME##_get(rt_array_##NAME value, int64_t index) { \
+static RT_UNUSED CTYPE rt_array_##NAME##_get(rt_array_##NAME value, int64_t index) { \
     return value.data[rt_check_index(value.len, index)]; \
 } \
-static CTYPE rt_slice_##NAME##_get(rt_slice_##NAME value, int64_t index) { \
+static RT_UNUSED CTYPE rt_slice_##NAME##_get(rt_slice_##NAME value, int64_t index) { \
     return value.data[rt_check_index(value.len, index)]; \
 } \
-static CTYPE rt_list_##NAME##_get(rt_list_##NAME* value, int64_t index) { \
+static RT_UNUSED CTYPE rt_list_##NAME##_get(rt_list_##NAME* value, int64_t index) { \
     return value->data[rt_check_index(value->len, index)]; \
 } \
-static void rt_array_##NAME##_set(rt_array_##NAME value, int64_t index, CTYPE elem) { \
+static RT_UNUSED void rt_array_##NAME##_set(rt_array_##NAME value, int64_t index, CTYPE elem) { \
     value.data[rt_check_index(value.len, index)] = elem; \
 } \
-static void rt_slice_##NAME##_set(rt_slice_##NAME value, int64_t index, CTYPE elem) { \
+static RT_UNUSED void rt_slice_##NAME##_set(rt_slice_##NAME value, int64_t index, CTYPE elem) { \
     value.data[rt_check_index(value.len, index)] = elem; \
 } \
-static void rt_list_##NAME##_set(rt_list_##NAME* value, int64_t index, CTYPE elem) { \
+static RT_UNUSED void rt_list_##NAME##_set(rt_list_##NAME* value, int64_t index, CTYPE elem) { \
     value->data[rt_check_index(value->len, index)] = elem; \
 } \
-static rt_slice_##NAME rt_array_##NAME##_slice(rt_array_##NAME value, bool has_start, int64_t start, bool has_end, int64_t end) { \
+static RT_UNUSED rt_slice_##NAME rt_array_##NAME##_slice(rt_array_##NAME value, bool has_start, int64_t start, bool has_end, int64_t end) { \
     rt_range range = rt_check_slice(value.len, has_start, start, has_end, end); \
     CTYPE* data = value.data == NULL ? NULL : value.data + range.start; \
     return (rt_slice_##NAME){data, range.end - range.start}; \
 } \
-static rt_slice_##NAME rt_slice_##NAME##_slice(rt_slice_##NAME value, bool has_start, int64_t start, bool has_end, int64_t end) { \
+static RT_UNUSED rt_slice_##NAME rt_slice_##NAME##_slice(rt_slice_##NAME value, bool has_start, int64_t start, bool has_end, int64_t end) { \
     rt_range range = rt_check_slice(value.len, has_start, start, has_end, end); \
     CTYPE* data = value.data == NULL ? NULL : value.data + range.start; \
     return (rt_slice_##NAME){data, range.end - range.start}; \
 } \
-static rt_slice_##NAME rt_list_##NAME##_slice(rt_list_##NAME* value, bool has_start, int64_t start, bool has_end, int64_t end) { \
+static RT_UNUSED rt_slice_##NAME rt_list_##NAME##_slice(rt_list_##NAME* value, bool has_start, int64_t start, bool has_end, int64_t end) { \
     rt_range range = rt_check_slice(value->len, has_start, start, has_end, end); \
     CTYPE* data = value->data == NULL ? NULL : value->data + range.start; \
     return (rt_slice_##NAME){data, range.end - range.start}; \
 } \
-static void rt_list_##NAME##_free(void* ptr) { \
+static RT_UNUSED void rt_list_##NAME##_free(void* ptr) { \
     rt_list_##NAME* list = ptr; \
     free(list->data); \
     free(list); \
 } \
-static rt_list_##NAME* rt_list_##NAME##_new(rt_arena* arena, size_t cap) { \
+static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_new(rt_arena* arena, size_t cap) { \
     rt_list_##NAME* list = malloc(sizeof(rt_list_##NAME)); \
     if (list == NULL) { \
         rt_runtime_fail("allocation failed"); \
@@ -301,7 +307,7 @@ static rt_list_##NAME* rt_list_##NAME##_new(rt_arena* arena, size_t cap) { \
     rt_arena_register_list(arena, list, rt_list_##NAME##_free); \
     return list; \
 } \
-static rt_list_##NAME* rt_list_##NAME##_from_values(rt_arena* arena, const CTYPE* values, size_t len) { \
+static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_from_values(rt_arena* arena, const CTYPE* values, size_t len) { \
     rt_list_##NAME* list = rt_list_##NAME##_new(arena, len); \
     if (len > 0) { \
         memcpy(list->data, values, len * sizeof(CTYPE)); \
@@ -309,7 +315,7 @@ static rt_list_##NAME* rt_list_##NAME##_from_values(rt_arena* arena, const CTYPE
     list->len = len; \
     return list; \
 } \
-static void rt_list_##NAME##_append(rt_list_##NAME* list, CTYPE elem) { \
+static RT_UNUSED void rt_list_##NAME##_append(rt_list_##NAME* list, CTYPE elem) { \
     if (list->len == list->cap) { \
         size_t new_cap = list->cap == 0 ? 4 : list->cap * 2; \
         if (new_cap < list->cap || new_cap > SIZE_MAX / sizeof(CTYPE)) { \

@@ -8,6 +8,12 @@
       "include": "#strings"
     },
     {
+      "include": "#declarations"
+    },
+    {
+      "include": "#variables"
+    },
+    {
       "include": "#functions"
     },
     {
@@ -21,6 +27,9 @@
     },
     {
       "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
     }
   ],
   "repository": {
@@ -37,13 +46,75 @@
         {
           "name": "string.quoted.double.trux",
           "begin": "\"",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.begin.trux"
+            }
+          },
           "end": "\"",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.string.end.trux"
+            }
+          },
           "patterns": [
             {
               "name": "constant.character.escape.trux",
               "match": "\\\\[\"\\\\nt]"
+            },
+            {
+              "name": "invalid.illegal.character.escape.trux",
+              "match": "\\\\."
             }
           ]
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "name": "meta.package.declaration.trux",
+          "match": "\\b(package)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.package.trux"
+            },
+            "2": {
+              "name": "entity.name.namespace.trux"
+            }
+          }
+        },
+        {
+          "name": "meta.import.declaration.trux",
+          "match": "\\b(import)\\s+(\"(?:\\\\[\"\\\\nt]|[^\"\\\\\\r\\n])*\")",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.import.trux"
+            },
+            "2": {
+              "name": "string.quoted.double.import.trux"
+            }
+          }
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "meta.variable.declaration.trux",
+          "match": "\\b(let)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.variable.trux"
+            },
+            "2": {
+              "name": "variable.other.declaration.trux"
+            }
+          }
+        },
+        {
+          "name": "variable.parameter.trux",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s+(?:\\[[0-9]*\\]|list\\s*\\[|int\\b|float\\b|string\\b|bool\\b))"
         }
       ]
     },
@@ -51,19 +122,37 @@
       "patterns": [
         {
           "name": "meta.function.declaration.trux",
-          "match": "\\b(func)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(?:(pub)\\s+)?(func)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
-              "name": "keyword.declaration.function.trux"
+              "name": "keyword.declaration.visibility.trux"
             },
             "2": {
+              "name": "keyword.declaration.function.trux"
+            },
+            "3": {
               "name": "entity.name.function.trux"
             }
           }
         },
         {
           "name": "support.function.builtin.trux",
-          "match": "\\b(print|len|clone|append|make)(?=\\s*\\()"
+          "match": "\\b(print|len|clone|append|make|read_line|read_int|read_float|read_bool|read_file|write_file|read_csv|write_csv)(?=\\s*\\()"
+        },
+        {
+          "name": "meta.function-call.qualified.trux",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(\\.)([A-Za-z_][A-Za-z0-9_]*)(?=\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "entity.name.namespace.trux"
+            },
+            "2": {
+              "name": "punctuation.accessor.dot.trux"
+            },
+            "3": {
+              "name": "entity.name.function.call.trux"
+            }
+          }
         },
         {
           "name": "entity.name.function.call.trux",
@@ -116,6 +205,34 @@
         {
           "name": "keyword.operator.trux",
           "match": "==|!=|<=|>=|[+\\-*/=<>]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.block.trux",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.section.brackets.trux",
+          "match": "[\\[\\]]"
+        },
+        {
+          "name": "punctuation.section.parens.trux",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.separator.comma.trux",
+          "match": ","
+        },
+        {
+          "name": "punctuation.separator.slice.trux",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.accessor.dot.trux",
+          "match": "\\."
         }
       ]
     }

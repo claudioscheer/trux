@@ -38,6 +38,13 @@
         "path": "./syntaxes/trux.tmLanguage.json"
       }
     ],
+    "themes": [
+      {
+        "label": "Trux Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/dark-color-theme.json"
+      }
+    ],
     "configurationDefaults": {
       "[trux]": {
         "editor.detectIndentation": false,

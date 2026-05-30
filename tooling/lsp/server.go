@@ -27,6 +27,7 @@ const (
 	diagnosticSeverityError = 1
 
 	completionKindFunction = 3
+	completionKindModule   = 9
 	completionKindVariable = 6
 	completionKindKeyword  = 14
 	completionKindType     = 25
@@ -235,7 +236,7 @@ func initializeResult() map[string]any {
 			"referencesProvider":         true,
 			"hoverProvider":              true,
 			"completionProvider": map[string]any{
-				"triggerCharacters": []string{},
+				"triggerCharacters": []string{"."},
 			},
 		},
 		"serverInfo": map[string]any{
@@ -647,9 +648,11 @@ type CompletionList struct {
 }
 
 type CompletionItem struct {
-	Label  string `json:"label"`
-	Kind   int    `json:"kind"`
-	Detail string `json:"detail,omitempty"`
+	Label      string `json:"label"`
+	Kind       int    `json:"kind"`
+	Detail     string `json:"detail,omitempty"`
+	InsertText string `json:"insertText,omitempty"`
+	FilterText string `json:"filterText,omitempty"`
 }
 
 type MarkupContent struct {

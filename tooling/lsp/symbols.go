@@ -68,6 +68,16 @@ type sourceFile struct {
 	program *ast.Program
 }
 
+type importedPackage struct {
+	name string
+	file *sourceFile
+}
+
+type completionContext struct {
+	member      bool
+	packageName string
+}
+
 type importPathReference struct {
 	path  string
 	token token.Token
@@ -87,6 +97,12 @@ func (s *Server) handleDefinition(raw json.RawMessage) (any, error) {
 	}
 
 	if link, ok, err := s.resolveImportPath(params.TextDocument.URI, params.Position); err != nil {
+		return nil, err
+	} else if ok {
+		return []LocationLink{link}, nil
+	}
+
+	if link, ok, err := s.resolveImportPackageQualifier(params.TextDocument.URI, params.Position); err != nil {
 		return nil, err
 	} else if ok {
 		return []LocationLink{link}, nil
@@ -130,32 +146,43 @@ func (s *Server) handleCompletion(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	items := baseCompletionItems()
-	seen := completionLabels(items)
-
 	text, ok := s.documents[params.TextDocument.URI]
 	if !ok {
 		var err error
 		text, err = readURI(params.TextDocument.URI)
 		if err != nil {
-			return completionListFromItems(items), nil
+			return completionListFromItems(baseCompletionItems()), nil
 		}
 	}
 
 	path := normalizePath(pathFromURI(params.TextDocument.URI))
-	graph := loadSourceGraph(path, text, s.documents)
-	file := graph.files[path]
-	if file == nil {
-		for _, item := range importedFunctionCompletionItems(path, text, s.documents) {
-			items = appendCompletionItem(items, seen, item)
+	imports := directImportedPackages(path, text, s.documents)
+	context := completionContextAt(text, params.Position)
+	if context.member {
+		for _, pkg := range imports {
+			if pkg.name == context.packageName {
+				return completionListFromItems(packageMemberCompletionItems(pkg)), nil
+			}
 		}
-		return completionListFromItems(items), nil
+		return completionListFromItems(nil), nil
 	}
 
-	for _, item := range visibleLocalCompletionItems(file, tokenPositionFromLSP(params.Position)) {
+	items := baseCompletionItems()
+	seen := completionLabels(items)
+	graph := loadSourceGraph(path, text, s.documents)
+	file := graph.files[path]
+	if file != nil {
+		for _, item := range visibleLocalCompletionItems(file, tokenPositionFromLSP(params.Position)) {
+			items = appendCompletionItem(items, seen, item)
+		}
+		for _, item := range sameFileFunctionCompletionItems(file) {
+			items = appendCompletionItem(items, seen, item)
+		}
+	}
+	for _, item := range importedPackageCompletionItems(imports) {
 		items = appendCompletionItem(items, seen, item)
 	}
-	for _, item := range functionCompletionItems(graph, path) {
+	for _, item := range qualifiedImportedFunctionCompletionItems(imports) {
 		items = appendCompletionItem(items, seen, item)
 	}
 
@@ -269,6 +296,171 @@ func (s *Server) importPathAt(uri string, pos Position) (importPathReference, bo
 	return importPathReference{}, false, nil
 }
 
+func (s *Server) resolveImportPackageQualifier(uri string, pos Position) (LocationLink, bool, error) {
+	text, err := s.documentText(uri)
+	if err != nil {
+		return LocationLink{}, false, err
+	}
+
+	word, ok := wordAt(text, pos)
+	if !ok {
+		return LocationLink{}, false, nil
+	}
+
+	originRange := rangeForWord(text, pos)
+	if originRange == nil {
+		return LocationLink{}, false, nil
+	}
+
+	path := normalizePath(pathFromURI(uri))
+	graph := loadSourceGraph(path, text, s.documents)
+	file := graph.files[path]
+	if file == nil || !packageQualifierAt(file, word, tokenPositionFromLSP(pos)) {
+		return LocationLink{}, false, nil
+	}
+
+	importToken, ok := directImportTokenForPackage(file, graph, word)
+	if !ok {
+		return LocationLink{}, false, nil
+	}
+
+	targetRange := importPathRange(importToken)
+	return LocationLink{
+		OriginSelectionRange: originRange,
+		TargetURI:            file.uri,
+		TargetRange:          *targetRange,
+		TargetSelectionRange: *targetRange,
+	}, true, nil
+}
+
+func directImportTokenForPackage(file *sourceFile, graph *sourceGraph, packageName string) (token.Token, bool) {
+	for _, importDecl := range file.program.Imports {
+		if filepath.IsAbs(importDecl.Path) || filepath.Ext(importDecl.Path) != ".tx" {
+			continue
+		}
+
+		importPath := normalizePath(filepath.Join(filepath.Dir(file.path), importDecl.Path))
+		importedFile := graph.files[importPath]
+		if importedFile == nil || importedFile.program.PackageName != packageName {
+			continue
+		}
+
+		if importToken, ok := importPathTokenForDecl(file, importDecl); ok {
+			return importToken, true
+		}
+	}
+
+	return token.Token{}, false
+}
+
+func importPathTokenForDecl(file *sourceFile, importDecl *ast.ImportDecl) (token.Token, bool) {
+	tokens := lexer.LexFile(file.path, file.text)
+	for i := 0; i < len(tokens)-1; i++ {
+		if tokens[i].Type != token.Import || tokens[i+1].Type != token.String {
+			continue
+		}
+		if samePosition(tokens[i].Pos, importDecl.Pos) && tokens[i+1].Lexeme == importDecl.Path {
+			return tokens[i+1], true
+		}
+	}
+
+	return token.Token{}, false
+}
+
+func packageQualifierAt(file *sourceFile, packageName string, cursor token.Position) bool {
+	for _, fn := range file.program.Functions {
+		if packageQualifierInBlock(fn.Body, packageName, cursor) {
+			return true
+		}
+	}
+	return false
+}
+
+func packageQualifierInBlock(block ast.Block, packageName string, cursor token.Position) bool {
+	for _, stmt := range block.Statements {
+		switch stmt := stmt.(type) {
+		case *ast.LetStmt:
+			if packageQualifierInExpr(stmt.Value, packageName, cursor) {
+				return true
+			}
+		case *ast.ReturnStmt:
+			if packageQualifierInExpr(stmt.Value, packageName, cursor) {
+				return true
+			}
+		case *ast.AssignStmt:
+			if packageQualifierInExpr(stmt.Value, packageName, cursor) {
+				return true
+			}
+		case *ast.IndexAssignStmt:
+			if packageQualifierInExpr(stmt.Target, packageName, cursor) || packageQualifierInExpr(stmt.Value, packageName, cursor) {
+				return true
+			}
+		case *ast.IfStmt:
+			if packageQualifierInExpr(stmt.Condition, packageName, cursor) || packageQualifierInBlock(stmt.Then, packageName, cursor) {
+				return true
+			}
+			if stmt.Else != nil && packageQualifierInBlock(*stmt.Else, packageName, cursor) {
+				return true
+			}
+		case *ast.WhileStmt:
+			if packageQualifierInExpr(stmt.Condition, packageName, cursor) || packageQualifierInBlock(stmt.Body, packageName, cursor) {
+				return true
+			}
+		case *ast.ExprStmt:
+			if packageQualifierInExpr(stmt.Expr, packageName, cursor) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func packageQualifierInExpr(expr ast.Expression, packageName string, cursor token.Position) bool {
+	switch expr := expr.(type) {
+	case nil:
+		return false
+	case *ast.CallExpr:
+		if expr.Package == packageName && containsName(cursor, expr.Start, expr.Package) {
+			return true
+		}
+		for _, arg := range expr.Args {
+			if packageQualifierInExpr(arg, packageName, cursor) {
+				return true
+			}
+		}
+	case *ast.ArrayLiteral:
+		return packageQualifierInExprs(expr.Elements, packageName, cursor)
+	case *ast.ListLiteral:
+		return packageQualifierInExprs(expr.Elements, packageName, cursor)
+	case *ast.MakeExpr:
+		return packageQualifierInExpr(expr.Len, packageName, cursor)
+	case *ast.BinaryExpr:
+		return packageQualifierInExpr(expr.Left, packageName, cursor) || packageQualifierInExpr(expr.Right, packageName, cursor)
+	case *ast.IndexExpr:
+		return packageQualifierInExpr(expr.Collection, packageName, cursor) || packageQualifierInExpr(expr.Index, packageName, cursor)
+	case *ast.SliceExpr:
+		if packageQualifierInExpr(expr.Collection, packageName, cursor) {
+			return true
+		}
+		if expr.StartIndex != nil && packageQualifierInExpr(expr.StartIndex, packageName, cursor) {
+			return true
+		}
+		return expr.EndIndex != nil && packageQualifierInExpr(expr.EndIndex, packageName, cursor)
+	}
+
+	return false
+}
+
+func packageQualifierInExprs(exprs []ast.Expression, packageName string, cursor token.Position) bool {
+	for _, expr := range exprs {
+		if packageQualifierInExpr(expr, packageName, cursor) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) documentText(uri string) (string, error) {
 	text, ok := s.documents[uri]
 	if ok {
@@ -328,24 +520,6 @@ func visibleLocalsInBlock(block ast.Block, scope map[string]localDefinition, cur
 	}
 
 	return locals
-}
-
-func functionCompletionItems(graph *sourceGraph, activePath string) []CompletionItem {
-	items := []CompletionItem{}
-	for _, file := range graph.order {
-		includePrivate := file.path == activePath
-		for _, fn := range file.program.Functions {
-			if !includePrivate && !fn.Public {
-				continue
-			}
-			detail := "function"
-			if file.path != activePath {
-				detail = "imported function"
-			}
-			items = append(items, CompletionItem{Label: fn.Name, Kind: completionKindFunction, Detail: detail})
-		}
-	}
-	return items
 }
 
 func completionLabels(items []CompletionItem) map[string]struct{} {
@@ -468,56 +642,136 @@ func loadSourceGraph(activePath string, activeText string, documents map[string]
 	return graph
 }
 
-func importedFunctionCompletionItems(activePath string, activeText string, documents map[string]string) []CompletionItem {
+func directImportedPackages(activePath string, activeText string, documents map[string]string) []importedPackage {
 	openDocuments := map[string]string{}
 	for uri, text := range documents {
 		openDocuments[normalizePath(pathFromURI(uri))] = text
 	}
 
-	graph := &sourceGraph{files: map[string]*sourceFile{}}
-	var load func(path string)
-	load = func(path string) {
+	imports := []importedPackage{}
+	seenPaths := map[string]struct{}{}
+	seenPackages := map[string]struct{}{}
+	for _, path := range importPathsFromText(activePath, activeText) {
 		path = normalizePath(path)
-		if _, exists := graph.files[path]; exists {
-			return
+		if _, ok := seenPaths[path]; ok {
+			continue
 		}
+		seenPaths[path] = struct{}{}
 
 		text, ok := openDocuments[path]
 		if !ok {
 			data, err := os.ReadFile(path)
 			if err != nil {
-				return
+				continue
 			}
 			text = string(data)
 		}
 
 		program, err := parser.ParseFile(path, text)
 		if err != nil {
-			return
+			continue
 		}
 
+		if _, ok := seenPackages[program.PackageName]; ok {
+			continue
+		}
+		seenPackages[program.PackageName] = struct{}{}
 		file := &sourceFile{
 			path:    path,
 			uri:     uriFromPath(path),
 			text:    text,
 			program: program,
 		}
-		graph.files[path] = file
-		graph.order = append(graph.order, file)
+		imports = append(imports, importedPackage{name: program.PackageName, file: file})
+	}
 
-		for _, importDecl := range program.Imports {
-			if filepath.IsAbs(importDecl.Path) || filepath.Ext(importDecl.Path) != ".tx" {
+	return imports
+}
+
+func sameFileFunctionCompletionItems(file *sourceFile) []CompletionItem {
+	items := []CompletionItem{}
+	for _, fn := range file.program.Functions {
+		items = append(items, CompletionItem{Label: fn.Name, Kind: completionKindFunction, Detail: "function"})
+	}
+	return items
+}
+
+func importedPackageCompletionItems(imports []importedPackage) []CompletionItem {
+	items := make([]CompletionItem, 0, len(imports))
+	for _, pkg := range imports {
+		items = append(items, CompletionItem{Label: pkg.name, Kind: completionKindModule, Detail: "imported package"})
+	}
+	return items
+}
+
+func qualifiedImportedFunctionCompletionItems(imports []importedPackage) []CompletionItem {
+	items := []CompletionItem{}
+	for _, pkg := range imports {
+		for _, fn := range pkg.file.program.Functions {
+			if !fn.Public {
 				continue
 			}
-			load(filepath.Join(filepath.Dir(path), importDecl.Path))
+			label := pkg.name + "." + fn.Name
+			items = append(items, CompletionItem{
+				Label:      label,
+				Kind:       completionKindFunction,
+				Detail:     "imported function",
+				InsertText: label,
+				FilterText: label + " " + fn.Name,
+			})
 		}
 	}
+	return items
+}
 
-	for _, importPath := range importPathsFromText(activePath, activeText) {
-		load(importPath)
+func packageMemberCompletionItems(pkg importedPackage) []CompletionItem {
+	items := []CompletionItem{}
+	for _, fn := range pkg.file.program.Functions {
+		if !fn.Public {
+			continue
+		}
+		items = append(items, CompletionItem{
+			Label:      fn.Name,
+			Kind:       completionKindFunction,
+			Detail:     "function from " + pkg.name,
+			InsertText: fn.Name,
+		})
+	}
+	return items
+}
+
+func completionContextAt(text string, pos Position) completionContext {
+	lines := strings.Split(text, "\n")
+	if pos.Line < 0 || pos.Line >= len(lines) {
+		return completionContext{}
 	}
 
-	return functionCompletionItems(graph, activePath)
+	line := []rune(lines[pos.Line])
+	if pos.Character < 0 || pos.Character > len(line) {
+		return completionContext{}
+	}
+
+	prefixStart := pos.Character
+	for prefixStart > 0 && isWordRune(line[prefixStart-1]) {
+		prefixStart--
+	}
+	if prefixStart == 0 || line[prefixStart-1] != '.' {
+		return completionContext{}
+	}
+
+	qualifierEnd := prefixStart - 1
+	qualifierStart := qualifierEnd
+	for qualifierStart > 0 && isWordRune(line[qualifierStart-1]) {
+		qualifierStart--
+	}
+	if qualifierStart == qualifierEnd {
+		return completionContext{}
+	}
+
+	return completionContext{
+		member:      true,
+		packageName: string(line[qualifierStart:qualifierEnd]),
+	}
 }
 
 func importPathsFromText(activePath string, text string) []string {

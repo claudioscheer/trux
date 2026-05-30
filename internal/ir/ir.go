@@ -558,7 +558,7 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		}
 		sig, ok := b.info.ResolvedCalls[expr]
 		if !ok {
-			return nil, fmt.Errorf("missing resolved call for %q", expr.Callee)
+			return nil, fmt.Errorf("missing resolved call for %q", expr.SourceName())
 		}
 		args, err := b.buildExprs(expr.Args)
 		if err != nil {

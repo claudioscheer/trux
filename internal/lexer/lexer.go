@@ -96,6 +96,9 @@ func (l *Lexer) NextToken() token.Token {
 	case ':':
 		l.advance()
 		return token.Token{Type: token.Colon, Lexeme: ":", Pos: pos}
+	case '.':
+		l.advance()
+		return token.Token{Type: token.Dot, Lexeme: ".", Pos: pos}
 	case '(':
 		l.advance()
 		return token.Token{Type: token.LParen, Lexeme: "(", Pos: pos}

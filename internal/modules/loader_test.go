@@ -17,9 +17,9 @@ import "math.tx"
 import "./math.tx"
 
 func main() int {
-    return add(1, 2)
+    return math.add(1, 2)
 }`)
-	writeSource(t, dir, "math.tx", `package main
+	writeSource(t, dir, "math.tx", `package math
 pub func add(a int, b int) int {
     return a + b
 }`)
@@ -46,9 +46,9 @@ func TestLoadAllowsDifferentPackageNames(t *testing.T) {
 import "math.tx"
 
 func main() int {
-    return add(1, 2)
+    return calc.add(1, 2)
 }`)
-	writeSource(t, dir, "math.tx", `package math
+	writeSource(t, dir, "math.tx", `package calc
 pub func add(a int, b int) int {
     return a + b
 }`)
@@ -165,9 +165,9 @@ import "a.tx"
 import "b.tx"
 
 func main() int {
-    return a() + b()
+    return alpha.a() + beta.b()
 }`)
-	writeSource(t, dir, "a.tx", `package main
+	writeSource(t, dir, "a.tx", `package alpha
 func value() int {
     return 1
 }
@@ -175,7 +175,7 @@ func value() int {
 pub func a() int {
     return value()
 }`)
-	writeSource(t, dir, "b.tx", `package main
+	writeSource(t, dir, "b.tx", `package beta
 func value() int {
     return 2
 }
@@ -197,7 +197,34 @@ pub func b() int {
 	}
 }
 
-func TestLoadRejectsDuplicatePublicFunctions(t *testing.T) {
+func TestLoadAllowsSameNamedPublicFunctionsInDifferentPackages(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "a.tx"
+import "b.tx"
+
+func main() int {
+    return alpha.value() + beta.value()
+}`)
+	writeSource(t, dir, "a.tx", `package alpha
+pub func value() int {
+    return 1
+}`)
+	writeSource(t, dir, "b.tx", `package beta
+pub func value() int {
+    return 2
+}`)
+
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := semtypes.Check(result.Program); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadRejectsDuplicateDirectPackageNames(t *testing.T) {
 	dir := t.TempDir()
 	writeSource(t, dir, "main.tx", `package main
 import "a.tx"
@@ -206,12 +233,12 @@ import "b.tx"
 func main() int {
     return 0
 }`)
-	writeSource(t, dir, "a.tx", `package main
-pub func value() int {
+	writeSource(t, dir, "a.tx", `package util
+pub func a() int {
     return 1
 }`)
-	writeSource(t, dir, "b.tx", `package main
-pub func value() int {
+	writeSource(t, dir, "b.tx", `package util
+pub func b() int {
     return 2
 }`)
 
@@ -219,8 +246,7 @@ pub func value() int {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	assertErrorContains(t, err, `duplicate public function "value"`)
-	assertErrorContains(t, err, filepath.Join(dir, "a.tx"))
+	assertErrorContains(t, err, `package "util" imported from both`)
 }
 
 func TestLoadRejectsReservedFunctionPrefixAndImportedMain(t *testing.T) {
@@ -283,9 +309,9 @@ func TestLoadRejectsCallsToOtherFilePrivateFunction(t *testing.T) {
 import "lib.tx"
 
 func main() int {
-    return secret()
+    return lib.secret()
 }`)
-	writeSource(t, dir, "lib.tx", `package main
+	writeSource(t, dir, "lib.tx", `package lib
 func secret() int {
     return 42
 }`)
@@ -294,7 +320,7 @@ func secret() int {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	assertErrorContains(t, err, `cannot call private function "secret"`)
+	assertErrorContains(t, err, `cannot call private function "lib.secret"`)
 	assertErrorContains(t, err, filepath.Join(dir, "lib.tx"))
 }
 
@@ -304,15 +330,15 @@ func TestLoadResolvesTransitivePublicFunctions(t *testing.T) {
 import "a.tx"
 
 func main() int {
-    return b()
+    return a.a()
 }`)
-	writeSource(t, dir, "a.tx", `package main
+	writeSource(t, dir, "a.tx", `package a
 import "b.tx"
 
 pub func a() int {
-    return b()
+    return b.b()
 }`)
-	writeSource(t, dir, "b.tx", `package main
+	writeSource(t, dir, "b.tx", `package b
 pub func b() int {
     return 7
 }`)
@@ -324,6 +350,52 @@ pub func b() int {
 	if _, err := semtypes.Check(result.Program); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestLoadRejectsTransitivePackageCallsWithoutDirectImport(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "a.tx"
+
+func main() int {
+    return b.b()
+}`)
+	writeSource(t, dir, "a.tx", `package a
+import "b.tx"
+
+pub func a() int {
+    return b.b()
+}`)
+	writeSource(t, dir, "b.tx", `package b
+pub func b() int {
+    return 7
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, `package "b" is not imported`)
+}
+
+func TestLoadRejectsUnqualifiedImportedPublicFunction(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "math.tx"
+
+func main() int {
+    return add(1, 2)
+}`)
+	writeSource(t, dir, "math.tx", `package math
+pub func add(a int, b int) int {
+    return a + b
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, `imported function "add" must be called as "math.add"`)
 }
 
 func TestLoadResolvesSameFilePrivateBeforeLoadedPublic(t *testing.T) {
@@ -338,7 +410,7 @@ func value() int {
 func main() int {
     return value()
 }`)
-	writeSource(t, dir, "lib.tx", `package main
+	writeSource(t, dir, "lib.tx", `package lib
 pub func value() int {
     return 2
 }`)
@@ -352,8 +424,8 @@ pub func value() int {
 	}
 
 	call := findMainReturnCall(t, result.Program)
-	if !strings.HasPrefix(call.Callee, "__trux_mod_0_value") {
-		t.Fatalf("callee = %q, want entry private function rewrite", call.Callee)
+	if !strings.HasPrefix(call.ResolvedCallee, "__trux_mod_0_value") {
+		t.Fatalf("resolved callee = %q, want entry private function rewrite", call.ResolvedCallee)
 	}
 }
 

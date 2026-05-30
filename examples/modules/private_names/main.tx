@@ -3,6 +3,6 @@ import "alpha.tx"
 import "beta.tx"
 
 func main() int {
-    print(alpha(), " ", beta())
+    print(alpha.alpha(), " ", beta.beta())
     return 0
 }

@@ -97,11 +97,14 @@ func TestPrintIsIdentifier(t *testing.T) {
 }
 
 func TestLexesImportAndPubTokens(t *testing.T) {
-	assertTokens(t, Lex(`import "math.tx" pub func add`), []expectedToken{
+	assertTokens(t, Lex(`import "math.tx" pub func add math.add`), []expectedToken{
 		{token.Import, "import"},
 		{token.String, "math.tx"},
 		{token.Pub, "pub"},
 		{token.Func, "func"},
+		{token.Ident, "add"},
+		{token.Ident, "math"},
+		{token.Dot, "."},
 		{token.Ident, "add"},
 		{token.EOF, ""},
 	})

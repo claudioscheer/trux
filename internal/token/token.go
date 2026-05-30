@@ -43,6 +43,7 @@ const (
 
 	Comma Type = ","
 	Colon Type = ":"
+	Dot   Type = "."
 
 	LParen   Type = "("
 	RParen   Type = ")"

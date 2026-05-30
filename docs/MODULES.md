@@ -4,7 +4,7 @@
 
 Trux now has initial module support. Programs can load multiple `.tx` source files through relative imports, while the backend still compiles the loaded program into a single generated `.c` file.
 
-The implemented stage supports `import "relative/path.tx"`, `pub func`, private file-local functions, private-name hygiene, transitive public function visibility, import de-duplication, different package names per loaded file, and cycle detection. Qualified names, directory-based packages, reusable package artifacts, and separate C compilation are still deferred.
+The implemented stage supports `import "relative/path.tx"`, `pub func`, package-qualified calls such as `math.add(...)`, private file-local functions, private-name hygiene, import de-duplication, different package names per loaded file, and cycle detection. Directory-based packages, standard-library imports, reusable package artifacts, and separate C compilation are still deferred.
 
 ## Generated C Code and Modules
 
@@ -34,7 +34,7 @@ A proper module system will eventually require the C backend to emit multiple `.
 
 | Stage | Module Support | Generated C Output | Recommendation |
 |-------|----------------|--------------------|----------------|
-| Current / initial modules | Multiple `.tx` source files through relative imports (`import "foo.tx"`) + `pub` visibility. Private functions are file-local and may share names across files. Single flat namespace for public names. Cycle detection. | Single `.c` file (via loader + private name hygiene merge into existing pipeline) | Keep for simplicity. Preserves the existing type checker, IR, and codegen with minimal changes. |
+| Current / initial modules | Multiple `.tx` source files through relative imports (`import "foo.tx"`) + package-qualified `pub` visibility. Private functions are file-local and may share names across files. Public names may overlap across packages. Cycle detection. | Single `.c` file (via loader + private name hygiene merge into existing pipeline) | Keep for simplicity. Preserves the existing type checker, IR, and codegen with minimal changes. |
 | Real modules | Module-aware compilation, proper boundaries | One `.c` file per module plus runtime files | Switch here |
 | Full package system | Package exports and reusable artifacts | Proper multi-file output with headers | Required |
 
@@ -45,20 +45,21 @@ The first cut of module support uses the following concrete design:
 - **Source model**: Multiple `.tx` source files are supported, but the backend still emits exactly one `.c` file for the whole loaded program.
 - **Import syntax**: `import "relative/path/to/mod.tx"`. Paths are resolved relative to the directory of the file containing the `import` statement. The `.tx` extension is required and explicit.
 - **Import placement**: Imports are top-level declarations after `package` and before any `func` declarations. Grouped imports and imports inside functions are not part of the initial implementation.
-- **Visibility**: `pub func` makes a function visible to importers (Go-style). Functions without `pub` are private to their declaring source file.
+- **Visibility**: `pub func` makes a function visible to direct importers through `package.function(...)`. Functions without `pub` are private to their declaring source file.
 - **Name rules**:
   - No two functions in the same file may share the same source name.
-  - Public function names must be unique across the entire program.
+  - Public function names may overlap across packages because imported calls are package-qualified.
+  - A file may not directly import two different files that declare the same package name.
   - Private functions may have the same name in different files (they are file-local).
 - **Implementation technique**: A loader parses the entry file and all transitive imports, detects cycles, and performs a small hygiene/merge pass. Private functions receive compiler-unique internal names only for the duration of type checking and code generation. The result is a single flat `Program` fed to the existing type checker, IR builder, and code generator. This keeps changes to the existing type checker and codegen small.
 - **Output**: Still one concatenated `.c` file containing the runtime plus all functions from all modules.
 - **Error reporting**: Parse and type errors carry the originating file path so diagnostics from imported modules are clear.
-- **Package clause**: Currently decorative (still required by the parser for compatibility). Loaded files may use different package names. The entry file's package name is kept on the merged `Program`, but package names are not used for resolution or qualification in this stage.
+- **Package clause**: Loaded files may use different package names. An imported file's package name is the qualifier used by direct importers.
 - **Entrypoint**: Exactly one `main` function is allowed, and it must be declared in the entry file. It is the compiler entrypoint, not a module export. Imported files must not define `main`.
 
 This approach deliberately stays inside the "controlled change, not a rewrite" constraint. The existing single-file `Parse` → `Check` → `ir.Build` → `Generate` pipeline continues to work for both single-file programs and the merged multi-file case.
 
-Qualified names (e.g. `math.add`), directory-based packages, and separate C compilation are deferred to later stages.
+Directory-based packages, standard-library imports, and separate C compilation are deferred to later stages.
 
 ## Loader and Import Rules
 
@@ -83,9 +84,10 @@ Concrete loader rules:
 - A source file is loaded at most once, even if reached through multiple import paths such as `foo.tx` and `./foo.tx`.
 - Import cycles are reported with the import chain, including file paths.
 - Missing imports, directories, and non-`.tx` paths are compile errors.
-- Public functions from all transitively loaded files live in one flat public namespace for this initial stage.
+- Public functions from directly imported files are visible only through `package.function(...)`.
+- Transitive imports are loaded for dependencies, but they do not introduce callable package qualifiers into the importing file.
 
-This treats imports closer to controlled source inclusion than to real package namespaces. The tradeoff is intentional: it avoids module-aware type checking while still allowing multi-file programs. The cost is that public names are globally visible once loaded, so this is not the final package model.
+This still treats imports closer to controlled source inclusion than to reusable package artifacts. The tradeoff is intentional: it avoids separate module compilation while still giving source code a real package-qualified call surface.
 
 ## Visibility and Name Hygiene
 
@@ -94,12 +96,12 @@ The merged program must not depend on C-level collisions or checker-level duplic
 Rules:
 
 - Reserve a compiler-internal prefix, such as `__trux_`, for generated names. User function names beginning with that prefix are rejected.
-- Public functions keep their source name in the merged `Program`.
-- Private functions, except the entry file's `main`, are rewritten to compiler-unique internal names before type checking.
+- Public and private functions, except the entry file's `main`, are rewritten to compiler-unique internal names before type checking when multiple files are loaded.
 - Calls to a same-file private function are rewritten to that function's internal name.
-- Calls to public functions keep the public source name.
-- If a file has a private function with the same name as a loaded public function, calls from that file resolve to the same-file private function. There is no syntax yet to call the hidden public function from that file.
-- Calls to another file's private function are rejected because the private function name is never exposed in the merged public namespace.
+- Calls to same-file functions stay unqualified in source and are rewritten to the same-file internal name.
+- Calls to imported public functions must use the direct import package qualifier, such as `math.add(...)`.
+- If a file has a private function with the same name as an imported public function, unqualified calls from that file resolve to the same-file private function. The imported public function remains callable through `package.function(...)`.
+- Calls to another file's private function are rejected, including qualified calls through that file's package.
 
 The private-name rewrite is a temporary compatibility layer for the current flat checker and code generator. Real module boundaries should replace this with explicit name resolution later.
 
@@ -135,16 +137,18 @@ Before treating module support as complete, add focused tests for:
 - Lexing and parsing `import` and `pub func`.
 - Rejecting imports after function declarations.
 - Resolving relative imports from the importing file's directory.
-- Allowing imported files to use package names that differ from the entry file.
+- Using imported package names as call qualifiers, even when the file name differs.
 - De-duplicating the same file reached through different relative paths.
 - Detecting import cycles with a useful chain.
 - Rejecting missing imports, absolute imports, and non-`.tx` imports.
 - Allowing same-named private functions in different files.
-- Rejecting duplicate public function names across loaded files.
+- Allowing duplicate public function names across different packages.
+- Rejecting duplicate direct import package names.
 - Rejecting user function names that use the reserved compiler-internal prefix.
 - Rewriting same-file private calls to internal names.
 - Rejecting calls to another file's private function.
-- Resolving public functions from transitively loaded imports according to the initial flat public namespace rule.
+- Rejecting unqualified calls to imported public functions.
+- Rejecting qualified calls to transitively imported packages unless the calling file imports that package directly.
 - Resolving a same-file private function before a loaded public function with the same source name.
 - Keeping the entry file's `main` as the generated program entrypoint.
 - Rejecting `main` in imported files.
@@ -167,7 +171,7 @@ Even while staying single-file, the code generator should:
 
 - **Runtime separation**: The runtime should eventually live in its own `.c`/`.h` pair rather than being inlined into every generated program.
 - **Module boundaries (initial cut)**: For the first implementation, each `.tx` file is a module. Private name hygiene lets us support per-file privacy without changing the flat checker/codegen. Real per-module C files come later.
-- **Public vs private**: `pub func` controls cross-file visibility. Private functions are file-local. The initial implementation uses compiler-internal renaming for private functions to avoid name clashes while keeping a single flat namespace for public names.
+- **Public vs private**: `pub func` controls cross-file visibility through direct package-qualified calls. Private functions are file-local. The initial implementation uses compiler-internal renaming to avoid name clashes while preserving one merged compiler pipeline.
 - **Build model**: The `trux` driver will eventually need to coordinate compilation and linking of multiple generated C files. In the initial modules stage the driver grows a relative-import loader and hygiene pass but still emits one `.c`.
 - **Error provenance**: Parse and type errors must carry originating file paths (not just line/column) so diagnostics from imported modules are actionable.
 

@@ -37,13 +37,13 @@ The compiler currently supports:
 - array and list literals, `make([]T, n)`, `len(x)`, indexing, slicing, list `append`, and indexed assignment
 - explicit `clone(x)` for owned copies of strings, arrays, slices, and lists
 - relative module imports with `import "path/to/file.tx"` across files that may declare different package names
-- `pub func` exports, file-local private functions, transitive public function visibility, and import-cycle detection
+- `pub func` exports called as `package.function(...)`, file-local private functions, and import-cycle detection
 - typed IR
 - C code generation and execution through `cc` or `$CC`
 - `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
 - stdin, file, and CSV IO through builtins
 
-Nested collections, qualified module names, directory-based packages, separate module compilation, reusable package artifacts, and GPU kernels are not implemented.
+Directory-based packages, separate module compilation, reusable package artifacts, and GPU kernels are not implemented.
 
 ## Building
 

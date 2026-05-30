@@ -477,8 +477,18 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 		return &ast.BoolLiteral{Start: tok.Pos, Value: false}, nil
 	case p.check(token.Ident):
 		ident := p.advance()
+		packageName := ""
+		callee := ident.Lexeme
+		if p.match(token.Dot) {
+			member, err := p.expect(token.Ident)
+			if err != nil {
+				return nil, err
+			}
+			packageName = ident.Lexeme
+			callee = member.Lexeme
+		}
 		if p.match(token.LParen) {
-			if ident.Lexeme == "make" {
+			if packageName == "" && callee == "make" {
 				return p.parseMakeExpr(ident)
 			}
 
@@ -491,7 +501,10 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 				return nil, err
 			}
 
-			return &ast.CallExpr{Start: ident.Pos, Callee: ident.Lexeme, Args: args}, nil
+			return &ast.CallExpr{Start: ident.Pos, Package: packageName, Callee: callee, Args: args}, nil
+		}
+		if packageName != "" {
+			return nil, p.errorf(p.current(), "expected %q, got %s", string(token.LParen), describe(p.current()))
 		}
 
 		return &ast.IdentExpr{Start: ident.Pos, Name: ident.Lexeme}, nil
@@ -673,7 +686,7 @@ func isLiteralToken(typ token.Type) bool {
 	switch typ {
 	case token.Assign, token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
 		token.Plus, token.Minus, token.Asterisk, token.Slash,
-		token.Comma, token.Colon, token.LParen, token.RParen, token.LBrace, token.RBrace, token.LBracket, token.RBracket:
+		token.Comma, token.Colon, token.Dot, token.LParen, token.RParen, token.LBrace, token.RBrace, token.LBracket, token.RBracket:
 		return true
 	default:
 		return false

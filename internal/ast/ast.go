@@ -271,14 +271,32 @@ func (e *MakeExpr) Pos() token.Position { return e.Start }
 func (*MakeExpr) expressionNode() {}
 
 type CallExpr struct {
-	Start  token.Position
-	Callee string
-	Args   []Expression
+	Start          token.Position
+	Package        string
+	Callee         string
+	ResolvedCallee string
+	Args           []Expression
 }
 
 func (e *CallExpr) Pos() token.Position { return e.Start }
 
 func (*CallExpr) expressionNode() {}
+
+func (e *CallExpr) SourceName() string {
+	if e.Package == "" {
+		return e.Callee
+	}
+
+	return e.Package + "." + e.Callee
+}
+
+func (e *CallExpr) TargetName() string {
+	if e.ResolvedCallee != "" {
+		return e.ResolvedCallee
+	}
+
+	return e.Callee
+}
 
 type BinaryExpr struct {
 	Start    token.Position

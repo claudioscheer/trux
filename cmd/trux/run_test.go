@@ -337,7 +337,7 @@ import "math.tx"
 import "words.tx"
 
 func main() int {
-    print(label(), " ", add(2, 5))
+    print(words.label(), " ", math.add(2, 5))
     return 0
 }`)
 	writeTempFile(t, dir, "math.tx", `package math
@@ -496,9 +496,9 @@ func TestRunFileReturnsImportedTypeErrorWithImportedSourceContext(t *testing.T) 
 import "lib.tx"
 
 func main() int {
-    return bad()
+    return lib.bad()
 }`)
-	libPath := writeTempFile(t, dir, "lib.tx", `package main
+	libPath := writeTempFile(t, dir, "lib.tx", `package lib
 pub func bad() int {
     return "wrong"
 }`)
@@ -514,7 +514,7 @@ pub func bad() int {
 
 	wantParts := []string{
 		libPath + ":3:12: cannot return string from function returning int",
-		"1 | package main",
+		"1 | package lib",
 		"2 | pub func bad() int {",
 		"3 |     return \"wrong\"",
 		"  |            ^",
@@ -782,7 +782,7 @@ func TestEmitCFileSupportsModuleProgram(t *testing.T) {
 import "math.tx"
 
 func main() int {
-    return add(1, 2)
+    return math.add(1, 2)
 }`)
 	writeTempFile(t, dir, "math.tx", `package math
 pub func add(a int, b int) int {
@@ -794,7 +794,7 @@ pub func add(a int, b int) int {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(result.CSource, "int64_t trux_add(") {
+	if !strings.Contains(result.CSource, "int64_t trux___trux_mod_1_add(") {
 		t.Fatalf("generated C = %q, want module function add", result.CSource)
 	}
 	if !strings.Contains(result.CSource, "int main(void)") {

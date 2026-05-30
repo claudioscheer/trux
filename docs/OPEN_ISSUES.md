@@ -52,6 +52,6 @@ func main() int {
 }
 ```
 
-This should be a real package boundary, not only a cosmetic alias. Today, module support uses relative `.tx` imports, public functions, and a flat merged namespace; package names are still decorative and qualified names are deferred. Moving I/O behind `import "io"` therefore depends on the package model growing enough to support standard-library imports and qualified package member resolution.
+This should be a real package boundary, not only a cosmetic alias. Module support now uses relative `.tx` imports and qualified package member resolution for source files, but `import "io"` still needs standard-library package resolution and a decision about how low-level runtime-backed operations are exposed behind that package facade.
 
-Tradeoff: keeping I/O as builtins is simple and matches the current lowering path for `print`, `len`, `clone`, and `append`. Moving I/O into an imported package makes side-effectful capabilities explicit and keeps the global namespace smaller, but it requires standard-library package resolution, qualified names, and a decision about whether low-level runtime-backed operations can be implemented as ordinary package functions or need privileged compiler lowering behind the package facade.
+Tradeoff: keeping I/O as builtins is simple and matches the current lowering path for `print`, `len`, `clone`, and `append`. Moving I/O into an imported package makes side-effectful capabilities explicit and keeps the global namespace smaller, but it requires standard-library package resolution and a decision about whether low-level runtime-backed operations can be implemented as ordinary package functions or need privileged compiler lowering behind the package facade.

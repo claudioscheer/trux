@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/claudioscheer/trux/internal/ast"
@@ -38,6 +39,26 @@ type fileUnit struct {
 	source  string
 	program *ast.Program
 	index   int
+	imports []importRef
+}
+
+type importRef struct {
+	decl *ast.ImportDecl
+	unit *fileUnit
+}
+
+type functionInfo struct {
+	unit         *fileUnit
+	decl         *ast.FuncDecl
+	internalName string
+	public       bool
+}
+
+type resolutionContext struct {
+	funcs         map[*fileUnit]map[string]*functionInfo
+	directImports map[*fileUnit]map[string]importRef
+	privateDecls  map[string][]*functionInfo
+	publicDecls   map[string][]*functionInfo
 }
 
 type loader struct {
@@ -138,9 +159,11 @@ func (l *loader) loadFile(path string, importPos token.Position, stack []string)
 		if err != nil {
 			return nil, err
 		}
-		if _, err := l.loadFile(importPath, importDecl.Pos, stack); err != nil {
+		imported, err := l.loadFile(importPath, importDecl.Pos, stack)
+		if err != nil {
 			return nil, err
 		}
+		unit.imports = append(unit.imports, importRef{decl: importDecl, unit: imported})
 	}
 
 	return unit, nil
@@ -175,13 +198,17 @@ func (l *loader) resolveImport(unit *fileUnit, importDecl *ast.ImportDecl) (stri
 }
 
 func (l *loader) validateAndMerge(entry *fileUnit) error {
-	publicFuncs := map[string]*ast.FuncDecl{}
-	privateDecls := map[string][]*ast.FuncDecl{}
-	privateNames := map[*fileUnit]map[string]string{}
+	needsHygiene := len(l.order) > 1
+	ctx := resolutionContext{
+		funcs:         map[*fileUnit]map[string]*functionInfo{},
+		directImports: map[*fileUnit]map[string]importRef{},
+		privateDecls:  map[string][]*functionInfo{},
+		publicDecls:   map[string][]*functionInfo{},
+	}
 
 	for _, unit := range l.order {
 		seenInFile := map[string]*ast.FuncDecl{}
-		privateNames[unit] = map[string]string{}
+		ctx.funcs[unit] = map[string]*functionInfo{}
 
 		for _, fn := range unit.program.Functions {
 			if strings.HasPrefix(fn.Name, internalPrefix) {
@@ -199,39 +226,54 @@ func (l *loader) validateAndMerge(entry *fileUnit) error {
 				if fn.Public {
 					return l.errorInUnit(unit, fn.Pos, "main cannot be public")
 				}
-				continue
 			}
 
+			internalName := fn.Name
+			if needsHygiene && fn.Name != "main" {
+				internalName = fmt.Sprintf("%smod_%d_%s", internalPrefix, unit.index, fn.Name)
+			}
+			info := &functionInfo{
+				unit:         unit,
+				decl:         fn,
+				internalName: internalName,
+				public:       fn.Public,
+			}
+			ctx.funcs[unit][fn.Name] = info
+
+			if fn.Name == "main" {
+				continue
+			}
 			if fn.Public {
-				if previous := publicFuncs[fn.Name]; previous != nil {
-					return l.errorInUnit(unit, fn.Pos, "duplicate public function %q; first declared in %s", fn.Name, previous.Pos.File)
-				}
-				publicFuncs[fn.Name] = fn
+				ctx.publicDecls[fn.Name] = append(ctx.publicDecls[fn.Name], info)
 				continue
 			}
 
-			privateDecls[fn.Name] = append(privateDecls[fn.Name], fn)
-			privateNames[unit][fn.Name] = fmt.Sprintf("%smod_%d_%s", internalPrefix, unit.index, fn.Name)
+			ctx.privateDecls[fn.Name] = append(ctx.privateDecls[fn.Name], info)
 		}
 	}
 
-	publicNames := map[string]struct{}{}
-	for name := range publicFuncs {
-		publicNames[name] = struct{}{}
-	}
-
-	needsHygiene := len(l.order) > 1
-	if !needsHygiene {
-		return nil
+	for _, unit := range l.order {
+		direct := map[string]importRef{}
+		for _, ref := range unit.imports {
+			packageName := ref.unit.program.PackageName
+			if existing, ok := direct[packageName]; ok {
+				if existing.unit.path == ref.unit.path {
+					continue
+				}
+				return l.errorInUnit(unit, ref.decl.Pos, "package %q imported from both %s and %s", packageName, existing.unit.path, ref.unit.path)
+			}
+			direct[packageName] = ref
+		}
+		ctx.directImports[unit] = direct
 	}
 
 	for _, unit := range l.order {
 		for _, fn := range unit.program.Functions {
-			if err := l.rewriteCalls(unit, fn.Body.Statements, privateNames[unit], publicNames, privateDecls); err != nil {
+			if err := l.rewriteCalls(unit, fn.Body.Statements, ctx); err != nil {
 				return err
 			}
-			if internal, ok := privateNames[unit][fn.Name]; ok {
-				fn.Name = internal
+			if info := ctx.funcs[unit][fn.Name]; info != nil && info.internalName != fn.Name {
+				fn.Name = info.internalName
 			}
 		}
 	}
@@ -239,111 +281,154 @@ func (l *loader) validateAndMerge(entry *fileUnit) error {
 	return nil
 }
 
-func (l *loader) rewriteCalls(unit *fileUnit, statements []ast.Statement, privateNames map[string]string, publicNames map[string]struct{}, privateDecls map[string][]*ast.FuncDecl) error {
+func (l *loader) rewriteCalls(unit *fileUnit, statements []ast.Statement, ctx resolutionContext) error {
 	for _, stmt := range statements {
-		if err := l.rewriteStmtCalls(unit, stmt, privateNames, publicNames, privateDecls); err != nil {
+		if err := l.rewriteStmtCalls(unit, stmt, ctx); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (l *loader) rewriteStmtCalls(unit *fileUnit, stmt ast.Statement, privateNames map[string]string, publicNames map[string]struct{}, privateDecls map[string][]*ast.FuncDecl) error {
+func (l *loader) rewriteStmtCalls(unit *fileUnit, stmt ast.Statement, ctx resolutionContext) error {
 	switch stmt := stmt.(type) {
 	case *ast.LetStmt:
-		return l.rewriteExprCalls(unit, stmt.Value, privateNames, publicNames, privateDecls)
+		return l.rewriteExprCalls(unit, stmt.Value, ctx)
 	case *ast.ReturnStmt:
-		return l.rewriteExprCalls(unit, stmt.Value, privateNames, publicNames, privateDecls)
+		return l.rewriteExprCalls(unit, stmt.Value, ctx)
 	case *ast.AssignStmt:
-		return l.rewriteExprCalls(unit, stmt.Value, privateNames, publicNames, privateDecls)
+		return l.rewriteExprCalls(unit, stmt.Value, ctx)
 	case *ast.IndexAssignStmt:
-		if err := l.rewriteExprCalls(unit, stmt.Target, privateNames, publicNames, privateDecls); err != nil {
+		if err := l.rewriteExprCalls(unit, stmt.Target, ctx); err != nil {
 			return err
 		}
-		return l.rewriteExprCalls(unit, stmt.Value, privateNames, publicNames, privateDecls)
+		return l.rewriteExprCalls(unit, stmt.Value, ctx)
 	case *ast.IfStmt:
-		if err := l.rewriteExprCalls(unit, stmt.Condition, privateNames, publicNames, privateDecls); err != nil {
+		if err := l.rewriteExprCalls(unit, stmt.Condition, ctx); err != nil {
 			return err
 		}
-		if err := l.rewriteCalls(unit, stmt.Then.Statements, privateNames, publicNames, privateDecls); err != nil {
+		if err := l.rewriteCalls(unit, stmt.Then.Statements, ctx); err != nil {
 			return err
 		}
 		if stmt.Else != nil {
-			return l.rewriteCalls(unit, stmt.Else.Statements, privateNames, publicNames, privateDecls)
+			return l.rewriteCalls(unit, stmt.Else.Statements, ctx)
 		}
 	case *ast.WhileStmt:
-		if err := l.rewriteExprCalls(unit, stmt.Condition, privateNames, publicNames, privateDecls); err != nil {
+		if err := l.rewriteExprCalls(unit, stmt.Condition, ctx); err != nil {
 			return err
 		}
-		return l.rewriteCalls(unit, stmt.Body.Statements, privateNames, publicNames, privateDecls)
+		return l.rewriteCalls(unit, stmt.Body.Statements, ctx)
 	case *ast.ExprStmt:
-		return l.rewriteExprCalls(unit, stmt.Expr, privateNames, publicNames, privateDecls)
+		return l.rewriteExprCalls(unit, stmt.Expr, ctx)
 	}
 
 	return nil
 }
 
-func (l *loader) rewriteExprCalls(unit *fileUnit, expr ast.Expression, privateNames map[string]string, publicNames map[string]struct{}, privateDecls map[string][]*ast.FuncDecl) error {
+func (l *loader) rewriteExprCalls(unit *fileUnit, expr ast.Expression, ctx resolutionContext) error {
 	switch expr := expr.(type) {
 	case *ast.ArrayLiteral:
-		return l.rewriteExprList(unit, expr.Elements, privateNames, publicNames, privateDecls)
+		return l.rewriteExprList(unit, expr.Elements, ctx)
 	case *ast.ListLiteral:
-		return l.rewriteExprList(unit, expr.Elements, privateNames, publicNames, privateDecls)
+		return l.rewriteExprList(unit, expr.Elements, ctx)
 	case *ast.MakeExpr:
-		return l.rewriteExprCalls(unit, expr.Len, privateNames, publicNames, privateDecls)
+		return l.rewriteExprCalls(unit, expr.Len, ctx)
 	case *ast.CallExpr:
 		for _, arg := range expr.Args {
-			if err := l.rewriteExprCalls(unit, arg, privateNames, publicNames, privateDecls); err != nil {
+			if err := l.rewriteExprCalls(unit, arg, ctx); err != nil {
 				return err
 			}
+		}
+		if expr.Package != "" {
+			return l.resolveQualifiedCall(unit, expr, ctx)
 		}
 		if isBuiltin(expr.Callee) {
 			return nil
 		}
-		if internal, ok := privateNames[expr.Callee]; ok {
-			expr.Callee = internal
+		if info := ctx.funcs[unit][expr.Callee]; info != nil {
+			expr.ResolvedCallee = info.internalName
 			return nil
 		}
-		if _, ok := publicNames[expr.Callee]; ok {
-			return nil
+		if packageName, ok := l.directExportingPackage(unit, expr.Callee, ctx); ok {
+			return l.errorInUnit(unit, expr.Start, "imported function %q must be called as %q", expr.Callee, packageName+"."+expr.Callee)
 		}
-		if private := privateDecls[expr.Callee]; len(private) > 0 {
-			return l.errorInUnit(unit, expr.Start, "cannot call private function %q from %s; it is declared in %s", expr.Callee, unit.path, private[0].Pos.File)
+		if private := ctx.privateDecls[expr.Callee]; len(private) > 0 {
+			return l.errorInUnit(unit, expr.Start, "cannot call private function %q from %s; it is declared in %s", expr.Callee, unit.path, private[0].decl.Pos.File)
+		}
+		if public := ctx.publicDecls[expr.Callee]; len(public) > 0 {
+			packageName := public[0].unit.program.PackageName
+			return l.errorInUnit(unit, expr.Start, "cannot call imported function %q without a direct package import; import package %q and call %s.%s", expr.Callee, packageName, packageName, expr.Callee)
 		}
 	case *ast.BinaryExpr:
-		if err := l.rewriteExprCalls(unit, expr.Left, privateNames, publicNames, privateDecls); err != nil {
+		if err := l.rewriteExprCalls(unit, expr.Left, ctx); err != nil {
 			return err
 		}
-		return l.rewriteExprCalls(unit, expr.Right, privateNames, publicNames, privateDecls)
+		return l.rewriteExprCalls(unit, expr.Right, ctx)
 	case *ast.IndexExpr:
-		if err := l.rewriteExprCalls(unit, expr.Collection, privateNames, publicNames, privateDecls); err != nil {
+		if err := l.rewriteExprCalls(unit, expr.Collection, ctx); err != nil {
 			return err
 		}
-		return l.rewriteExprCalls(unit, expr.Index, privateNames, publicNames, privateDecls)
+		return l.rewriteExprCalls(unit, expr.Index, ctx)
 	case *ast.SliceExpr:
-		if err := l.rewriteExprCalls(unit, expr.Collection, privateNames, publicNames, privateDecls); err != nil {
+		if err := l.rewriteExprCalls(unit, expr.Collection, ctx); err != nil {
 			return err
 		}
 		if expr.StartIndex != nil {
-			if err := l.rewriteExprCalls(unit, expr.StartIndex, privateNames, publicNames, privateDecls); err != nil {
+			if err := l.rewriteExprCalls(unit, expr.StartIndex, ctx); err != nil {
 				return err
 			}
 		}
 		if expr.EndIndex != nil {
-			return l.rewriteExprCalls(unit, expr.EndIndex, privateNames, publicNames, privateDecls)
+			return l.rewriteExprCalls(unit, expr.EndIndex, ctx)
 		}
 	}
 
 	return nil
 }
 
-func (l *loader) rewriteExprList(unit *fileUnit, exprs []ast.Expression, privateNames map[string]string, publicNames map[string]struct{}, privateDecls map[string][]*ast.FuncDecl) error {
+func (l *loader) rewriteExprList(unit *fileUnit, exprs []ast.Expression, ctx resolutionContext) error {
 	for _, expr := range exprs {
-		if err := l.rewriteExprCalls(unit, expr, privateNames, publicNames, privateDecls); err != nil {
+		if err := l.rewriteExprCalls(unit, expr, ctx); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (l *loader) resolveQualifiedCall(unit *fileUnit, expr *ast.CallExpr, ctx resolutionContext) error {
+	ref, ok := ctx.directImports[unit][expr.Package]
+	if !ok {
+		return l.errorInUnit(unit, expr.Start, "package %q is not imported by %s", expr.Package, unit.path)
+	}
+
+	info := ctx.funcs[ref.unit][expr.Callee]
+	if info == nil {
+		return l.errorInUnit(unit, expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
+	}
+	if !info.public {
+		return l.errorInUnit(unit, expr.Start, "cannot call private function %q from %s; it is declared in %s", expr.SourceName(), unit.path, info.decl.Pos.File)
+	}
+
+	expr.ResolvedCallee = info.internalName
+	return nil
+}
+
+func (l *loader) directExportingPackage(unit *fileUnit, name string, ctx resolutionContext) (string, bool) {
+	packages := make([]string, 0, len(ctx.directImports[unit]))
+	for packageName := range ctx.directImports[unit] {
+		packages = append(packages, packageName)
+	}
+	sort.Strings(packages)
+
+	for _, packageName := range packages {
+		ref := ctx.directImports[unit][packageName]
+		info := ctx.funcs[ref.unit][name]
+		if info != nil && info.public {
+			return packageName, true
+		}
+	}
+
+	return "", false
 }
 
 func isBuiltin(name string) bool {

@@ -34,7 +34,7 @@ Every source file starts with a package declaration:
 package main
 ```
 
-The compiler currently accepts single-file programs only. A runnable program must define:
+The compiler accepts an entry file plus transitive relative `.tx` imports. A runnable program must define:
 
 ```trux
 func main() int
@@ -116,6 +116,7 @@ string literals
 boolean literals
 variables
 function calls
+qualified imported function calls
 parenthesized expressions
 binary arithmetic
 comparisons
@@ -132,6 +133,14 @@ read_float()
 read_bool()
 read_file(path)
 read_csv(path, columns)
+```
+
+Imported public functions must be called through the package declared by the imported file:
+
+```trux
+import "math.tx"
+
+let total int = math.add(1, 2)
 ```
 
 Arithmetic operators:
@@ -361,7 +370,7 @@ The compiler rejects:
 syntax errors
 undefined variables
 undefined functions
-duplicate function names
+duplicate function names in the same file
 duplicate local variables
 wrong number of function arguments
 missing main function
@@ -412,8 +421,7 @@ trux emit-c main.tx
 
 These ideas are not implemented and should not drive current language usage:
 
-- packages and imports
-- public package exports
+- directory-based packages and standard-library imports
 - multi-file C output
 - GPU kernels
 

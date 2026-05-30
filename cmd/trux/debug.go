@@ -148,7 +148,7 @@ func formatExprCalls(out *bytes.Buffer, expr ast.Expression, info *semtypes.Info
 		formatExprCalls(out, expr.Len, info)
 	case *ast.CallExpr:
 		if sig, ok := info.ResolvedCalls[expr]; ok {
-			fmt.Fprintf(out, "  %d:%d %s -> %s\n", expr.Start.Line, expr.Start.Column, expr.Callee, sig.ReturnType)
+			fmt.Fprintf(out, "  %d:%d %s -> %s\n", expr.Start.Line, expr.Start.Column, expr.SourceName(), sig.ReturnType)
 		}
 		if types, ok := info.PrintCalls[expr]; ok {
 			fmt.Fprintf(out, "  %d:%d print -> print(", expr.Start.Line, expr.Start.Column)
@@ -161,7 +161,7 @@ func formatExprCalls(out *bytes.Buffer, expr ast.Expression, info *semtypes.Info
 			fmt.Fprintln(out, ")")
 		}
 		if sig, ok := info.IOCalls[expr]; ok {
-			fmt.Fprintf(out, "  %d:%d %s -> %s\n", expr.Start.Line, expr.Start.Column, expr.Callee, sig.Kind)
+			fmt.Fprintf(out, "  %d:%d %s -> %s\n", expr.Start.Line, expr.Start.Column, expr.SourceName(), sig.Kind)
 		}
 		for _, arg := range expr.Args {
 			formatExprCalls(out, arg, info)

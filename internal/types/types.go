@@ -505,7 +505,11 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		argTypes = append(argTypes, argType)
 	}
 
-	if expr.Callee == "print" {
+	if expr.Package != "" && expr.ResolvedCallee == "" {
+		return nil, typeError(expr.Start, "package %q is not imported", expr.Package)
+	}
+
+	if expr.Package == "" && expr.Callee == "print" {
 		if !allowPrint {
 			return nil, typeError(expr.Start, "print can only be used as a statement")
 		}
@@ -521,7 +525,7 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		c.setExpr(expr, argTypes[len(argTypes)-1], OriginUnknown)
 		return argTypes[len(argTypes)-1], nil
 	}
-	if expr.Callee == "len" {
+	if expr.Package == "" && expr.Callee == "len" {
 		if len(argTypes) != 1 {
 			return nil, typeError(expr.Start, "len expects 1 argument, got %d", len(argTypes))
 		}
@@ -532,7 +536,7 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		c.setExpr(expr, ast.IntType, OriginOwned)
 		return ast.IntType, nil
 	}
-	if expr.Callee == "clone" {
+	if expr.Package == "" && expr.Callee == "clone" {
 		if len(argTypes) != 1 {
 			return nil, typeError(expr.Start, "clone expects 1 argument, got %d", len(argTypes))
 		}
@@ -543,7 +547,7 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		c.setExpr(expr, argTypes[0], OriginFrameOwned)
 		return argTypes[0], nil
 	}
-	if expr.Callee == "append" {
+	if expr.Package == "" && expr.Callee == "append" {
 		if !allowPrint {
 			return nil, typeError(expr.Start, "append can only be used as a statement")
 		}
@@ -564,25 +568,29 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		c.setExpr(expr, argTypes[0], c.exprOrigin(expr.Args[0]))
 		return argTypes[0], nil
 	}
-	if typ, origin, ok, err := c.checkIOCall(expr, argTypes, allowPrint); ok {
-		if err != nil {
-			return nil, err
+	if expr.Package == "" {
+		if typ, origin, ok, err := c.checkIOCall(expr, argTypes, allowPrint); ok {
+			if err != nil {
+				return nil, err
+			}
+			c.setExpr(expr, typ, origin)
+			return typ, nil
 		}
-		c.setExpr(expr, typ, origin)
-		return typ, nil
 	}
 
-	sig, ok := c.info.Funcs[expr.Callee]
+	targetName := expr.TargetName()
+	displayName := expr.SourceName()
+	sig, ok := c.info.Funcs[targetName]
 	if !ok {
-		return nil, typeError(expr.Start, "undefined function %q", expr.Callee)
+		return nil, typeError(expr.Start, "undefined function %q", displayName)
 	}
 	if len(argTypes) != len(sig.Params) {
-		return nil, typeError(expr.Start, "%s expects %d arguments, got %d", expr.Callee, len(sig.Params), len(argTypes))
+		return nil, typeError(expr.Start, "%s expects %d arguments, got %d", displayName, len(sig.Params), len(argTypes))
 	}
 	for i, argType := range argTypes {
 		want := sig.Params[i].Type
 		if !ast.TypeEqual(argType, want) {
-			return nil, typeError(expr.Args[i].Pos(), "argument %d to %s has type %s, want %s", i+1, expr.Callee, argType, want)
+			return nil, typeError(expr.Args[i].Pos(), "argument %d to %s has type %s, want %s", i+1, displayName, argType, want)
 		}
 	}
 

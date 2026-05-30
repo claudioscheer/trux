@@ -126,6 +126,28 @@ func main() int {
 	}
 }
 
+func TestParsesQualifiedCallExpression(t *testing.T) {
+	program := mustParse(t, `package main
+import "math.tx"
+
+func main() int {
+    let x int = math.add(1, 2)
+}`)
+
+	mainFn := program.Functions[0]
+	stmt := mainFn.Body.Statements[0].(*ast.LetStmt)
+	call, ok := stmt.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("let value = %T, want ast.CallExpr", stmt.Value)
+	}
+	if call.Package != "math" || call.Callee != "add" {
+		t.Fatalf("call = %s.%s, want math.add", call.Package, call.Callee)
+	}
+	if call.SourceName() != "math.add" {
+		t.Fatalf("source name = %q, want math.add", call.SourceName())
+	}
+}
+
 func TestParsesBinaryOperatorPrecedence(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

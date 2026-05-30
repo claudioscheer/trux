@@ -18,26 +18,40 @@ rt_slice_int trux_borrowedMiddle(rt_context* trux_ctx, rt_arena* trux_result_are
 
 Tradeoff: this would make generated C smaller and avoid unnecessary arena init/deinit calls, but it requires changing return lowering because the current backend uses a shared `trux_return` cleanup label for all functions.
 
-## Language: no input I/O primitives (only print output exists)
+## Language: I/O should live in an imported package instead of global builtins
 
 Status: open
 
-The language provides only one output mechanism (`print` of scalars, which lowers to rt_print_* + newline in generated C). There are no input facilities whatsoever:
+I/O now works, but it is exposed as compiler-recognized global builtins (`read_line`, `read_int`, `read_file`, `write_file`, `read_csv`, and `write_csv`). That keeps examples small, but it makes I/O part of the always-available global language surface.
 
-- `func main() int` — parameters are rejected at type-check time (`internal/types/types.go:161`: "main must not have parameters").
-- No `read`, `input`, `scan`, or similar builtin (the only CallExpr special forms are print/len/clone/append; see types.go:489 and ir.go:376).
-- No stdin/file reads, no argv, no env access, no line-based or typed input.
-- Runtime (rt.go) contains only printf/fwrite writers for output + stderr fatals; zero read helpers.
-
-Programs are therefore limited to pure computation that produces output. Interactive programs, data ingestion, or any stdin-driven logic are impossible.
+Current shape:
 
 ```trux
+package main
+
 func main() int {
-    // no syntax or builtin exists to populate x from input
-    let x int = /* ??? */
-    print(x + 1)
+    let name string = read_line()
+    let note string = read_file("input.txt")
+    write_file("copy.txt", note + "\n" + name)
     return 0
 }
 ```
 
-Tradeoff: adding input I/O requires choosing a model (e.g. `read_line() string` owning a frame string, or typed `read_int()` that fatals on bad input to match existing error style, or a streaming iterator) that respects the arena/ownership rules without introducing new failure modes the rest of the language does not have. It also means new AST/IR nodes, checker cases, codegen emission, and runtime C helpers — a larger surface-area increase than the current single print statement. The cost is language completeness for real-world utility; the benefit of staying minimal is a tiny compiler and simple mental model.
+Desired direction:
+
+```trux
+package main
+
+import "io"
+
+func main() int {
+    let name string = io.read_line()
+    let note string = io.read_file("input.txt")
+    io.write_file("copy.txt", note + "\n" + name)
+    return 0
+}
+```
+
+This should be a real package boundary, not only a cosmetic alias. Today, module support uses relative `.tx` imports, public functions, and a flat merged namespace; package names are still decorative and qualified names are deferred. Moving I/O behind `import "io"` therefore depends on the package model growing enough to support standard-library imports and qualified package member resolution.
+
+Tradeoff: keeping I/O as builtins is simple and matches the current lowering path for `print`, `len`, `clone`, and `append`. Moving I/O into an imported package makes side-effectful capabilities explicit and keeps the global namespace smaller, but it requires standard-library package resolution, qualified names, and a decision about whether low-level runtime-backed operations can be implemented as ordinary package functions or need privileged compiler lowering behind the package facade.

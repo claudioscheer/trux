@@ -41,6 +41,7 @@ The compiler currently supports:
 - typed IR
 - C code generation and execution through `cc` or `$CC`
 - `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
+- stdin, file, and CSV IO through builtins
 
 Nested collections, qualified module names, directory-based packages, separate module compilation, reusable package artifacts, and GPU kernels are not implemented.
 
@@ -122,6 +123,19 @@ trux false
 
 More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/collections.tx](examples/collections.tx) and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current collection and ownership model. Module examples live under [examples/modules/](examples/modules/).
 
+The IO basics project reads a name and number from stdin, reads/writes text files, and reads/writes flat row-major CSV:
+
+```bash
+printf 'Ada\n41\n' | make run FILE=examples/projects/io_basics/main.tx
+```
+
+More complete IO examples live under [examples/projects/](examples/projects/):
+
+- `io_basics`: stdin, file IO, and CSV IO in one small program
+- `interactive_counter`: stdin with `read_line` and `read_int`
+- `file_notes`: `read_file` and `write_file`
+- `csv_roster`: `read_csv`, list mutation, and `write_csv`
+
 ## Commands
 
 ```bash
@@ -132,4 +146,4 @@ make build-bin FILE=examples/hello.tx OUT=bin/hello
 
 ## Documentation
 
-See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including arenas, modules, and future GPU ideas.
+See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including arenas, IO, modules, and future GPU ideas.

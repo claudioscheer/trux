@@ -126,6 +126,12 @@ slicing
 make([]T, n)
 clone(x)
 len(x)
+read_line()
+read_int()
+read_float()
+read_bool()
+read_file(path)
+read_csv(path, columns)
 ```
 
 Arithmetic operators:
@@ -173,6 +179,8 @@ if / else
 while
 print(...)
 append(list, value)
+write_file(path, contents)
+write_csv(path, cells, columns)
 ```
 
 `if` and `while` require `bool` conditions:
@@ -209,6 +217,31 @@ print(bool)   -> rt_print_bool
 ```trux
 append(items, 2)
 ```
+
+## IO
+
+Input, file, and CSV operations are builtins:
+
+```trux
+let line string = read_line()
+let count int = read_int()
+let ratio float = read_float()
+let ok bool = read_bool()
+
+let contents string = read_file("input.txt")
+write_file("copy.txt", contents)
+
+let cells list[string] = read_csv("input.csv", 2)
+write_csv("copy.csv", cells, 2)
+```
+
+`read_line` reads one line from stdin without the trailing newline. `read_int`, `read_float`, and `read_bool` read one line from stdin and parse it as the requested scalar type. Invalid typed input is a runtime error.
+
+`read_file` returns the complete file contents as a `string`. `write_file` overwrites the target path with the provided contents.
+
+`read_csv` returns a flat row-major `list[string]`. The `columns` argument must be positive and each CSV row must have exactly that many columns. `write_csv` writes a flat row-major `list[string]` using the same column count.
+
+CSV supports quoted fields and escaped quotes using doubled quotes.
 
 ## Collections
 
@@ -356,6 +389,8 @@ append values with the wrong element type
 mutation of parameter-owned collections or aliases/views of them
 make with a non-slice type or non-int length
 clone with the wrong arity or unsupported type
+IO builtins with the wrong arity or argument types
+write_file and write_csv outside statement position
 ```
 
 ## Build Commands

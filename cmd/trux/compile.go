@@ -133,9 +133,13 @@ func compileC(sourcePath string, outputPath string) error {
 	return nil
 }
 
-func runExecutable(out io.Writer, executablePath string) error {
+func runExecutable(out io.Writer, in io.Reader, executablePath string) error {
 	cmd := exec.Command(executablePath)
 	cmd.Stdout = out
+	if in == nil {
+		in = os.Stdin
+	}
+	cmd.Stdin = in
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()

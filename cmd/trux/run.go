@@ -26,7 +26,7 @@ var runCmd = &cobra.Command{
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runFileWithOptions(cmd.OutOrStdout(), args[0], runOptions{Debug: runDebug})
+		return runFileWithOptions(cmd.OutOrStdout(), args[0], runOptions{Debug: runDebug, Stdin: cmd.InOrStdin()})
 	},
 }
 
@@ -37,6 +37,7 @@ func init() {
 
 type runOptions struct {
 	Debug bool
+	Stdin io.Reader
 }
 
 func runFile(out io.Writer, path string) error {
@@ -64,7 +65,7 @@ func runFileWithOptions(out io.Writer, path string, opts runOptions) error {
 		return err
 	}
 
-	return runExecutable(out, executablePath)
+	return runExecutable(out, opts.Stdin, executablePath)
 }
 
 func formatSourceError(path string, src string, sources map[string]string, err error) error {

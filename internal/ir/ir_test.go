@@ -281,6 +281,53 @@ func main() int {
 	}
 }
 
+func TestBuildCreatesTypedIRForIO(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let line string = read_line()
+    let count int = read_int()
+    let text string = read_file("input.txt")
+    write_file("out.txt", text + line)
+    let cells list[string] = read_csv("in.csv", 2)
+    write_csv("out.csv", cells, 2)
+    print(line, " ", count, " ", len(cells))
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := irProgram.Functions[0]
+	if _, ok := mainFn.Body[0].(*LetStmt).Value.(*ReadLineExpr); !ok {
+		t.Fatalf("line let value = %T, want ReadLineExpr", mainFn.Body[0].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[1].(*LetStmt).Value.(*ReadIntExpr); !ok {
+		t.Fatalf("count let value = %T, want ReadIntExpr", mainFn.Body[1].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[2].(*LetStmt).Value.(*ReadFileExpr); !ok {
+		t.Fatalf("text let value = %T, want ReadFileExpr", mainFn.Body[2].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[3].(*WriteFileStmt); !ok {
+		t.Fatalf("fourth statement = %T, want WriteFileStmt", mainFn.Body[3])
+	}
+	readCSV := mainFn.Body[4].(*LetStmt).Value
+	if !ast.TypeEqual(readCSV.Type(), &ast.ListType{Elem: ast.StringType}) {
+		t.Fatalf("read_csv type = %s, want list[string]", readCSV.Type())
+	}
+	if _, ok := readCSV.(*ReadCSVExpr); !ok {
+		t.Fatalf("cells let value = %T, want ReadCSVExpr", readCSV)
+	}
+	if _, ok := mainFn.Body[5].(*WriteCSVStmt); !ok {
+		t.Fatalf("sixth statement = %T, want WriteCSVStmt", mainFn.Body[5])
+	}
+}
+
 func sameTypes(got []ast.Type, want []ast.Type) bool {
 	if len(got) != len(want) {
 		return false

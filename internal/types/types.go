@@ -32,6 +32,7 @@ type Info struct {
 	LenCalls      map[*ast.CallExpr]ast.Type
 	AppendCalls   map[*ast.CallExpr]AppendSig
 	CloneCalls    map[*ast.CallExpr]CloneSig
+	IOCalls       map[*ast.CallExpr]IOCallSig
 }
 
 type AppendSig struct {
@@ -41,6 +42,23 @@ type AppendSig struct {
 
 type CloneSig struct {
 	Type ast.Type
+}
+
+type IOCallKind string
+
+const (
+	IOCallReadLine  IOCallKind = "read_line"
+	IOCallReadInt   IOCallKind = "read_int"
+	IOCallReadFloat IOCallKind = "read_float"
+	IOCallReadBool  IOCallKind = "read_bool"
+	IOCallReadFile  IOCallKind = "read_file"
+	IOCallWriteFile IOCallKind = "write_file"
+	IOCallReadCSV   IOCallKind = "read_csv"
+	IOCallWriteCSV  IOCallKind = "write_csv"
+)
+
+type IOCallSig struct {
+	Kind IOCallKind
 }
 
 type Origin string
@@ -107,6 +125,7 @@ func Check(program *ast.Program) (*Info, error) {
 			LenCalls:      map[*ast.CallExpr]ast.Type{},
 			AppendCalls:   map[*ast.CallExpr]AppendSig{},
 			CloneCalls:    map[*ast.CallExpr]CloneSig{},
+			IOCalls:       map[*ast.CallExpr]IOCallSig{},
 		},
 	}
 
@@ -545,6 +564,13 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		c.setExpr(expr, argTypes[0], c.exprOrigin(expr.Args[0]))
 		return argTypes[0], nil
 	}
+	if typ, origin, ok, err := c.checkIOCall(expr, argTypes, allowPrint); ok {
+		if err != nil {
+			return nil, err
+		}
+		c.setExpr(expr, typ, origin)
+		return typ, nil
+	}
 
 	sig, ok := c.info.Funcs[expr.Callee]
 	if !ok {
@@ -563,6 +589,91 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 	c.info.ResolvedCalls[expr] = sig
 	c.setExpr(expr, sig.ReturnType, originForCallResult(sig.ReturnType))
 	return sig.ReturnType, nil
+}
+
+func (c *checker) checkIOCall(expr *ast.CallExpr, argTypes []ast.Type, allowStatementOnly bool) (ast.Type, Origin, bool, error) {
+	switch IOCallKind(expr.Callee) {
+	case IOCallReadLine:
+		if len(argTypes) != 0 {
+			return nil, "", true, typeError(expr.Start, "read_line expects 0 arguments, got %d", len(argTypes))
+		}
+		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadLine}
+		return ast.StringType, OriginFrameOwned, true, nil
+	case IOCallReadInt:
+		if len(argTypes) != 0 {
+			return nil, "", true, typeError(expr.Start, "read_int expects 0 arguments, got %d", len(argTypes))
+		}
+		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadInt}
+		return ast.IntType, OriginOwned, true, nil
+	case IOCallReadFloat:
+		if len(argTypes) != 0 {
+			return nil, "", true, typeError(expr.Start, "read_float expects 0 arguments, got %d", len(argTypes))
+		}
+		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadFloat}
+		return ast.FloatType, OriginOwned, true, nil
+	case IOCallReadBool:
+		if len(argTypes) != 0 {
+			return nil, "", true, typeError(expr.Start, "read_bool expects 0 arguments, got %d", len(argTypes))
+		}
+		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadBool}
+		return ast.BoolType, OriginOwned, true, nil
+	case IOCallReadFile:
+		if len(argTypes) != 1 {
+			return nil, "", true, typeError(expr.Start, "read_file expects 1 argument, got %d", len(argTypes))
+		}
+		if !ast.TypeEqual(argTypes[0], ast.StringType) {
+			return nil, "", true, typeError(expr.Args[0].Pos(), "read_file path has type %s, want string", argTypes[0])
+		}
+		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadFile}
+		return ast.StringType, OriginFrameOwned, true, nil
+	case IOCallWriteFile:
+		if !allowStatementOnly {
+			return nil, "", true, typeError(expr.Start, "write_file can only be used as a statement")
+		}
+		if len(argTypes) != 2 {
+			return nil, "", true, typeError(expr.Start, "write_file expects 2 arguments, got %d", len(argTypes))
+		}
+		if !ast.TypeEqual(argTypes[0], ast.StringType) {
+			return nil, "", true, typeError(expr.Args[0].Pos(), "write_file path has type %s, want string", argTypes[0])
+		}
+		if !ast.TypeEqual(argTypes[1], ast.StringType) {
+			return nil, "", true, typeError(expr.Args[1].Pos(), "write_file contents has type %s, want string", argTypes[1])
+		}
+		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallWriteFile}
+		return ast.StringType, OriginUnknown, true, nil
+	case IOCallReadCSV:
+		if len(argTypes) != 2 {
+			return nil, "", true, typeError(expr.Start, "read_csv expects 2 arguments, got %d", len(argTypes))
+		}
+		if !ast.TypeEqual(argTypes[0], ast.StringType) {
+			return nil, "", true, typeError(expr.Args[0].Pos(), "read_csv path has type %s, want string", argTypes[0])
+		}
+		if !ast.TypeEqual(argTypes[1], ast.IntType) {
+			return nil, "", true, typeError(expr.Args[1].Pos(), "read_csv columns has type %s, want int", argTypes[1])
+		}
+		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadCSV}
+		return &ast.ListType{Elem: ast.StringType}, OriginFrameOwned, true, nil
+	case IOCallWriteCSV:
+		if !allowStatementOnly {
+			return nil, "", true, typeError(expr.Start, "write_csv can only be used as a statement")
+		}
+		if len(argTypes) != 3 {
+			return nil, "", true, typeError(expr.Start, "write_csv expects 3 arguments, got %d", len(argTypes))
+		}
+		if !ast.TypeEqual(argTypes[0], ast.StringType) {
+			return nil, "", true, typeError(expr.Args[0].Pos(), "write_csv path has type %s, want string", argTypes[0])
+		}
+		if !ast.TypeEqual(argTypes[1], &ast.ListType{Elem: ast.StringType}) {
+			return nil, "", true, typeError(expr.Args[1].Pos(), "write_csv cells has type %s, want list[string]", argTypes[1])
+		}
+		if !ast.TypeEqual(argTypes[2], ast.IntType) {
+			return nil, "", true, typeError(expr.Args[2].Pos(), "write_csv columns has type %s, want int", argTypes[2])
+		}
+		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallWriteCSV}
+		return ast.StringType, OriginUnknown, true, nil
+	default:
+		return nil, "", false, nil
+	}
 }
 
 func binaryType(pos token.Position, operator string, leftType ast.Type, rightType ast.Type) (ast.Type, error) {

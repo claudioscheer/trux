@@ -581,6 +581,38 @@ func main() int {
 	}
 }
 
+func TestGenerateCreatesCForIO(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func main() int {
+    let line string = read_line()
+    let count int = read_int()
+    let ratio float = read_float()
+    let ready bool = read_bool()
+    let text string = read_file("input.txt")
+    write_file("out.txt", text + line)
+    let cells list[string] = read_csv("in.csv", 2)
+    write_csv("out.csv", cells, 2)
+    print(line, " ", count, " ", ratio, " ", ready, " ", len(cells))
+    return 0
+}`)
+
+	wantParts := []string{
+		"rt_string trux_v_4_line = rt_read_line(&trux_frame);",
+		"int64_t trux_v_5_count = rt_read_int(&trux_frame);",
+		"double trux_v_5_ratio = rt_read_float(&trux_frame);",
+		"bool trux_v_5_ready = rt_read_bool(&trux_frame);",
+		"rt_string trux_v_4_text = rt_read_file(&trux_frame, (rt_string){(const uint8_t*)\"input.txt\", 9});",
+		"rt_write_file((rt_string){(const uint8_t*)\"out.txt\", 7}, rt_string_concat(&trux_frame, trux_v_4_text, trux_v_4_line));",
+		"rt_list_string* trux_v_5_cells = rt_read_csv(&trux_frame, (rt_string){(const uint8_t*)\"in.csv\", 6}, 2);",
+		"rt_write_csv((rt_string){(const uint8_t*)\"out.csv\", 7}, trux_v_5_cells, 2);",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
 func mustGenerateC(t *testing.T, src string) string {
 	t.Helper()
 

@@ -26,6 +26,7 @@ const (
 	diagnosticSeverityError = 1
 
 	completionKindFunction = 3
+	completionKindVariable = 6
 	completionKindKeyword  = 14
 	completionKindType     = 25
 )
@@ -91,8 +92,12 @@ func (s *Server) handleRequest(msg rpcMessage) (any, error) {
 		return nil, nil
 	case "textDocument/formatting":
 		return s.handleFormatting(msg.Params)
+	case "textDocument/definition":
+		return s.handleDefinition(msg.Params)
+	case "textDocument/references":
+		return s.handleReferences(msg.Params)
 	case "textDocument/completion":
-		return completionList(), nil
+		return s.handleCompletion(msg.Params)
 	case "textDocument/hover":
 		return s.handleHover(msg.Params)
 	default:
@@ -139,6 +144,10 @@ func (s *Server) publishDiagnostics(uri string) error {
 }
 
 func (s *Server) publishDiagnosticsFor(uri string, diagnostics []Diagnostic) error {
+	if diagnostics == nil {
+		diagnostics = []Diagnostic{}
+	}
+
 	return writeNotification(s.out, "textDocument/publishDiagnostics", map[string]any{
 		"uri":         uri,
 		"diagnostics": diagnostics,
@@ -210,6 +219,8 @@ func initializeResult() map[string]any {
 				"change":    1,
 			},
 			"documentFormattingProvider": true,
+			"definitionProvider":         true,
+			"referencesProvider":         true,
 			"hoverProvider":              true,
 			"completionProvider": map[string]any{
 				"triggerCharacters": []string{},
@@ -333,30 +344,34 @@ func fullRange(text string) Range {
 func completionList() CompletionList {
 	return CompletionList{
 		IsIncomplete: false,
-		Items: []CompletionItem{
-			{Label: "package", Kind: completionKindKeyword, Detail: "package declaration"},
-			{Label: "import", Kind: completionKindKeyword, Detail: "module import"},
-			{Label: "pub", Kind: completionKindKeyword, Detail: "public function export"},
-			{Label: "func", Kind: completionKindKeyword, Detail: "function declaration"},
-			{Label: "return", Kind: completionKindKeyword, Detail: "return statement"},
-			{Label: "let", Kind: completionKindKeyword, Detail: "local binding"},
-			{Label: "if", Kind: completionKindKeyword, Detail: "conditional statement"},
-			{Label: "else", Kind: completionKindKeyword, Detail: "conditional fallback"},
-			{Label: "while", Kind: completionKindKeyword, Detail: "loop statement"},
-			{Label: "true", Kind: completionKindKeyword, Detail: "boolean literal"},
-			{Label: "false", Kind: completionKindKeyword, Detail: "boolean literal"},
-			{Label: "in", Kind: completionKindKeyword, Detail: "string containment operator"},
-			{Label: "int", Kind: completionKindType, Detail: "integer type"},
-			{Label: "float", Kind: completionKindType, Detail: "floating-point type"},
-			{Label: "string", Kind: completionKindType, Detail: "string type"},
-			{Label: "bool", Kind: completionKindType, Detail: "boolean type"},
-			{Label: "list", Kind: completionKindType, Detail: "mutable list type"},
-			{Label: "print", Kind: completionKindFunction, Detail: "print one or more scalar values"},
-			{Label: "len", Kind: completionKindFunction, Detail: "length of a string or collection"},
-			{Label: "clone", Kind: completionKindFunction, Detail: "owned copy of a dynamic value"},
-			{Label: "append", Kind: completionKindFunction, Detail: "append a value to a list"},
-			{Label: "make", Kind: completionKindFunction, Detail: "create a slice"},
-		},
+		Items:        baseCompletionItems(),
+	}
+}
+
+func baseCompletionItems() []CompletionItem {
+	return []CompletionItem{
+		{Label: "package", Kind: completionKindKeyword, Detail: "package declaration"},
+		{Label: "import", Kind: completionKindKeyword, Detail: "module import"},
+		{Label: "pub", Kind: completionKindKeyword, Detail: "public function export"},
+		{Label: "func", Kind: completionKindKeyword, Detail: "function declaration"},
+		{Label: "return", Kind: completionKindKeyword, Detail: "return statement"},
+		{Label: "let", Kind: completionKindKeyword, Detail: "local binding"},
+		{Label: "if", Kind: completionKindKeyword, Detail: "conditional statement"},
+		{Label: "else", Kind: completionKindKeyword, Detail: "conditional fallback"},
+		{Label: "while", Kind: completionKindKeyword, Detail: "loop statement"},
+		{Label: "true", Kind: completionKindKeyword, Detail: "boolean literal"},
+		{Label: "false", Kind: completionKindKeyword, Detail: "boolean literal"},
+		{Label: "in", Kind: completionKindKeyword, Detail: "string containment operator"},
+		{Label: "int", Kind: completionKindType, Detail: "integer type"},
+		{Label: "float", Kind: completionKindType, Detail: "floating-point type"},
+		{Label: "string", Kind: completionKindType, Detail: "string type"},
+		{Label: "bool", Kind: completionKindType, Detail: "boolean type"},
+		{Label: "list", Kind: completionKindType, Detail: "mutable list type"},
+		{Label: "print", Kind: completionKindFunction, Detail: "print one or more scalar values"},
+		{Label: "len", Kind: completionKindFunction, Detail: "length of a string or collection"},
+		{Label: "clone", Kind: completionKindFunction, Detail: "owned copy of a dynamic value"},
+		{Label: "append", Kind: completionKindFunction, Detail: "append a value to a list"},
+		{Label: "make", Kind: completionKindFunction, Detail: "create a slice"},
 	}
 }
 
@@ -571,6 +586,11 @@ type Diagnostic struct {
 type TextEdit struct {
 	Range   Range  `json:"range"`
 	NewText string `json:"newText"`
+}
+
+type Location struct {
+	URI   string `json:"uri"`
+	Range Range  `json:"range"`
 }
 
 type CompletionList struct {

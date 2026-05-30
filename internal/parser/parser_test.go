@@ -41,7 +41,7 @@ func TestParsesHelloExample(t *testing.T) {
 		t.Fatalf("param count = %d, want %d", len(add.Params), len(wantParams))
 	}
 	for i := range wantParams {
-		if add.Params[i] != wantParams[i] {
+		if add.Params[i].Name != wantParams[i].Name || !ast.TypeEqual(add.Params[i].Type, wantParams[i].Type) {
 			t.Fatalf("param %d = %#v, want %#v", i, add.Params[i], wantParams[i])
 		}
 	}

@@ -143,6 +143,7 @@ func (p *Parser) parseFuncDecl() (*ast.FuncDecl, error) {
 
 	return &ast.FuncDecl{
 		Pos:        start.Pos,
+		NamePos:    name.Pos,
 		Name:       name.Lexeme,
 		Public:     public,
 		Params:     params,
@@ -168,7 +169,7 @@ func (p *Parser) parseParams() ([]ast.Param, error) {
 			return nil, err
 		}
 
-		params = append(params, ast.Param{Name: name.Lexeme, Type: typ})
+		params = append(params, ast.Param{Pos: name.Pos, Name: name.Lexeme, Type: typ})
 
 		if !p.match(token.Comma) {
 			return params, nil
@@ -230,11 +231,12 @@ func (p *Parser) parseType() (ast.Type, error) {
 }
 
 func (p *Parser) parseBlock() (ast.Block, error) {
-	if _, err := p.expect(token.LBrace); err != nil {
+	start, err := p.expect(token.LBrace)
+	if err != nil {
 		return ast.Block{}, err
 	}
 
-	block := ast.Block{}
+	block := ast.Block{Start: start.Pos}
 	for !p.check(token.RBrace) && !p.check(token.EOF) {
 		stmt, err := p.parseStatement()
 		if err != nil {
@@ -243,9 +245,11 @@ func (p *Parser) parseBlock() (ast.Block, error) {
 		block.Statements = append(block.Statements, stmt)
 	}
 
-	if _, err := p.expect(token.RBrace); err != nil {
+	end, err := p.expect(token.RBrace)
+	if err != nil {
 		return ast.Block{}, err
 	}
+	block.End = end.Pos
 
 	return block, nil
 }
@@ -290,7 +294,7 @@ func (p *Parser) parseLetStmt() (ast.Statement, error) {
 		return nil, err
 	}
 
-	return &ast.LetStmt{Start: start.Pos, Name: name.Lexeme, Type: typ, Value: value}, nil
+	return &ast.LetStmt{Start: start.Pos, NamePos: name.Pos, Name: name.Lexeme, Type: typ, Value: value}, nil
 }
 
 func (p *Parser) parseReturnStmt() (ast.Statement, error) {

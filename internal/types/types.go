@@ -46,10 +46,11 @@ type CloneSig struct {
 type Origin string
 
 const (
-	OriginBorrowed Origin = "borrowed"
-	OriginScratch  Origin = "scratch"
-	OriginOwned    Origin = "owned"
-	OriginUnknown  Origin = "unknown"
+	OriginBorrowed   Origin = "borrowed"
+	OriginScratch    Origin = "scratch"
+	OriginOwned      Origin = "owned"
+	OriginFrameOwned Origin = "frame-owned"
+	OriginUnknown    Origin = "unknown"
 )
 
 type checker struct {
@@ -520,7 +521,7 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 			return nil, typeError(expr.Args[0].Pos(), "clone does not support %s", argTypes[0])
 		}
 		c.info.CloneCalls[expr] = CloneSig{Type: argTypes[0]}
-		c.setExpr(expr, argTypes[0], OriginOwned)
+		c.setExpr(expr, argTypes[0], OriginFrameOwned)
 		return argTypes[0], nil
 	}
 	if expr.Callee == "append" {

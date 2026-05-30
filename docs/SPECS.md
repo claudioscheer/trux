@@ -592,10 +592,10 @@ func midOwned(xs []int) []int {
 }
 ```
 
-`clone(x)` supports `string`, arrays, slices, and lists. It allocates into the selected ownership target for the expression context. In return context that target is the result arena. In local owned context it is `trux_ctx->arena`:
+`clone(x)` supports `string`, arrays, slices, and lists. It allocates into the selected ownership target for the expression context. In direct return context that target is the result arena. In local context that target is the current function-frame arena, and returning that frame-owned value copies it into the result arena:
 
 ```go
-func ownedLocal() []int {
+func frameOwnedLocal() []int {
     let xs [3]int = [3]int{1, 2, 3}
     let ys []int = clone(xs[:])
     return ys
@@ -752,7 +752,7 @@ runtime bounds traps
 
 Dynamic allocation uses arenas for strings, arrays, and slice backing storage. Lists are heap-backed shared handles tracked by the runtime owner and freed at program exit, arena reset, or arena rewind.
 
-Generated code uses a durable arena plus a compiler-managed temp arena. Local dynamic values may use temp memory. Function outputs are the only escape path: scratch-backed returns are copied into the caller-provided result arena, parameter-backed slice returns remain borrowed, and explicit `clone(x)` creates owned data in the selected ownership target.
+Generated code uses a durable arena plus compiler-managed function-frame arenas. Local dynamic values may use frame memory. Function outputs are the only escape path: scratch-backed and frame-owned returns are copied into the caller-provided result arena, parameter-backed slice returns remain borrowed, and direct `return clone(x)` creates owned data directly in the result arena.
 
 See [ARENAS.md](ARENAS.md) for the full rationale, tradeoffs, staged evolution plan, and why GC was deferred.
 

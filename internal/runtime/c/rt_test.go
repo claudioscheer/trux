@@ -219,6 +219,84 @@ int main(void) {
 `)
 }
 
+func TestStringConcatCopiesEmptySideOperandsIntoTargetArena(t *testing.T) {
+	compileAndRunRuntimeC(t, Source+`
+int main(void) {
+    rt_arena source_arena;
+    rt_arena target_arena;
+    rt_arena_init(&source_arena);
+    rt_arena_init(&target_arena);
+
+    rt_string source_string = rt_string_clone(&source_arena, (rt_string){(const uint8_t*)"ab", 2});
+    rt_string right_empty = rt_string_concat(&target_arena, source_string, (rt_string){NULL, 0});
+    rt_string left_empty = rt_string_concat(&target_arena, (rt_string){NULL, 0}, source_string);
+
+    if (right_empty.data == source_string.data || left_empty.data == source_string.data) {
+        fprintf(stderr, "concat reused source storage for empty-side operand\n");
+        return 1;
+    }
+
+    rt_arena_reset(&source_arena);
+    if (!rt_string_equal(right_empty, (rt_string){(const uint8_t*)"ab", 2}) ||
+        !rt_string_equal(left_empty, (rt_string){(const uint8_t*)"ab", 2})) {
+        fprintf(stderr, "concat result did not survive source arena reset\n");
+        return 1;
+    }
+
+    rt_arena_deinit(&target_arena);
+    rt_arena_deinit(&source_arena);
+    return 0;
+}
+`)
+}
+
+func TestStringHelpersRejectInvalidNonEmptyString(t *testing.T) {
+	tests := []struct {
+		name string
+		stmt string
+	}{
+		{
+			name: "print",
+			stmt: `rt_print_string((rt_string){NULL, 1});`,
+		},
+		{
+			name: "clone",
+			stmt: `rt_string ignored = rt_string_clone(&arena, (rt_string){NULL, 1}); (void)ignored;`,
+		},
+		{
+			name: "equal",
+			stmt: `bool ignored = rt_string_equal((rt_string){NULL, 1}, (rt_string){(const uint8_t*)"a", 1}); (void)ignored;`,
+		},
+		{
+			name: "contains",
+			stmt: `bool ignored = rt_string_contains((rt_string){(const uint8_t*)"a", 1}, (rt_string){NULL, 1}); (void)ignored;`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compileAndRunRuntimeCExpectFailure(t, Source+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+    `+tt.stmt+`
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`, "trux runtime error: invalid string: non-zero length with NULL data")
+		})
+	}
+}
+
+func TestCheckedLenI64RejectsTooLargeLength(t *testing.T) {
+	compileAndRunRuntimeCExpectFailure(t, Source+`
+int main(void) {
+    (void)rt_checked_len_i64((size_t)INT64_MAX + (size_t)1);
+    return 0;
+}
+`, "trux runtime error: length too large")
+}
+
 func TestListCloneRegistersWithTargetArena(t *testing.T) {
 	compileAndRunRuntimeC(t, Source+`
 int main(void) {
@@ -272,6 +350,31 @@ static void* rt_test_realloc(void* ptr, size_t size) {
 func compileAndRunRuntimeC(t *testing.T, source string) {
 	t.Helper()
 
+	exePath := compileRuntimeC(t, source)
+	run := exec.Command(exePath)
+	output, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run runtime C: %v\n%s", err, output)
+	}
+}
+
+func compileAndRunRuntimeCExpectFailure(t *testing.T, source string, want string) {
+	t.Helper()
+
+	exePath := compileRuntimeC(t, source)
+	run := exec.Command(exePath)
+	output, err := run.CombinedOutput()
+	if err == nil {
+		t.Fatalf("run runtime C succeeded, want failure containing %q\n%s", want, output)
+	}
+	if !strings.Contains(string(output), want) {
+		t.Fatalf("run runtime C output = %q, want it to contain %q", output, want)
+	}
+}
+
+func compileRuntimeC(t *testing.T, source string) string {
+	t.Helper()
+
 	compiler := os.Getenv("CC")
 	if compiler == "" {
 		compiler = "cc"
@@ -296,9 +399,5 @@ func compileAndRunRuntimeC(t *testing.T, source string) {
 		t.Fatalf("strict C compiler emitted warnings:\n%s", output)
 	}
 
-	run := exec.Command(exePath)
-	output, err = run.CombinedOutput()
-	if err != nil {
-		t.Fatalf("run runtime C: %v\n%s", err, output)
-	}
+	return exePath
 }

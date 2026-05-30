@@ -13,7 +13,7 @@ import (
 
 const (
 	durableArena = "trux_ctx->arena"
-	tempArena    = "trux_ctx->temp"
+	frameArena   = "&trux_frame"
 	resultArena  = "trux_result_arena"
 )
 
@@ -39,12 +39,9 @@ func Generate(program *ir.Program) (string, error) {
 
 	fmt.Fprintln(&out, "int main(void) {")
 	fmt.Fprintln(&out, "    rt_arena trux_arena;")
-	fmt.Fprintln(&out, "    rt_arena trux_temp;")
 	fmt.Fprintln(&out, "    rt_arena_init(&trux_arena);")
-	fmt.Fprintln(&out, "    rt_arena_init(&trux_temp);")
-	fmt.Fprintln(&out, "    rt_context trux_ctx = {&trux_arena, &trux_temp};")
+	fmt.Fprintln(&out, "    rt_context trux_ctx = {&trux_arena};")
 	fmt.Fprintln(&out, "    int64_t trux_exit_code = trux_main(&trux_ctx, &trux_arena);")
-	fmt.Fprintln(&out, "    rt_arena_deinit(&trux_temp);")
 	fmt.Fprintln(&out, "    rt_arena_deinit(&trux_arena);")
 	fmt.Fprintln(&out, "    return (int)trux_exit_code;")
 	fmt.Fprintln(&out, "}")
@@ -60,13 +57,24 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func) error {
 	if err := emitSignature(out, fn, false); err != nil {
 		return err
 	}
+	returnType, err := emitType(fn.ReturnType)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintln(out, " {")
-	fmt.Fprintln(out, "    rt_arena_mark trux_temp_mark = rt_arena_mark_current(trux_ctx->temp);")
+	fmt.Fprintln(out, "    (void)trux_ctx;")
+	fmt.Fprintln(out, "    (void)trux_result_arena;")
+	fmt.Fprintln(out, "    rt_arena trux_frame;")
+	fmt.Fprintln(out, "    rt_arena_init(&trux_frame);")
+	fmt.Fprintf(out, "    %s trux_return_value;\n", returnType)
 	for _, stmt := range fn.Body {
 		if err := emitStmt(out, stmt, 1); err != nil {
 			return err
 		}
 	}
+	fmt.Fprintln(out, "trux_return:")
+	fmt.Fprintln(out, "    rt_arena_deinit(&trux_frame);")
+	fmt.Fprintln(out, "    return trux_return_value;")
 	fmt.Fprintln(out, "}")
 	return nil
 }
@@ -103,18 +111,15 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 		if err != nil {
 			return err
 		}
-		targetArena := tempArena
-		if _, ok := stmt.Value.(*ir.CloneExpr); ok {
-			targetArena = durableArena
-		}
-		value, err := emitExpr(stmt.Value, targetArena)
+		value, err := emitExpr(stmt.Value, frameArena)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%s%s %s = %s;\n", indent, typ, mangleIdent(stmt.Name), value)
 	case *ir.ReturnStmt:
-		targetArena := tempArena
-		if _, ok := stmt.Value.(*ir.CloneExpr); ok {
+		targetArena := frameArena
+		_, directClone := stmt.Value.(*ir.CloneExpr)
+		if directClone {
 			targetArena = resultArena
 		} else if ast.TypeEqual(stmt.Value.Type(), ast.StringType) && !needsReturnCopyOut(stmt.Value) {
 			targetArena = resultArena
@@ -123,37 +128,26 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 		if err != nil {
 			return err
 		}
-		if needsReturnCopyOut(stmt.Value) {
+		if !directClone && needsReturnCopyOut(stmt.Value) {
 			value, err = emitClone(stmt.Value.Type(), resultArena, value)
 			if err != nil {
 				return err
 			}
 		}
-		typ, err := emitType(stmt.Value.Type())
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "%s%s trux_return_value = %s;\n", indent, typ, value)
-		fmt.Fprintf(out, "%sif (trux_result_arena != trux_ctx->temp) {\n", indent)
-		fmt.Fprintf(out, "%s    rt_arena_rewind(trux_ctx->temp, trux_temp_mark);\n", indent)
-		fmt.Fprintf(out, "%s}\n", indent)
-		fmt.Fprintf(out, "%sreturn trux_return_value;\n", indent)
+		fmt.Fprintf(out, "%strux_return_value = %s;\n", indent, value)
+		fmt.Fprintf(out, "%sgoto trux_return;\n", indent)
 	case *ir.AssignStmt:
-		targetArena := tempArena
-		if _, ok := stmt.Value.(*ir.CloneExpr); ok {
-			targetArena = durableArena
-		}
-		value, err := emitExpr(stmt.Value, targetArena)
+		value, err := emitExpr(stmt.Value, frameArena)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%s%s = %s;\n", indent, mangleIdent(stmt.Name), value)
 	case *ir.IndexAssignStmt:
-		collection, err := emitExpr(stmt.Target.Collection, tempArena)
+		collection, err := emitExpr(stmt.Target.Collection, frameArena)
 		if err != nil {
 			return err
 		}
-		index, err := emitExpr(stmt.Target.Index, tempArena)
+		index, err := emitExpr(stmt.Target.Index, frameArena)
 		if err != nil {
 			return err
 		}
@@ -200,7 +194,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 			return fmt.Errorf("print arg/type count mismatch")
 		}
 		for i, argExpr := range stmt.Args {
-			arg, err := emitExpr(argExpr, tempArena)
+			arg, err := emitExpr(argExpr, frameArena)
 			if err != nil {
 				return err
 			}
@@ -219,7 +213,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 		}
 		fmt.Fprintf(out, "%srt_print_newline();\n", indent)
 	case *ir.AppendStmt:
-		list, err := emitExpr(stmt.List, tempArena)
+		list, err := emitExpr(stmt.List, frameArena)
 		if err != nil {
 			return err
 		}
@@ -234,7 +228,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 		}
 		fmt.Fprintf(out, "%s%s(%s, %s);\n", indent, appendFn, list, value)
 	case *ir.ExprStmt:
-		expr, err := emitExpr(stmt.Expr, tempArena)
+		expr, err := emitExpr(stmt.Expr, frameArena)
 		if err != nil {
 			return err
 		}
@@ -261,7 +255,7 @@ func needsReturnCopyOut(expr ir.Expr) bool {
 		return false
 	}
 	switch expr.Ownership() {
-	case semtypes.OriginScratch, semtypes.OriginUnknown:
+	case semtypes.OriginFrameOwned, semtypes.OriginScratch, semtypes.OriginUnknown:
 		return true
 	default:
 		return false
@@ -272,11 +266,11 @@ func collectionValueArena(collection ir.Expr) string {
 	if collection.Ownership() == semtypes.OriginOwned {
 		return durableArena
 	}
-	return tempArena
+	return frameArena
 }
 
 func emitCondition(expr ir.Expr) (string, error) {
-	condition, err := emitExpr(expr, tempArena)
+	condition, err := emitExpr(expr, frameArena)
 	if err != nil {
 		return "", err
 	}
@@ -330,7 +324,7 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 		}
 		return fmt.Sprintf("%s(%s, %s, %d)", ctor, targetArena, values, len(expr.Elements)), nil
 	case *ir.MakeExpr:
-		length, err := emitExpr(expr.Len, tempArena)
+		length, err := emitExpr(expr.Len, frameArena)
 		if err != nil {
 			return "", err
 		}
@@ -340,20 +334,20 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 		}
 		return fmt.Sprintf("%s(%s, %s)", makeFn, targetArena, length), nil
 	case *ir.CloneExpr:
-		value, err := emitExpr(expr.Value, tempArena)
+		value, err := emitExpr(expr.Value, frameArena)
 		if err != nil {
 			return "", err
 		}
 		return emitClone(expr.Value.Type(), targetArena, value)
 	case *ir.CallExpr:
 		args := make([]string, 0, len(expr.Args)+1)
-		callResultArena := durableArena
+		callResultArena := frameArena
 		if isDynamicType(expr.Type()) {
 			callResultArena = targetArena
 		}
 		args = append(args, "trux_ctx", callResultArena)
 		for _, arg := range expr.Args {
-			argArena := tempArena
+			argArena := frameArena
 			if isDynamicType(expr.Type()) && ast.TypeEqual(arg.Type(), ast.StringType) {
 				argArena = callResultArena
 			}
@@ -388,23 +382,23 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 		}
 		return fmt.Sprintf("(%s %s %s)", left, expr.Operator, right), nil
 	case *ir.LenExpr:
-		value, err := emitExpr(expr.Value, tempArena)
+		value, err := emitExpr(expr.Value, frameArena)
 		if err != nil {
 			return "", err
 		}
 		if ast.TypeEqual(expr.Value.Type(), ast.StringType) {
-			return fmt.Sprintf("((int64_t)%s.len)", value), nil
+			return fmt.Sprintf("rt_checked_len_i64(%s.len)", value), nil
 		}
 		if _, ok := expr.Value.Type().(*ast.ListType); ok {
-			return fmt.Sprintf("((int64_t)%s->len)", value), nil
+			return fmt.Sprintf("rt_checked_len_i64(%s->len)", value), nil
 		}
-		return fmt.Sprintf("((int64_t)%s.len)", value), nil
+		return fmt.Sprintf("rt_checked_len_i64(%s.len)", value), nil
 	case *ir.IndexExpr:
 		collection, err := emitExpr(expr.Collection, targetArena)
 		if err != nil {
 			return "", err
 		}
-		index, err := emitExpr(expr.Index, tempArena)
+		index, err := emitExpr(expr.Index, frameArena)
 		if err != nil {
 			return "", err
 		}
@@ -526,7 +520,7 @@ func emitOptionalBound(expr ir.Expr) (string, string, error) {
 	if expr == nil {
 		return "false", "0", nil
 	}
-	value, err := emitExpr(expr, tempArena)
+	value, err := emitExpr(expr, frameArena)
 	if err != nil {
 		return "", "", err
 	}

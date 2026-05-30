@@ -2,40 +2,41 @@
 
 Trux uses arena-based allocation for dynamic memory.
 
-Generated programs have two arenas:
+Generated programs have a durable arena and compiler-managed function-frame arenas:
 
-- **durable arena**: values that must survive across function calls
-- **temp arena**: scratch memory used inside functions
+- **durable arena**: values that must survive across function calls or for the lifetime of the program/context
+- **function-frame arena**: scratch and frame-owned memory used inside one function call
 
 Functions are one-way:
 
 - parameters are inputs
-- return value is the output
+- the return value is the output
 - functions cannot mutate caller-owned containers
-
-Local temporary dynamic values allocate in the temp arena when possible.
 
 Function returns are either:
 
 - **borrowed**: a parameter value or parameter-backed slice/view
-- **owned**: data copied into the result arena, data already owned by the durable arena, or data produced by `clone`
+- **owned**: a value that remains valid after the callee returns, because it was copied into `trux_result_arena`, already lives in the durable arena, or was frame-owned and copied into `trux_result_arena` during return
 
-Local collections use function scratch memory:
+Local temporary dynamic values allocate in the current function-frame arena when possible.
 
-- array literals allocate in `trux_ctx->temp`
-- list literals allocate in `trux_ctx->temp`
-- `make([]T, n)` allocates backing storage in `trux_ctx->temp`
-- if local scratch-backed data is returned, it is copied into `trux_result_arena`
+Local collections use function-frame memory:
+
+- array literals allocate in the current function-frame arena
+- list literals allocate in the current function-frame arena
+- `make([]T, n)` allocates backing storage in the current function-frame arena
+- if local frame-backed data is returned, it is copied into `trux_result_arena`
 
 Slices are views:
 
 - returning a slice of parameter-owned data is okay
-- returning a slice of local temp data requires copying
+- returning a slice of local frame-backed data requires copying into `trux_result_arena`
 
 `clone(x)` creates an owned dynamic value in the selected ownership target for the expression context:
 
-- `return clone(xs[:])` allocates in `trux_result_arena`
-- `let ys []int = clone(xs[:])` allocates in `trux_ctx->arena`
+- `return clone(xs[:])` allocates directly in `trux_result_arena`
+- `let ys []int = clone(xs[:])` allocates in the current function-frame arena
+- returning a frame-owned dynamic value copies it into `trux_result_arena`
 
 For collections containing strings, `clone` deep-copies each string element.
 

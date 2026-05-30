@@ -27,9 +27,9 @@ func cloneThenEdit(xs []int) []int {
     return owned
 }
 
-// A local clone allocates into trux_ctx->arena.
-// Returning it is safe after function scratch memory is rewound.
-func durableLocalClone() []int {
+// A local clone allocates into the function frame.
+// Returning it copies the frame-owned data into the result arena.
+func frameLocalClone() []int {
     let xs [3]int = [3]int{7, 8, 9}
     let ys []int = clone(xs[:])
     return ys
@@ -57,8 +57,8 @@ func main() int {
     let edited []int = cloneThenEdit(xs[:])
     print(xs[0], " ", edited[0])
 
-    let durable []int = durableLocalClone()
-    print(durable[0], " ", durable[2])
+    let framed []int = frameLocalClone()
+    print(framed[0], " ", framed[2])
 
     let words list[string] = builtWords()
     print(words[0], " ", words[1], " ", len(words))

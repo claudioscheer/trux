@@ -222,7 +222,7 @@ func midOwned(xs []int) []int {
     return clone(xs[1:2])
 }
 
-func ownedLocal() []int {
+func frameOwnedLocal() []int {
     let xs [3]int = [3]int{1, 2, 3}
     let ys []int = clone(xs[:])
     return ys
@@ -241,8 +241,8 @@ func main() int {
     xs[1] = 9
     print(borrowed[0], " ", owned[0])
 
-    let durable []int = ownedLocal()
-    print(durable[0], " ", durable[2])
+    let framed []int = frameOwnedLocal()
+    print(framed[0], " ", framed[2])
     return 0
 }`)
 

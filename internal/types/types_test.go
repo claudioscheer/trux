@@ -305,9 +305,15 @@ func main() int {
 	if !ast.TypeEqual(info.CloneCalls[nameClone].Type, ast.StringType) {
 		t.Fatalf("clone type = %s, want string", info.CloneCalls[nameClone].Type)
 	}
+	if info.ExprOrigins[nameClone] != OriginFrameOwned {
+		t.Fatalf("clone origin = %s, want %s", info.ExprOrigins[nameClone], OriginFrameOwned)
+	}
 	sliceClone := mainFn.Body.Statements[2].(*ast.LetStmt).Value.(*ast.CallExpr)
 	if !ast.TypeEqual(info.CloneCalls[sliceClone].Type, &ast.SliceType{Elem: ast.IntType}) {
 		t.Fatalf("slice clone type = %s, want []int", info.CloneCalls[sliceClone].Type)
+	}
+	if info.ExprOrigins[sliceClone] != OriginFrameOwned {
+		t.Fatalf("slice clone origin = %s, want %s", info.ExprOrigins[sliceClone], OriginFrameOwned)
 	}
 }
 

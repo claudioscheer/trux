@@ -47,7 +47,6 @@ typedef struct {
 
 typedef struct {
     rt_arena* arena;
-    rt_arena* temp;
 } rt_context;
 
 typedef struct {
@@ -192,6 +191,13 @@ static RT_UNUSED size_t rt_checked_count(int64_t count, const char* what) {
     return (size_t)count;
 }
 
+static RT_UNUSED int64_t rt_checked_len_i64(size_t len) {
+    if (len > (size_t)INT64_MAX) {
+        rt_runtime_fail("length too large");
+    }
+    return (int64_t)len;
+}
+
 static RT_UNUSED size_t rt_checked_bytes(size_t count, size_t elem_size) {
     if (elem_size != 0 && count > SIZE_MAX / elem_size) {
         rt_runtime_fail("allocation size overflow");
@@ -218,12 +224,18 @@ static RT_UNUSED size_t rt_check_index(size_t len, int64_t index) {
 
 static RT_UNUSED rt_range rt_check_slice(size_t len, bool has_start, int64_t start_value, bool has_end, int64_t end_value) {
     int64_t start = has_start ? start_value : 0;
-    int64_t end = has_end ? end_value : (int64_t)len;
+    int64_t end = has_end ? end_value : rt_checked_len_i64(len);
     if (start < 0 || end < 0 || start > end || (uint64_t)end > len) {
         fprintf(stderr, "trux runtime error: slice %" PRId64 ":%" PRId64 " out of bounds for length %zu\n", start, end, len);
         exit(1);
     }
     return (rt_range){(size_t)start, (size_t)end};
+}
+
+static RT_UNUSED void rt_check_string(rt_string value) {
+    if (value.len > 0 && value.data == NULL) {
+        rt_runtime_fail("invalid string: non-zero length with NULL data");
+    }
 }
 
 static RT_UNUSED void rt_print_int(int64_t value) {
@@ -235,7 +247,13 @@ static RT_UNUSED void rt_print_float(double value) {
 }
 
 static RT_UNUSED void rt_print_string(rt_string value) {
-    fwrite(value.data, 1, value.len, stdout);
+    if (value.len == 0) {
+        return;
+    }
+    rt_check_string(value);
+    if (fwrite(value.data, 1, value.len, stdout) != value.len) {
+        rt_runtime_fail("write failed");
+    }
 }
 
 static RT_UNUSED void rt_print_bool(bool value) {
@@ -247,6 +265,8 @@ static RT_UNUSED void rt_print_newline(void) {
 }
 
 static RT_UNUSED bool rt_string_equal(rt_string left, rt_string right) {
+    rt_check_string(left);
+    rt_check_string(right);
     if (left.len != right.len) {
         return false;
     }
@@ -257,20 +277,24 @@ static RT_UNUSED bool rt_string_equal(rt_string left, rt_string right) {
 }
 
 static RT_UNUSED rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_string right) {
-    if (left.len == 0) {
-        return right;
-    }
-    if (right.len == 0) {
-        return left;
-    }
     if (left.len > SIZE_MAX - right.len) {
         rt_runtime_fail("string length overflow");
     }
 
     size_t len = left.len + right.len;
+    if (len == 0) {
+        return (rt_string){NULL, 0};
+    }
+
     uint8_t* data = rt_arena_alloc(arena, len);
-    memcpy(data, left.data, left.len);
-    memcpy(data + left.len, right.data, right.len);
+    if (left.len > 0) {
+        rt_check_string(left);
+        memcpy(data, left.data, left.len);
+    }
+    if (right.len > 0) {
+        rt_check_string(right);
+        memcpy(data + left.len, right.data, right.len);
+    }
     return (rt_string){data, len};
 }
 
@@ -278,23 +302,28 @@ static RT_UNUSED rt_string rt_string_clone(rt_arena* arena, rt_string value) {
     if (value.len == 0) {
         return (rt_string){NULL, 0};
     }
+    rt_check_string(value);
     uint8_t* data = rt_arena_alloc(arena, value.len);
     memcpy(data, value.data, value.len);
     return (rt_string){data, value.len};
 }
 
 static RT_UNUSED rt_string rt_string_index(rt_string value, int64_t index) {
+    rt_check_string(value);
     size_t checked = rt_check_index(value.len, index);
     return (rt_string){value.data + checked, 1};
 }
 
 static RT_UNUSED rt_string rt_string_slice(rt_string value, bool has_start, int64_t start, bool has_end, int64_t end) {
+    rt_check_string(value);
     rt_range range = rt_check_slice(value.len, has_start, start, has_end, end);
     const uint8_t* data = value.data == NULL ? NULL : value.data + range.start;
     return (rt_string){data, range.end - range.start};
 }
 
 static RT_UNUSED bool rt_string_contains(rt_string needle, rt_string haystack) {
+    rt_check_string(needle);
+    rt_check_string(haystack);
     if (needle.len == 0) {
         return true;
     }

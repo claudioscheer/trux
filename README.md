@@ -70,7 +70,7 @@ Debug files are written to `tmp/trux-debug/<source-name>/`.
 
 Minimal integer program:
 
-```trux
+```go trux
 package main
 
 func add(a int, b int) int {
@@ -92,7 +92,7 @@ Expected output:
 
 Strings, booleans, and multi-argument print:
 
-```trux
+```go trux
 package main
 
 func project() string {

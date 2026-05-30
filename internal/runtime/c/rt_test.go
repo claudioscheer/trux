@@ -288,6 +288,84 @@ int main(void) {
 	}
 }
 
+func TestCollectionHelpersRejectInvalidNonEmptyContainers(t *testing.T) {
+	tests := []struct {
+		name string
+		stmt string
+		want string
+	}{
+		{
+			name: "array from values",
+			stmt: `(void)rt_array_int_from_values(&arena, NULL, 1);`,
+			want: "trux runtime error: invalid array values: non-zero length with NULL data",
+		},
+		{
+			name: "array clone",
+			stmt: `rt_array_int ignored = rt_array_int_clone(&arena, (rt_array_int){NULL, 1}); (void)ignored;`,
+			want: "trux runtime error: invalid array: non-zero length with NULL data",
+		},
+		{
+			name: "array get",
+			stmt: `int64_t ignored = rt_array_int_get((rt_array_int){NULL, 1}, 0); (void)ignored;`,
+			want: "trux runtime error: invalid array: non-zero length with NULL data",
+		},
+		{
+			name: "array slice",
+			stmt: `rt_slice_int ignored = rt_array_int_slice((rt_array_int){NULL, 1}, false, 0, false, 0); (void)ignored;`,
+			want: "trux runtime error: invalid array: non-zero length with NULL data",
+		},
+		{
+			name: "slice clone",
+			stmt: `rt_slice_int ignored = rt_slice_int_clone(&arena, (rt_slice_int){NULL, 1}); (void)ignored;`,
+			want: "trux runtime error: invalid slice: non-zero length with NULL data",
+		},
+		{
+			name: "slice get",
+			stmt: `int64_t ignored = rt_slice_int_get((rt_slice_int){NULL, 1}, 0); (void)ignored;`,
+			want: "trux runtime error: invalid slice: non-zero length with NULL data",
+		},
+		{
+			name: "slice slice",
+			stmt: `rt_slice_int ignored = rt_slice_int_slice((rt_slice_int){NULL, 1}, false, 0, false, 0); (void)ignored;`,
+			want: "trux runtime error: invalid slice: non-zero length with NULL data",
+		},
+		{
+			name: "list from values",
+			stmt: `(void)rt_list_int_from_values(&arena, NULL, 1);`,
+			want: "trux runtime error: invalid list values: non-zero length with NULL data",
+		},
+		{
+			name: "list clone",
+			stmt: `rt_list_int bad = {NULL, 1, 1}; rt_list_int* ignored = rt_list_int_clone(&arena, &bad); (void)ignored;`,
+			want: "trux runtime error: invalid list: non-zero length with NULL data",
+		},
+		{
+			name: "list get",
+			stmt: `rt_list_int bad = {NULL, 1, 1}; int64_t ignored = rt_list_int_get(&bad, 0); (void)ignored;`,
+			want: "trux runtime error: invalid list: non-zero length with NULL data",
+		},
+		{
+			name: "list slice",
+			stmt: `rt_list_int bad = {NULL, 1, 1}; rt_slice_int ignored = rt_list_int_slice(&bad, false, 0, false, 0); (void)ignored;`,
+			want: "trux runtime error: invalid list: non-zero length with NULL data",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compileAndRunRuntimeCExpectFailure(t, Source+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+    `+tt.stmt+`
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`, tt.want)
+		})
+	}
+}
+
 func TestCheckedLenI64RejectsTooLargeLength(t *testing.T) {
 	compileAndRunRuntimeCExpectFailure(t, Source+`
 int main(void) {

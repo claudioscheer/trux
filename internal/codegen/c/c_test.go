@@ -553,6 +553,96 @@ func mustGenerateC(t *testing.T, src string) string {
 	return cSource
 }
 
+func generatedFunctionBody(t *testing.T, cSource string, name string) string {
+	t.Helper()
+
+	marker := "trux_" + name + "("
+	searchStart := 0
+	for {
+		idx := strings.Index(cSource[searchStart:], marker)
+		if idx < 0 {
+			t.Fatalf("generated C missing function %s:\n%s", name, cSource)
+		}
+		idx += searchStart
+		lineStart := strings.LastIndex(cSource[:idx], "\n") + 1
+		lineEnd := strings.Index(cSource[idx:], "\n")
+		if lineEnd < 0 {
+			lineEnd = len(cSource)
+		} else {
+			lineEnd += idx
+		}
+		line := cSource[lineStart:lineEnd]
+		if strings.HasSuffix(line, " {") {
+			open := strings.Index(cSource[lineStart:], "{") + lineStart
+			depth := 0
+			for i := open; i < len(cSource); i++ {
+				switch cSource[i] {
+				case '{':
+					depth++
+				case '}':
+					depth--
+					if depth == 0 {
+						return cSource[open+1 : i]
+					}
+				}
+			}
+			t.Fatalf("generated C function %s has no matching closing brace:\n%s", name, cSource)
+		}
+		searchStart = idx + len(marker)
+	}
+}
+
+func TestGenerateOnlyEmitsVoidCastsForUnusedRuntimeParameters(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func id(x int) int {
+    return x
+}
+
+func borrowedMiddle(xs []int) []int {
+    return xs[1:2]
+}
+
+func ownedMiddle(xs []int) []int {
+    return clone(xs[1:2])
+}
+
+func callsCtx(x int) int {
+    return id(x)
+}
+
+func main() int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let borrowed []int = borrowedMiddle(xs[:])
+    let owned []int = ownedMiddle(xs[:])
+    print(borrowed[0], " ", owned[0], " ", callsCtx(1))
+    return 0
+}`)
+
+	borrowed := generatedFunctionBody(t, cSource, "borrowedMiddle")
+	if !strings.Contains(borrowed, "(void)trux_ctx;") {
+		t.Fatalf("borrowedMiddle should mark unused trux_ctx:\n%s", borrowed)
+	}
+	if !strings.Contains(borrowed, "(void)trux_result_arena;") {
+		t.Fatalf("borrowedMiddle should mark unused trux_result_arena:\n%s", borrowed)
+	}
+
+	owned := generatedFunctionBody(t, cSource, "ownedMiddle")
+	if !strings.Contains(owned, "(void)trux_ctx;") {
+		t.Fatalf("ownedMiddle should mark unused trux_ctx:\n%s", owned)
+	}
+	if strings.Contains(owned, "(void)trux_result_arena;") {
+		t.Fatalf("ownedMiddle should not mark used trux_result_arena unused:\n%s", owned)
+	}
+
+	callsCtx := generatedFunctionBody(t, cSource, "callsCtx")
+	if strings.Contains(callsCtx, "(void)trux_ctx;") {
+		t.Fatalf("callsCtx should not mark used trux_ctx unused:\n%s", callsCtx)
+	}
+	if !strings.Contains(callsCtx, "(void)trux_result_arena;") {
+		t.Fatalf("callsCtx should mark unused trux_result_arena:\n%s", callsCtx)
+	}
+}
+
 func TestGenerateCopiesScratchSliceReturnToResultArena(t *testing.T) {
 	cSource := mustGenerateC(t, `package main
 func build() []int {

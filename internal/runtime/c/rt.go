@@ -238,6 +238,13 @@ static RT_UNUSED void rt_check_string(rt_string value) {
     }
 }
 
+static RT_UNUSED void rt_check_array_like(const void* data, size_t len, const char* what) {
+    if (len > 0 && data == NULL) {
+        fprintf(stderr, "trux runtime error: invalid %s: non-zero length with NULL data\n", what);
+        exit(1);
+    }
+}
+
 static RT_UNUSED void rt_print_int(int64_t value) {
     printf("%" PRId64, value);
 }
@@ -369,6 +376,7 @@ typedef struct { \
     size_t cap; \
 } rt_list_##NAME; \
 static RT_UNUSED rt_array_##NAME rt_array_##NAME##_from_values(rt_arena* arena, const CTYPE* values, size_t len) { \
+    rt_check_array_like(values, len, "array values"); \
     CTYPE* data = rt_arena_alloc_count(arena, len, sizeof(CTYPE), false); \
     if (len > 0) { \
         memcpy(data, values, len * sizeof(CTYPE)); \
@@ -376,6 +384,7 @@ static RT_UNUSED rt_array_##NAME rt_array_##NAME##_from_values(rt_arena* arena, 
     return (rt_array_##NAME){data, len}; \
 } \
 static RT_UNUSED rt_array_##NAME rt_array_##NAME##_clone(rt_arena* arena, rt_array_##NAME value) { \
+    rt_check_array_like(value.data, value.len, "array"); \
     CTYPE* data = rt_arena_alloc_count(arena, value.len, sizeof(CTYPE), false); \
     for (size_t i = 0; i < value.len; i++) { \
         data[i] = RT_CLONE_VALUE_##NAME(arena, value.data[i]); \
@@ -388,6 +397,7 @@ static RT_UNUSED rt_slice_##NAME rt_make_slice_##NAME(rt_arena* arena, int64_t c
     return (rt_slice_##NAME){data, len}; \
 } \
 static RT_UNUSED rt_slice_##NAME rt_slice_##NAME##_clone(rt_arena* arena, rt_slice_##NAME value) { \
+    rt_check_array_like(value.data, value.len, "slice"); \
     CTYPE* data = rt_arena_alloc_count(arena, value.len, sizeof(CTYPE), false); \
     for (size_t i = 0; i < value.len; i++) { \
         data[i] = RT_CLONE_VALUE_##NAME(arena, value.data[i]); \
@@ -395,34 +405,43 @@ static RT_UNUSED rt_slice_##NAME rt_slice_##NAME##_clone(rt_arena* arena, rt_sli
     return (rt_slice_##NAME){data, value.len}; \
 } \
 static RT_UNUSED CTYPE rt_array_##NAME##_get(rt_array_##NAME value, int64_t index) { \
+    rt_check_array_like(value.data, value.len, "array"); \
     return value.data[rt_check_index(value.len, index)]; \
 } \
 static RT_UNUSED CTYPE rt_slice_##NAME##_get(rt_slice_##NAME value, int64_t index) { \
+    rt_check_array_like(value.data, value.len, "slice"); \
     return value.data[rt_check_index(value.len, index)]; \
 } \
 static RT_UNUSED CTYPE rt_list_##NAME##_get(rt_list_##NAME* value, int64_t index) { \
+    rt_check_array_like(value->data, value->len, "list"); \
     return value->data[rt_check_index(value->len, index)]; \
 } \
 static RT_UNUSED void rt_array_##NAME##_set(rt_array_##NAME value, int64_t index, CTYPE elem) { \
+    rt_check_array_like(value.data, value.len, "array"); \
     value.data[rt_check_index(value.len, index)] = elem; \
 } \
 static RT_UNUSED void rt_slice_##NAME##_set(rt_slice_##NAME value, int64_t index, CTYPE elem) { \
+    rt_check_array_like(value.data, value.len, "slice"); \
     value.data[rt_check_index(value.len, index)] = elem; \
 } \
 static RT_UNUSED void rt_list_##NAME##_set(rt_list_##NAME* value, int64_t index, CTYPE elem) { \
+    rt_check_array_like(value->data, value->len, "list"); \
     value->data[rt_check_index(value->len, index)] = elem; \
 } \
 static RT_UNUSED rt_slice_##NAME rt_array_##NAME##_slice(rt_array_##NAME value, bool has_start, int64_t start, bool has_end, int64_t end) { \
+    rt_check_array_like(value.data, value.len, "array"); \
     rt_range range = rt_check_slice(value.len, has_start, start, has_end, end); \
     CTYPE* data = value.data == NULL ? NULL : value.data + range.start; \
     return (rt_slice_##NAME){data, range.end - range.start}; \
 } \
 static RT_UNUSED rt_slice_##NAME rt_slice_##NAME##_slice(rt_slice_##NAME value, bool has_start, int64_t start, bool has_end, int64_t end) { \
+    rt_check_array_like(value.data, value.len, "slice"); \
     rt_range range = rt_check_slice(value.len, has_start, start, has_end, end); \
     CTYPE* data = value.data == NULL ? NULL : value.data + range.start; \
     return (rt_slice_##NAME){data, range.end - range.start}; \
 } \
 static RT_UNUSED rt_slice_##NAME rt_list_##NAME##_slice(rt_list_##NAME* value, bool has_start, int64_t start, bool has_end, int64_t end) { \
+    rt_check_array_like(value->data, value->len, "list"); \
     rt_range range = rt_check_slice(value->len, has_start, start, has_end, end); \
     CTYPE* data = value->data == NULL ? NULL : value->data + range.start; \
     return (rt_slice_##NAME){data, range.end - range.start}; \
@@ -451,6 +470,7 @@ static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_new(rt_arena* arena, size_t ca
     return list; \
 } \
 static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_from_values(rt_arena* arena, const CTYPE* values, size_t len) { \
+    rt_check_array_like(values, len, "list values"); \
     rt_list_##NAME* list = rt_list_##NAME##_new(arena, len); \
     if (len > 0) { \
         memcpy(list->data, values, len * sizeof(CTYPE)); \
@@ -459,6 +479,7 @@ static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_from_values(rt_arena* arena, c
     return list; \
 } \
 static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_clone(rt_arena* arena, rt_list_##NAME* value) { \
+    rt_check_array_like(value->data, value->len, "list"); \
     rt_list_##NAME* list = rt_list_##NAME##_new(arena, value->len); \
     for (size_t i = 0; i < value->len; i++) { \
         list->data[i] = RT_CLONE_VALUE_##NAME(arena, value->data[i]); \
@@ -467,6 +488,7 @@ static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_clone(rt_arena* arena, rt_list
     return list; \
 } \
 static RT_UNUSED void rt_list_##NAME##_append(rt_list_##NAME* list, CTYPE elem) { \
+    rt_check_array_like(list->data, list->len, "list"); \
     if (list->len == list->cap) { \
         size_t new_cap = list->cap == 0 ? 4 : list->cap * 2; \
         if (new_cap < list->cap || new_cap > SIZE_MAX / sizeof(CTYPE)) { \

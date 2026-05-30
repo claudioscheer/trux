@@ -1,6 +1,7 @@
 package main
 
 func greet(name string) string {
+    // Concatenation allocates a dynamic string in compiler-managed memory.
     return "hello, " + name
 }
 
@@ -13,12 +14,22 @@ func main() int {
     let noun string = "compiler"
     let name string = language + " " + noun
     let empty string = ""
+    let text string = "trux compiler"
 
     print(name)
     print(greet(name))
     print(bang(name))
     print(empty + "empty")
     print((language + noun) == "truxcompiler")
+
+    // `in` reads left as the needle and right as the haystack.
+    print("trux" in text)
+    print("compiler" in text)
+    print("x c" in text)
+    print("missing" in text)
+    print("" in text)
+    print(text == "trux compiler")
+    print(text != "other")
 
     return 0
 }

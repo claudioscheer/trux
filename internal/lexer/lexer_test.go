@@ -7,8 +7,8 @@ import (
 	"github.com/claudioscheer/trux/internal/token"
 )
 
-func TestLexesV0Example(t *testing.T) {
-	input, err := os.ReadFile("../../examples/v0/hello.tx")
+func TestLexesHelloExample(t *testing.T) {
+	input, err := os.ReadFile("../../examples/hello.tx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestPrintIsIdentifier(t *testing.T) {
 	})
 }
 
-func TestLexesV1LiteralsAndTypes(t *testing.T) {
+func TestLexesPrimitiveLiteralsAndTypes(t *testing.T) {
 	assertTokens(t, Lex(`let name string = "trux\n" let ready bool = true false`), []expectedToken{
 		{token.Let, "let"},
 		{token.Ident, "name"},
@@ -113,7 +113,7 @@ func TestLexesV1LiteralsAndTypes(t *testing.T) {
 	})
 }
 
-func TestLexesV2Tokens(t *testing.T) {
+func TestLexesControlFlowAndComparisonTokens(t *testing.T) {
 	assertTokens(t, Lex(`if x <= 10 { y = 1.5 } else { while "x" in name != false { y = y + 1.0 } }`), []expectedToken{
 		{token.If, "if"},
 		{token.Ident, "x"},
@@ -144,7 +144,7 @@ func TestLexesV2Tokens(t *testing.T) {
 	})
 }
 
-func TestLexesV3CollectionTokens(t *testing.T) {
+func TestLexesCollectionTokens(t *testing.T) {
 	assertTokens(t, Lex(`let xs [3]int = [3]int{1, 2, 3} let ys []int = make([]int, len(xs)) append(list[int]{}, xs[0:2][1])`), []expectedToken{
 		{token.Let, "let"},
 		{token.Ident, "xs"},

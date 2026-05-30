@@ -29,7 +29,7 @@ func main() int {
 	}
 }
 
-func TestRunFileCompilesAndExecutesV0Program(t *testing.T) {
+func TestRunFileCompilesAndExecutesIntegerProgram(t *testing.T) {
 	requireCC(t)
 
 	path := writeTempSource(t, `package main
@@ -54,7 +54,7 @@ func main() int {
 	}
 }
 
-func TestRunFileCompilesAndExecutesV1Program(t *testing.T) {
+func TestRunFileCompilesAndExecutesPrimitiveProgram(t *testing.T) {
 	requireCC(t)
 
 	path := writeTempSource(t, `package main
@@ -113,7 +113,7 @@ func main() int {
 	}
 }
 
-func TestRunFileCompilesAndExecutesV2Examples(t *testing.T) {
+func TestRunFileCompilesAndExecutesControlAndStringExamples(t *testing.T) {
 	requireCC(t)
 
 	tests := []struct {
@@ -121,28 +121,20 @@ func TestRunFileCompilesAndExecutesV2Examples(t *testing.T) {
 		want string
 	}{
 		{
-			path: "../../examples/v2/control_flow.tx",
+			path: "../../examples/control_flow.tx",
 			want: "big\n0\n1\n2\ndone\n",
 		},
 		{
-			path: "../../examples/v2/floats.tx",
-			want: "2\n5\nhigh\n",
+			path: "../../examples/primitives.tx",
+			want: "trux 3 false\n2\nline\nquote: \"\n",
 		},
 		{
-			path: "../../examples/v2/fibonacci.tx",
+			path: "../../examples/fibonacci.tx",
 			want: "iterative\n0\n1\n1\n2\n3\n5\n8\n13\n21\n34\nrecursive\n0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n",
 		},
 		{
-			path: "../../examples/v2/mixed.tx",
-			want: "3.75\ntrue true\n",
-		},
-		{
-			path: "../../examples/v2/strings_in.tx",
-			want: "true\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\n",
-		},
-		{
-			path: "../../examples/v2/strings_concat.tx",
-			want: "trux compiler\nhello, trux compiler\ntrux compiler!\nempty\ntrue\n",
+			path: "../../examples/strings.tx",
+			want: "trux compiler\nhello, trux compiler\ntrux compiler!\nempty\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\n",
 		},
 	}
 
@@ -160,7 +152,7 @@ func TestRunFileCompilesAndExecutesV2Examples(t *testing.T) {
 	}
 }
 
-func TestRunFileCompilesAndExecutesV3Examples(t *testing.T) {
+func TestRunFileCompilesAndExecutesCollectionExamples(t *testing.T) {
 	requireCC(t)
 
 	tests := []struct {
@@ -168,19 +160,11 @@ func TestRunFileCompilesAndExecutesV3Examples(t *testing.T) {
 		want string
 	}{
 		{
-			path: "../../examples/v3/arrays.tx",
-			want: "3\n1 3\n9 2\n",
+			path: "../../examples/collections.tx",
+			want: "3\n1 3\n9 2\n8 8 2\n5 0 7\nr ru 4\n2 2\n3 2 3\n8 2\n",
 		},
 		{
-			path: "../../examples/v3/slices.tx",
-			want: "8 8 2\n5 0 7\nr ru 4\n",
-		},
-		{
-			path: "../../examples/v3/lists.tx",
-			want: "2 2\n3 2 3\n8 2\n",
-		},
-		{
-			path: "../../examples/v3/ownership_clone.tx",
+			path: "../../examples/ownership_clone.tx",
 			want: "99 2\n20 30\n1 42\n7 9\nab cd 2\n",
 		},
 	}
@@ -199,7 +183,7 @@ func TestRunFileCompilesAndExecutesV3Examples(t *testing.T) {
 	}
 }
 
-func TestRunFileCompilesAndExecutesPhase2Ownership(t *testing.T) {
+func TestRunFileCompilesAndExecutesOwnershipCopyOut(t *testing.T) {
 	requireCC(t)
 
 	path := writeTempSource(t, `package main
@@ -342,7 +326,7 @@ func main() int {
 	}
 }
 
-func TestRunFileWithDebugWritesEarlyPhaseFilesOnTypeError(t *testing.T) {
+func TestRunFileWithDebugWritesPartialFilesOnTypeError(t *testing.T) {
 	t.Cleanup(func() {
 		_ = os.RemoveAll("tmp")
 	})
@@ -542,7 +526,7 @@ func main() int {
 func TestGeneratedExamplesCompileWithStrictCWarnings(t *testing.T) {
 	requireCC(t)
 
-	paths, err := filepath.Glob("../../examples/*/*.tx")
+	paths, err := filepath.Glob("../../examples/*.tx")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,5 +1,6 @@
 package main
 
+// Small functions make generated C easy to inspect.
 func add(a int, b int) int {
     return a + b
 }
@@ -13,6 +14,7 @@ func square(x int) int {
 }
 
 func weighted(a int, b int, c int) int {
+    // Nested calls show that the typed IR resolves each call before codegen.
     return add(square(a), add(double(b), c))
 }
 

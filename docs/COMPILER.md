@@ -11,11 +11,11 @@ Hardcode a specific compiler only for narrow, documented reasons (e.g. a sanitiz
 
 ## Origin of the Question
 
-**[SPECS.md](SPECS.md)** (original pipeline diagram):
+The original pipeline diagram used to say:
 ```
-  → C code
-  → clang/gcc
-  → executable
+  -> C code
+  -> clang/gcc
+  -> executable
 ```
 
 **cmd/trux/run.go:19**:

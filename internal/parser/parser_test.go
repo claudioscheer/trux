@@ -8,8 +8,8 @@ import (
 	"github.com/claudioscheer/trux/internal/ast"
 )
 
-func TestParsesV0Example(t *testing.T) {
-	src, err := os.ReadFile("../../examples/v0/hello.tx")
+func TestParsesHelloExample(t *testing.T) {
+	src, err := os.ReadFile("../../examples/hello.tx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func main() int {
 	}
 }
 
-func TestParsesV1TypesAndLiterals(t *testing.T) {
+func TestParsesPrimitiveTypesAndLiterals(t *testing.T) {
 	program := mustParse(t, `package main
 func label() string {
     return "trux"
@@ -151,7 +151,7 @@ func main() int {
 	}
 }
 
-func TestParsesV2ControlFlowAssignmentFloatAndIn(t *testing.T) {
+func TestParsesControlFlowAssignmentFloatAndIn(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {
     let text string = "trux"
@@ -191,7 +191,7 @@ func main() int {
 	}
 }
 
-func TestParsesV3Collections(t *testing.T) {
+func TestParsesCollections(t *testing.T) {
 	program := mustParse(t, `package main
 func head(xs []int) int {
     return xs[0]

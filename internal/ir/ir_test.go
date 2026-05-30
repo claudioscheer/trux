@@ -8,7 +8,7 @@ import (
 	semtypes "github.com/claudioscheer/trux/internal/types"
 )
 
-func TestBuildCreatesTypedIRForV0Program(t *testing.T) {
+func TestBuildCreatesTypedIRForIntegerProgram(t *testing.T) {
 	program := mustParse(t, `package main
 func add(a int, b int) int {
     return a + b
@@ -65,7 +65,7 @@ func main() int {
 	}
 }
 
-func TestBuildCreatesTypedIRForV1Program(t *testing.T) {
+func TestBuildCreatesTypedIRForPrimitiveProgram(t *testing.T) {
 	program := mustParse(t, `package main
 func label() string {
     return "trux"
@@ -130,7 +130,7 @@ func main() int {
 	}
 }
 
-func TestBuildCreatesTypedIRForV2Program(t *testing.T) {
+func TestBuildCreatesTypedIRForControlFlowProgram(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {
     let text string = "trux"
@@ -205,7 +205,7 @@ func main() int {
 	}
 }
 
-func TestBuildCreatesTypedIRForV3Collections(t *testing.T) {
+func TestBuildCreatesTypedIRForCollections(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {
     let xs [2]int = [2]int{1, 2}

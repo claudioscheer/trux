@@ -1,0 +1,46 @@
+package main
+
+func main() int {
+    // Arrays have fixed length and store scalar elements.
+    let xs [3]int = [3]int{1, 2, 3}
+    print(len(xs))
+    print(xs[0], " ", xs[2])
+
+    // Slices are views. Mutating the slice writes through to the array.
+    xs[1] = 9
+    let mid []int = xs[1:3]
+    print(mid[0], " ", len(mid))
+
+    let ys [4]int = [4]int{1, 2, 3, 4}
+    let view []int = ys[1:3]
+    view[0] = 8
+    print(ys[1], " ", view[0], " ", len(view))
+
+    // `make` creates zero-filled slice backing storage.
+    let scratch []int = make([]int, 3)
+    scratch[0] = 5
+    scratch[2] = 7
+    print(scratch[0], " ", scratch[1], " ", scratch[2])
+
+    // String indexing returns a one-byte string view, not an integer byte.
+    let text string = "trux"
+    print(text[1], " ", text[1:3], " ", len(text))
+
+    // Lists are growable shared handles. Assigning a list copies the handle.
+    let items list[int] = list[int]{1}
+    let alias list[int] = items
+
+    append(items, 2)
+    print(len(alias), " ", alias[1])
+
+    append(alias, 3)
+    items[0] = items[0] + 1
+    let n int = len(alias)
+    print(n, " ", items[0], " ", items[2])
+
+    let tail []int = items[1:]
+    tail[0] = 8
+    print(items[1], " ", len(tail))
+
+    return 0
+}

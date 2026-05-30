@@ -3,12 +3,15 @@ package main
 func main() int {
     let x int = 10
 
+    // Conditions must be bool values. Numeric truthiness is intentionally
+    // rejected so generated C does not inherit C's loose condition rules.
     if x > 5 {
         print("big")
     } else {
         print("small")
     }
 
+    // Assignment updates an existing variable and keeps its original type.
     let i int = 0
     while i < 3 {
         print(i)

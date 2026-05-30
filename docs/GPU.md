@@ -1,40 +1,39 @@
-# GPU Programming Model
+# GPU Programming Model Idea
 
-**Core rule:** CPU and GPU have separate memory address spaces. All data movement must be explicit.
+This document is a future design note. GPU support is not implemented in the compiler, parser, type checker, runtime, or examples.
+
+The idea here is to preserve a possible direction: CPU and GPU have separate memory address spaces, and all data movement should be explicit.
 
 ## Recommended Abstraction
 
-Use `gpu.Buffer[T]` as the primary type for device memory.
+Use `gpu.Buffer[T]` as the primary type for device memory:
 
 ```trux
 let d_data gpu.Buffer[int] = gpu.alloc(n)
 ```
 
-`gpu.Buffer[T]` owns device memory and is the only way to pass data to kernels.
+`gpu.Buffer[T]` would own device memory and would be the only way to pass data to kernels.
 
-## Basic Pattern: CPU → GPU → CPU
+## Basic Pattern: CPU to GPU to CPU
 
 ```trux
 func main() int {
     let n int = 1024 * 1024
 
-    // 1. Data on CPU
+    // Data starts on the CPU.
     let h_data []int = make([]int, n)
-    // ... fill h_data on CPU ...
 
-    // 2. Allocate on GPU
+    // Device memory is explicit.
     let d_data gpu.Buffer[int] = gpu.alloc(n)
 
-    // 3. Send data to GPU (explicit copy)
+    // Copies are explicit so cost is visible in source.
     gpu.copy_to_device(h_data, d_data)
 
-    // 4. Launch kernel
     gpu.launch(fill, d_data, n)
 
-    // 5. Get results back (explicit copy)
+    // Copy results back only when host code needs them.
     gpu.copy_to_host(d_data, h_data)
 
-    // 6. Use results on CPU
     print(h_data[0])
 
     return 0
@@ -43,7 +42,7 @@ func main() int {
 
 ## Defining a Kernel
 
-Kernels are declared with the `kernel` keyword. They can only be called from the host via a launch, not normal function calls.
+Possible kernel syntax:
 
 ```trux
 kernel func fill(out gpu.Buffer[int], n int) {
@@ -55,10 +54,12 @@ kernel func fill(out gpu.Buffer[int], n int) {
 }
 ```
 
-Kernels have restrictions:
-- No dynamic allocation
-- Limited language features (see SPECS.md)
-- Operate on `gpu.Buffer` and primitive types
+Kernels would be restricted:
+
+- no dynamic allocation
+- limited language features
+- operate on `gpu.Buffer` and primitive types only
+- no host strings or complex host-owned values
 
 ## Launching a Kernel
 
@@ -66,86 +67,57 @@ Kernels have restrictions:
 gpu.launch(fill, d_data, n)
 ```
 
-The launch is asynchronous by default. Use explicit synchronization when you need to wait for completion before copying results back.
-
-## Complete Example
-
-```trux
-kernel func fill(out gpu.Buffer[int], n int) {
-    let i int = gpu.global_id()
-    if i < n {
-        out[i] = 42
-    }
-}
-
-func main() int {
-    let n int = 1024
-
-    let h_data []int = make([]int, n)
-
-    let d_data gpu.Buffer[int] = gpu.alloc(n)
-    gpu.copy_to_device(h_data, d_data)
-
-    gpu.launch(fill, d_data, n)
-
-    gpu.copy_to_host(d_data, h_data)
-
-    // h_data now contains results from the GPU
-    return 0
-}
-```
+Launches would likely be asynchronous by default. Source code would need explicit synchronization when it needs completion before copying results back.
 
 ## Key Operations
 
-| Operation                  | Description                              | Direction       |
-|---------------------------|------------------------------------------|-----------------|
-| `gpu.alloc(n)`            | Allocate `n` elements on the device      | -               |
-| `gpu.copy_to_device(h, d)`| Copy from CPU slice to `gpu.Buffer`      | Host → Device   |
-| `gpu.copy_to_host(d, h)`  | Copy from `gpu.Buffer` to CPU slice      | Device → Host   |
-| `gpu.launch(kernel, ...)` | Launch a GPU kernel                      | -               |
-| `gpu.free(buf)`           | Free device memory                       | -               |
+| Operation | Description | Direction |
+|-----------|-------------|-----------|
+| `gpu.alloc(n)` | Allocate `n` elements on the device | none |
+| `gpu.copy_to_device(h, d)` | Copy from CPU slice to `gpu.Buffer` | Host to device |
+| `gpu.copy_to_host(d, h)` | Copy from `gpu.Buffer` to CPU slice | Device to host |
+| `gpu.launch(kernel, ...)` | Launch a GPU kernel | none |
+| `gpu.free(buf)` | Free device memory | none |
 
 ## Mixing CPU and GPU Work
 
-You can freely interleave CPU and GPU execution:
+The intended model allows CPU and GPU execution to be interleaved:
 
 ```trux
-let input  []int = load_data_on_cpu()
-let device = gpu.alloc(len(input))
+let input []int = load_data_on_cpu()
+let device gpu.Buffer[int] = gpu.alloc(len(input))
 
 gpu.copy_to_device(input, device)
 gpu.launch(heavy_parallel_work, device, len(input))
 
-// Only copy back what the CPU actually needs
-let results = make([]int, 256)
+let results []int = make([]int, 256)
 gpu.copy_to_host_partial(device, results, 0, 256)
 
-let final = cpu_reduce(results)   // CPU post-processing
+let final int = cpu_reduce(results)
 save_results(final)
 ```
 
-**Guideline:** Only copy data back when the CPU actually needs it. Avoid round-tripping large buffers unnecessarily.
+Guideline: only copy data back when the CPU actually needs it. Avoid round-tripping large buffers unnecessarily.
 
 ## Synchronization Rules
 
-- `gpu.copy_to_host` is **synchronous** by default. It blocks until the kernel and copy complete.
-- For performance, use explicit synchronization or streams later:
-  - `gpu.sync()`
-  - Stream-based async copies
+Likely default rules:
 
-Do not read from a host buffer that was the target of a previous `copy_to_host` until the copy has completed.
+- `gpu.copy_to_host` is synchronous by default.
+- Explicit `gpu.sync()` or stream-based async copies can be added later.
+- Host code must not read from a host buffer that is the target of an unfinished copy.
 
 ## Design Decisions
 
-- **Explicit copies only** (default). Unified memory (`cudaMallocManaged`) is not the primary model and should only be offered as an opt-in later if needed.
+- Explicit copies are the default model.
+- Unified memory should only be offered later as an opt-in if it is needed.
 - `gpu.Buffer[T]` owns its memory. It is not a view.
-- String and other complex host types are **not** supported inside kernels in the initial GPU support.
-- Kernels are restricted. They operate on `gpu.Buffer` and primitive types only.
-- Host-side arenas are recommended for managing temporary staging buffers and other CPU-side GPU resources.
+- Kernels operate on `gpu.Buffer` and primitive types only.
+- Host-side arenas may help manage temporary staging buffers and other CPU-side GPU resources.
 
-## Generated Code Shape (C level)
+## Generated Code Shape
 
-The compiler will emit code similar to:
+A C/CUDA backend could emit code similar to:
 
 ```c
 int *h_data = ...;
@@ -161,9 +133,4 @@ cudaFree(d_data);
 
 ## Summary
 
-- CPU and GPU memory are separate.
-- Use `gpu.Buffer[T]` + explicit `copy_to_device` / `copy_to_host`.
-- Minimize data movement.
-- CPU work and GPU work can be mixed, but synchronization is required before reading copied-back data.
-
-This model prioritizes control and performance over convenience.
+This idea prioritizes control and performance over convenience. The central rule is explicit movement between CPU and GPU memory.

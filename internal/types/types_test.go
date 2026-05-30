@@ -8,7 +8,7 @@ import (
 	"github.com/claudioscheer/trux/internal/parser"
 )
 
-func TestCheckValidV0Program(t *testing.T) {
+func TestCheckValidIntegerProgram(t *testing.T) {
 	program := mustParse(t, `package main
 func add(a int, b int) int {
     return a + b
@@ -42,7 +42,7 @@ func main() int {
 	}
 }
 
-func TestCheckValidV1Program(t *testing.T) {
+func TestCheckValidPrimitiveProgram(t *testing.T) {
 	program := mustParse(t, `package main
 func label() string {
     return "trux"
@@ -85,7 +85,7 @@ func main() int {
 	}
 }
 
-func TestCheckValidV2Program(t *testing.T) {
+func TestCheckValidControlFlowProgram(t *testing.T) {
 	program := mustParse(t, `package main
 func more(value float) float {
     return value + 1.25
@@ -155,7 +155,7 @@ func main() int {
 	}
 }
 
-func TestCheckAllowsV3Collections(t *testing.T) {
+func TestCheckAllowsCollections(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {
     let xs [3]int = [3]int{1, 2, 3}
@@ -371,7 +371,7 @@ func main() int {
 	}
 }
 
-func TestCheckRejectsV0SemanticErrors(t *testing.T) {
+func TestCheckRejectsSemanticErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		src  string

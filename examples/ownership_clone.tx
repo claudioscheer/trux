@@ -6,20 +6,21 @@ func borrowedMiddle(xs []int) []int {
     return xs[1:3]
 }
 
-// clone makes the returned slice owned.
-// Use this when the caller should not observe later changes through the view.
+// `clone` makes the returned slice owned.
+// Use it when the caller should not observe later changes through the view.
 func ownedMiddle(xs []int) []int {
     return clone(xs[1:3])
 }
 
-// Local arrays use function scratch memory.
-// Returning a slice of scratch memory copies the selected elements into the result arena.
+// Local arrays use function-frame memory.
+// Returning a slice of local frame memory copies the selected elements into
+// the result arena so the returned value remains valid after the call.
 func scratchMiddle() []int {
     let xs [4]int = [4]int{10, 20, 30, 40}
     return xs[1:3]
 }
 
-// Parameter collections are read-only.
+// Parameter collections are read-only inside the callee.
 // The way to edit parameter data is to clone first, then mutate the owned copy.
 func cloneThenEdit(xs []int) []int {
     let owned []int = clone(xs[:])
@@ -36,7 +37,8 @@ func frameLocalClone() []int {
 }
 
 // Local lists and string concatenations use scratch memory.
-// Returning the list clones it into the result arena, including deep copies of string elements.
+// Returning the list clones it into the result arena, including deep copies of
+// string elements.
 func builtWords() list[string] {
     let words list[string] = list[string]{}
     append(words, "a" + "b")
@@ -48,6 +50,8 @@ func main() int {
     let xs [4]int = [4]int{1, 2, 3, 4}
     let borrowed []int = borrowedMiddle(xs[:])
     let owned []int = ownedMiddle(xs[:])
+
+    // The borrowed view observes the later mutation. The clone does not.
     xs[1] = 99
     print(borrowed[0], " ", owned[0])
 

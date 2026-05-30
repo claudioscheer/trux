@@ -40,7 +40,7 @@ The compiler currently supports:
 - C code generation and execution through `cc` or `$CC`
 - `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
 
-Nested collections, imports, and modules are not implemented yet.
+Nested collections, imports, modules, public package exports, and GPU kernels are not implemented.
 
 ## Building
 
@@ -55,13 +55,13 @@ This produces `bin/trux`.
 Run a source file:
 
 ```bash
-make run FILE=examples/v1/functions.tx
+make run FILE=examples/hello.tx
 ```
 
 Run with debug output for each compiler phase:
 
 ```bash
-make run FILE=examples/v1/functions.tx DEBUG=1
+make run FILE=examples/hello.tx DEBUG=1
 ```
 
 Debug files are written to `tmp/trux-debug/<source-name>/`.
@@ -90,25 +90,22 @@ Expected output:
 3
 ```
 
-Strings, booleans, and multi-argument print:
+Strings, booleans, floats, and multi-argument print:
 
 ```go trux
 package main
 
-func project() string {
-    return "trux"
-}
-
-func stable() bool {
-    return false
+func mean(a float, b float) float {
+    return (a + b) / 2.0
 }
 
 func main() int {
-    let name string = project()
-    let isStable bool = stable()
+    let name string = "trux"
+    let stable bool = false
+    let average float = mean(1.5, 2.5)
 
-    print(name, " ", 1, " ", isStable)
-    print(isStable)
+    print(name, " ", stable)
+    print(average)
 
     return 0
 }
@@ -117,20 +114,20 @@ func main() int {
 Expected output:
 
 ```text
-trux 1 false
-false
+trux false
+2
 ```
 
-More examples live in [examples/](examples/). For the Phase 2 ownership lifecycle and `clone`, start with [examples/v3/ownership_clone.tx](examples/v3/ownership_clone.tx).
+More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/collections.tx](examples/collections.tx) and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current collection and ownership model.
 
 ## Commands
 
 ```bash
 make test
-make emit-c FILE=examples/v1/functions.tx
-make build-bin FILE=examples/v1/functions.tx OUT=bin/functions
+make emit-c FILE=examples/hello.tx
+make build-bin FILE=examples/hello.tx OUT=bin/hello
 ```
 
 ## Documentation
 
-See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including arenas, modules, and GPU support.
+See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including arenas, modules, and future GPU ideas.

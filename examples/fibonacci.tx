@@ -1,6 +1,7 @@
 package main
 
 func fibRecursive(n int) int {
+    // Recursive calls work like any other resolved function call.
     if n <= 1 {
         return n
     }
@@ -13,6 +14,7 @@ func printIterative(count int) int {
     let a int = 0
     let b int = 1
 
+    // The loop version demonstrates mutable locals without recursion.
     while i < count {
         print(a)
 

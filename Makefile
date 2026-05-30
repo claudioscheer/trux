@@ -11,18 +11,18 @@ CMD := ./cmd/trux
 build:
 	$(GO) build -o bin/$(BINARY) $(CMD)
 
-# Usage: make run FILE=examples/v0/hello.tx
+# Usage: make run FILE=examples/hello.tx
 run: build
 	@if [ -z "$(FILE)" ]; then echo "Usage: make run FILE=path/to/file.tx"; exit 1; fi
 	./bin/$(BINARY) run $(if $(DEBUG),--debug )$(RUN_FLAGS) $(FILE)
 
-# Usage: make build-bin FILE=examples/v0/hello.tx OUT=bin/hello
+# Usage: make build-bin FILE=examples/hello.tx OUT=bin/hello
 build-bin: build
 	@if [ -z "$(FILE)" ]; then echo "Usage: make build-bin FILE=path/to/file.tx"; exit 1; fi
 	@if [ -z "$(OUT)" ]; then echo "Usage: make build-bin FILE=path/to/file.tx OUT=path/to/output"; exit 1; fi
 	./bin/$(BINARY) build -o $(OUT) $(FILE)
 
-# Usage: make emit-c FILE=examples/v0/hello.tx
+# Usage: make emit-c FILE=examples/hello.tx
 emit-c: build
 	@if [ -z "$(FILE)" ]; then echo "Usage: make emit-c FILE=path/to/file.tx"; exit 1; fi
 	./bin/$(BINARY) emit-c $(FILE)

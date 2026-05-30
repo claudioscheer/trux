@@ -9,7 +9,7 @@ import (
 	semtypes "github.com/claudioscheer/trux/internal/types"
 )
 
-func TestGenerateCreatesCForV0Program(t *testing.T) {
+func TestGenerateCreatesCForIntegerProgram(t *testing.T) {
 	program, err := parser.Parse(`package main
 func add(a int, b int) int {
     return a + b
@@ -76,7 +76,7 @@ func main() int {
 	}
 }
 
-func TestGenerateCreatesCForV1Program(t *testing.T) {
+func TestGenerateCreatesCForPrimitiveProgram(t *testing.T) {
 	program, err := parser.Parse(`package main
 func label() string {
     return "trux"
@@ -141,7 +141,7 @@ func main() int {
 	}
 }
 
-func TestGenerateCreatesCForV2Program(t *testing.T) {
+func TestGenerateCreatesCForControlFlowProgram(t *testing.T) {
 	program, err := parser.Parse(`package main
 func main() int {
     let text string = "trux"
@@ -480,7 +480,7 @@ func main() int {
 	}
 }
 
-func TestGenerateCreatesCForV3Collections(t *testing.T) {
+func TestGenerateCreatesCForCollections(t *testing.T) {
 	program, err := parser.Parse(`package main
 func main() int {
     let xs [3]int = [3]int{1, 2, 3}

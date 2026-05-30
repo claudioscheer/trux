@@ -1,234 +1,78 @@
-# `trux` Early Specification
+# `trux` Language Specification
 
 ## Goal
 
 `trux` is a small Go-inspired language that compiles to C.
 
-`trux` is not Go-compatible. It only borrows simple syntax ideas from Go.
+`trux` is not Go-compatible. It borrows simple syntax ideas from Go while keeping the compiler small enough to understand end to end.
 
-The compiler is written in Go.
+The compiler is written in Go. The current backend emits C and invokes `cc` or `$CC`.
 
-The first backend is C.
-
----
-
-# Compiler Pipeline
+## Compiler Pipeline
 
 `trux` uses this pipeline:
 
 ```text
 source code
-  → lexer
-  → parser
-  → AST
-  → type checker
-  → typed IR
-  → C code
-  → cc (or $CC)
-  → executable
+  -> lexer
+  -> parser
+  -> AST
+  -> type checker
+  -> typed IR
+  -> C code
+  -> cc (or $CC)
+  -> executable
 ```
 
-For v0, typed IR can be simple.
+The typed IR is a separate checked representation consumed by the C backend. It stores resolved function calls, resolved builtin calls, variable types, expression types, function signatures, and ownership metadata for dynamic values.
 
-A typed IR means the compiler has already checked what every expression means and what type it has before generating C.
+## Program Shape
 
----
+Every source file starts with a package declaration:
 
-# v0: Minimal Language
-
-## Goal
-
-v0 proves the full compiler pipeline.
-
-It supports only enough syntax to compile simple integer programs.
-
-## Supported Features
-
-```text
+```trux
 package main
-func
-return
-let
-int
-function calls
-integer literals
-+ - * /
-print
-line comments (// ...)
 ```
 
-## Example
+The compiler currently accepts single-file programs only. A runnable program must define:
 
-```go
-package main
-
-func add(a int, b int) int {
-    return a + b
-}
-
-func main() int {
-    let x int = add(1, 2)
-    print(x)
-    return 0
-}
-```
-
-Expected output:
-
-```text
-3
-```
-
-## Types
-
-v0 supports one type:
-
-```text
-int
-```
-
-`int` maps to C as:
-
-```c
-int64_t
-```
-
-## Functions
-
-Functions must declare parameter types and return type.
-
-```go
-func add(a int, b int) int {
-    return a + b
-}
-```
-
-## Variables
-
-Variables use `let`.
-
-```go
-let x int = 10
-```
-
-All variables require explicit types.
-
-## Expressions
-
-Supported expressions:
-
-```text
-integer literals
-variables
-function calls
-parenthesized expressions
-binary arithmetic
-```
-
-Supported operators:
-
-```text
-+ - * /
-```
-
-All operators work only on `int`.
-
-## Print
-
-`print(expr)` prints an integer.
-
-```go
-print(x)
-```
-
-## Entry Point
-
-Every program must have:
-
-```go
+```trux
 func main() int
 ```
 
-The compiler generates a real C `main` function that calls `trux` `main`.
-
-## v0 Compiler Checks
-
-The compiler must reject:
-
-```text
-syntax errors
-undefined variables
-undefined functions
-duplicate function names
-duplicate local variables
-wrong number of function arguments
-missing main function
-invalid return type
-invalid expression type
-```
-
----
-
-# v1: Strings, Booleans, Typed IR
-
-## Goal
-
-v1 adds basic strings, booleans, and a real typed IR.
-
-The compiler should no longer treat typed IR as just a checked AST. It should build a separate typed representation that the C backend consumes.
-
-## New Supported Features
-
-```text
-string
-bool
-true
-false
-string literals
-boolean literals
-print(string)
-print(bool)
-typed IR
-```
-
-## Example
-
-```go
-package main
-
-func main() int {
-    let name string = "trux"
-    let ready bool = true
-
-    print(name)
-    print(ready)
-
-    return 0
-}
-```
-
-Expected output:
-
-```text
-trux
-true
-```
+The generated C program contains a real `main` function that creates the runtime context, calls the Trux `main`, and returns its integer exit code.
 
 ## Types
 
-v1 supports:
+Supported scalar types:
 
 ```text
 int
+float
 string
 bool
 ```
 
-## String Type
+Supported collection types:
 
-A `trux` string is not a raw C `char*`.
+```text
+[N]T
+[]T
+list[T]
+```
 
-It should be represented as:
+Collection element types are limited to scalar types. Nested collections are rejected.
+
+Current C mappings:
+
+```text
+int    -> int64_t
+float  -> double
+bool   -> bool
+string -> rt_string
+```
+
+A `trux` string is not a raw C `char*`. It is represented as:
 
 ```c
 typedef struct {
@@ -237,324 +81,155 @@ typedef struct {
 } rt_string;
 ```
 
-## Boolean Type
+## Functions and Variables
 
-A `trux` bool maps to C as:
+Functions must declare parameter types and return type:
 
-```c
-bool
-```
-
-Generated C should include:
-
-```c
-#include <stdbool.h>
-```
-
-## Print
-
-`print` supports:
-
-```text
-print(int)
-print(string)
-print(bool)
-```
-
-The typed IR decides which runtime function to call:
-
-```text
-print(int)    → rt_print_int
-print(string) → rt_print_string
-print(bool)   → rt_print_bool
-```
-
-## Runtime Functions
-
-The runtime should provide:
-
-```c
-void rt_print_int(int64_t value);
-void rt_print_string(rt_string value);
-void rt_print_bool(bool value);
-```
-
-## Typed IR
-
-v1 should introduce a real typed IR.
-
-The typed IR must store:
-
-```text
-function names
-function parameters
-function return types
-variable types
-expression types
-resolved function calls
-resolved print calls
-```
-
-Example source:
-
-```go
-let name string = "trux"
-print(name)
-```
-
-Typed IR should know:
-
-```text
-name has type string
-print(name) calls print(string)
-```
-
-## v1 Compiler Checks
-
-The compiler must reject:
-
-```text
-assigning string to int
-assigning int to string
-assigning bool to int
-using string with + - * /
-using bool with + - * /
-returning the wrong type
-calling functions with wrong argument types
-```
-
----
-
-# v2: Control Flow
-
-## Goal
-
-v2 adds basic control flow.
-
-## New Supported Features
-
-```text
-if
-else
-while
-comparison operators
-boolean conditions
-variable assignment
-float
-string containment with in
-string concatenation with +
-```
-
-## Example
-
-```go
-package main
-
-func main() int {
-    let x int = 10
-
-    if x > 5 {
-        print("big")
-    } else {
-        print("small")
-    }
-
-    return 0
+```trux
+func add(a int, b int) int {
+    return a + b
 }
 ```
 
-Expected output:
+Variables use `let` and require explicit types:
+
+```trux
+let x int = 10
+```
+
+Assignment updates an existing variable and must preserve its type:
+
+```trux
+x = x + 1
+```
+
+Block-local variables are scoped to the block where they are declared.
+
+## Expressions
+
+Supported expressions include:
 
 ```text
-big
+integer literals
+float literals
+string literals
+boolean literals
+variables
+function calls
+parenthesized expressions
+binary arithmetic
+comparisons
+string containment
+collection literals
+indexing
+slicing
+make([]T, n)
+clone(x)
+len(x)
 ```
 
-## While Example
-
-```go
-package main
-
-func main() int {
-    let i int = 0
-
-    while i < 3 {
-        print(i)
-        i = i + 1
-    }
-
-    return 0
-}
-```
-
-Expected output:
+Arithmetic operators:
 
 ```text
-0
-1
-2
++ - * /
 ```
 
-## Comparison Operators
+Arithmetic requires matching numeric operands. The compiler does not implicitly promote `int` to `float`.
 
-v2 supports these types:
-
-```text
-int
-float
-string
-bool
-```
-
-`float` maps to C as:
-
-```c
-double
-```
-
-Trux does not implicitly promote `int` to `float`. Mixed numeric arithmetic, comparisons, function calls, and assignments are rejected.
-
-v2 supports:
+Comparison operators:
 
 ```text
 == != < <= > >=
 ```
 
-Comparisons return:
+Comparisons return `bool`. Numeric ordering comparisons require matching numeric operands. Equality supports matching `int`, `float`, `string`, and `bool` operands.
 
-```text
-bool
-```
+String containment uses `in`:
 
-Example:
-
-```go
-let result bool = 1 < 2
-```
-
-Numeric comparisons require matching numeric operands:
-
-```go
-let a bool = 1 < 2
-let b bool = 1.0 < 2.0
-```
-
-Invalid:
-
-```go
-let bad bool = 1 < 2.0
-```
-
-Equality supports matching `int`, `float`, `string`, and `bool` operands.
-
-## String Containment
-
-v2 supports string containment:
-
-```go
+```trux
 let found bool = "ux" in "trux"
 ```
 
-The left operand is the needle. The right operand is the haystack.
+The left operand is the needle. The right operand is the haystack. Both operands must be `string`, and the result is `bool`.
 
-`in` requires `string` operands and returns `bool`.
+String concatenation uses `+`:
 
-## String Concatenation
-
-v2 supports string concatenation:
-
-```go
+```trux
 let name string = "trux" + " compiler"
 ```
 
-`+` requires matching `string` operands and returns `string`.
+Concatenated strings are dynamic strings allocated in compiler-managed memory. String literals point at static storage.
 
-Concatenated strings are dynamic strings allocated in the generated program arena. String literals continue to point at static storage. Dynamic strings live until the generated program arena is destroyed at program exit.
+## Statements
 
-## If / Else
+Supported statements:
 
-`if` requires a `bool` condition.
-
-```go
-if condition {
-    ...
-}
+```text
+let
+assignment
+indexed assignment
+return
+if / else
+while
+print(...)
+append(list, value)
 ```
 
-`else` is optional.
+`if` and `while` require `bool` conditions:
 
-```go
-if condition {
-    ...
+```trux
+if x > 5 {
+    print("big")
 } else {
-    ...
+    print("small")
+}
+
+while x < 10 {
+    x = x + 1
 }
 ```
 
-Invalid:
+`print` supports one or more scalar arguments:
 
-```go
-if 123 {
-    print("bad")
-}
+```trux
+print("count: ", 3, " ", true)
 ```
 
-The compiler must reject this because `123` is an `int`, not a `bool`.
+The typed IR decides which runtime function each argument needs:
 
-## While
-
-`while` requires a `bool` condition.
-
-```go
-while i < 10 {
-    i = i + 1
-}
+```text
+print(int)    -> rt_print_int
+print(float)  -> rt_print_float
+print(string) -> rt_print_string
+print(bool)   -> rt_print_bool
 ```
 
-## Assignment
+`append` is statement-only and mutates a list:
 
-v2 adds assignment to existing variables.
-
-```go
-i = i + 1
+```trux
+append(items, 2)
 ```
 
-The assigned value must match the variable type.
+## Collections
 
-Invalid:
+Arrays use `[N]T`, where `N` is a positive integer literal:
 
-```go
-let x int = 1
-x = "hello"
-```
-
-## v3 Collections
-
-v3 adds scalar-element collections:
-
-```go
-let xs [3]int = [3]int{1, 2, 3}
-let view []int = xs[1:]
-let items list[int] = list[int]{1, 2}
-```
-
-Element types are limited to `int`, `float`, `bool`, and `string`. Nested collections are rejected.
-
-Arrays use `[N]T`, where `N` is a positive integer literal. Array literals must provide exactly `N` elements:
-
-```go
+```trux
 let xs [3]int = [3]int{1, 2, 3}
 ```
+
+Array literals must provide exactly `N` elements.
 
 Slices use `[]T` and are borrowed views over arrays, slices, or lists:
 
-```go
+```trux
 let tail []int = xs[1:]
 let all []int = xs[:]
 ```
 
 Lists use `list[T]` and are growable shared handles:
 
-```go
+```trux
 let items list[int] = list[int]{1}
 append(items, 2)
 ```
@@ -563,22 +238,52 @@ Assigning or passing a list copies the handle. Mutating through any alias observ
 
 `make([]T, n)` creates zero-filled arena-backed storage and returns a slice view:
 
-```go
+```trux
 let scratch []int = make([]int, 10)
 ```
 
-Local array literals, list literals, and `make([]T, n)` allocate in function scratch memory. If scratch-backed collection data is returned, the generated function copies it into the caller-provided result arena before rewinding scratch memory:
+`len(x)` returns an `int` for strings, arrays, slices, and lists.
 
-```go
-func build() []int {
-    let xs [3]int = [3]int{1, 2, 3}
-    return xs[:]
-}
+Indexing works for strings, arrays, slices, and lists:
+
+```trux
+let first int = xs[0]
+let ch string = "abc"[1]
 ```
 
-Function returns are either borrowed or owned. Returning a parameter or a parameter-backed slice is borrowed by default:
+String indexing returns a one-byte `string` view. Strings are immutable, so string index assignment is rejected.
 
-```go
+Slicing works for strings, arrays, slices, and lists:
+
+```trux
+let sub []int = xs[1:3]
+let prefix string = "trux"[:2]
+```
+
+Indexed assignment works for arrays, slices, and lists:
+
+```trux
+xs[0] = 42
+view[1] = 7
+items[0] = 9
+```
+
+Runtime bounds checks trap invalid indexes and slices with a `trux runtime error`.
+
+## Ownership and Memory Model
+
+Dynamic allocation uses arenas for strings, arrays, and slice backing storage. Lists are heap-backed shared handles tracked by the runtime owner and freed at program exit, arena reset, or arena rewind.
+
+Generated code uses a durable arena plus compiler-managed function-frame arenas. Local dynamic values may use frame memory.
+
+Function returns are either borrowed or owned:
+
+- Borrowed returns are parameter values or parameter-backed slices/views.
+- Owned returns remain valid after the callee returns because they were copied into `trux_result_arena`, already live in the durable arena, or were frame-owned and copied into `trux_result_arena` during return.
+
+Returning a parameter or a parameter-backed slice is borrowed by default:
+
+```trux
 func mid(xs []int) []int {
     return xs[1:2]
 }
@@ -586,15 +291,15 @@ func mid(xs []int) []int {
 
 Use `clone(x)` when an owned copy is required:
 
-```go
+```trux
 func midOwned(xs []int) []int {
     return clone(xs[1:2])
 }
 ```
 
-`clone(x)` supports `string`, arrays, slices, and lists. It allocates into the selected ownership target for the expression context. In direct return context that target is the result arena. In local context that target is the current function-frame arena, and returning that frame-owned value copies it into the result arena:
+`clone(x)` supports `string`, arrays, slices, and lists. In direct return context, it allocates into the result arena. In local context, it allocates into the current function-frame arena, and returning that frame-owned value copies it into the result arena:
 
-```go
+```trux
 func frameOwnedLocal() []int {
     let xs [3]int = [3]int{1, 2, 3}
     let ys []int = clone(xs[:])
@@ -604,63 +309,40 @@ func frameOwnedLocal() []int {
 
 For collections containing strings, `clone` deep-copies each string element.
 
-See [examples/v3/ownership_clone.tx](../examples/v3/ownership_clone.tx) for an executable walkthrough of borrowed views, owned clones, scratch copy-out, and safe mutation through cloned parameter data.
-
-`len(x)` returns an `int` for strings, arrays, slices, and lists.
-
-Indexing works for strings, arrays, slices, and lists:
-
-```go
-let first int = xs[0]
-let ch string = "abc"[1]
-```
-
-String indexing returns a one-byte `string` view. Strings are immutable, so string index assignment is rejected.
-
-Slicing works for strings, arrays, slices, and lists:
-
-```go
-let sub []int = xs[1:3]
-let prefix string = "trux"[:2]
-```
-
-Indexed assignment works for arrays, slices, and lists:
-
-```go
-xs[0] = 42
-view[1] = 7
-items[0] = 9
-```
-
 Inside a function, collection parameters are borrowed. The function may read them and return values derived from them, but it may not mutate the parameter-owned collection or an alias/view of it:
 
-```go
+```trux
 func bad(xs list[int]) int {
     append(xs, 1) // rejected
     return len(xs)
 }
 ```
 
-Runtime bounds checks trap invalid indexes and slices with a `trux runtime error`.
+See [ARENAS.md](ARENAS.md) for the full memory model rationale. See [../examples/ownership_clone.tx](../examples/ownership_clone.tx) for an executable walkthrough.
 
-## v2 Compiler Checks
+## Compiler Checks
 
-The compiler must reject:
+The compiler rejects:
 
 ```text
-if condition that is not bool
-while condition that is not bool
-assignment to undefined variable
-assignment with wrong type
-comparison between incompatible types
+syntax errors
+undefined variables
+undefined functions
+duplicate function names
+duplicate local variables
+wrong number of function arguments
+missing main function
+main functions with parameters
+invalid return type
+invalid expression type
+assigning a value to the wrong variable type
+returning the wrong type
+calling functions with wrong argument types
+using arithmetic with incompatible operands
+using comparisons with incompatible operands
 using in with non-string operands
-```
-
-## v3 Compiler Checks
-
-The compiler must reject:
-
-```text
+if or while conditions that are not bool
+assignment to undefined variables
 nested collection element types
 array literals with the wrong element count
 collection literal elements with the wrong type
@@ -676,9 +358,7 @@ make with a non-slice type or non-int length
 clone with the wrong arity or unsupported type
 ```
 
----
-
-# Build Commands
+## Build Commands
 
 Minimum command:
 
@@ -693,84 +373,16 @@ trux build -o main main.tx
 trux emit-c main.tx
 ```
 
----
+## Future Ideas
 
-# Summary
+These ideas are not implemented and should not drive current language usage:
 
-## v0
+- packages and imports
+- public package exports
+- multi-file C output
+- GPU kernels
 
-```text
-minimal int language
-functions
-let
-return
-print(int)
-C backend
-```
-
-## v1
-
-```text
-string
-bool
-print(string)
-print(bool)
-real typed IR
-```
-
-## v2
-
-```text
-if
-else
-while
-comparisons
-assignment
-float
-string containment
-string concatenation
-```
-
-## v3
-
-```text
-arrays
-slices
-lists
-len
-make([]T, n)
-indexing
-slicing
-indexed assignment
-append for lists
-runtime bounds traps
-```
-
----
-
-# Memory Model
-
-Dynamic allocation uses arenas for strings, arrays, and slice backing storage. Lists are heap-backed shared handles tracked by the runtime owner and freed at program exit, arena reset, or arena rewind.
-
-Generated code uses a durable arena plus compiler-managed function-frame arenas. Local dynamic values may use frame memory. Function outputs are the only escape path: scratch-backed and frame-owned returns are copied into the caller-provided result arena, parameter-backed slice returns remain borrowed, and direct `return clone(x)` creates owned data directly in the result arena.
-
-See [ARENAS.md](ARENAS.md) for the full rationale, tradeoffs, staged evolution plan, and why GC was deferred.
-
-GPU support uses explicit memory copies via `gpu.Buffer[T]`. See [GPU.md](GPU.md) for the programming model.
-
-Module support will eventually require moving beyond single-file C generation. See [MODULES.md](MODULES.md).
-
-This is a deliberate design choice aligned with the project's goals of a small compiler, readable generated C, and learning compiler construction and systems language tradeoffs.
-
----
-
-# Future Direction
-
-Long-term goal: support packages, imports, public functions, and GPU kernels.
-
-These are not near-term priorities and will not drive early language design.
-
-## Public Functions
+Possible package/export syntax:
 
 ```trux
 package math
@@ -782,13 +394,9 @@ pub func add(a int, b int) int {
 func double(x int) int {
     return x * 2
 }
-````
+```
 
-`pub func` makes a function visible to other packages.
-
-Plain `func` stays private to the current package.
-
-## GPU Kernels
+Possible GPU kernel syntax:
 
 ```trux
 kernel func fill(out gpu.Buffer[int], n int) {
@@ -800,4 +408,4 @@ kernel func fill(out gpu.Buffer[int], n int) {
 }
 ```
 
-Kernel functions will be restricted and compiled through a separate GPU backend.
+Kernel functions would be restricted and compiled through a separate GPU backend.

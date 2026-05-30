@@ -401,7 +401,7 @@ func completionList() CompletionList {
 func baseCompletionItems() []CompletionItem {
 	return []CompletionItem{
 		{Label: "package", Kind: completionKindKeyword, Detail: "package declaration"},
-		{Label: "import", Kind: completionKindKeyword, Detail: "module import"},
+		{Label: "import", Kind: completionKindKeyword, Detail: "module or standard package import"},
 		{Label: "pub", Kind: completionKindKeyword, Detail: "public function export"},
 		{Label: "func", Kind: completionKindKeyword, Detail: "function declaration"},
 		{Label: "return", Kind: completionKindKeyword, Detail: "return statement"},
@@ -668,7 +668,7 @@ type Hover struct {
 
 var hoverText = map[string]string{
 	"package": "`package name` declares the package for the current file.",
-	"import":  "`import \"path.tx\"` loads a relative Trux module.",
+	"import":  "`import \"path.tx\"` loads a relative module; `import \"io\"` and `import \"csv\"` load standard packages.",
 	"pub":     "`pub func` exports a function to files that import this module.",
 	"func":    "`func name(params) type { ... }` declares a function.",
 	"return":  "`return expr` exits the current function with a value.",

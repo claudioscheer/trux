@@ -41,7 +41,7 @@ The compiler currently supports:
 - typed IR
 - C code generation and execution through `cc` or `$CC`
 - `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
-- stdin, file, and CSV IO through builtins
+- standard `io` and `csv` packages for stdin, file, and CSV IO
 
 Directory-based packages, separate module compilation, reusable package artifacts, and GPU kernels are not implemented.
 
@@ -132,9 +132,9 @@ printf 'Ada\n41\n' | make run FILE=examples/projects/io_basics/main.tx
 More complete IO examples live under [examples/projects/](examples/projects/):
 
 - `io_basics`: stdin, file IO, and CSV IO in one small program
-- `interactive_counter`: stdin with `readLine` and `readInt`
-- `file_notes`: `readFile` and `writeFile`
-- `csv_roster`: `readCsv`, list mutation, and `writeCsv`
+- `interactive_counter`: stdin with `io.readLine` and `io.readInt`
+- `file_notes`: `io.readFile` and `io.writeFile`
+- `csv_roster`: `csv.read`, list mutation, and `csv.write`
 
 ## Commands
 

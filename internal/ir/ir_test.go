@@ -1,9 +1,11 @@
 package ir
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/claudioscheer/trux/internal/ast"
+	"github.com/claudioscheer/trux/internal/modules"
 	"github.com/claudioscheer/trux/internal/parser"
 	semtypes "github.com/claudioscheer/trux/internal/types"
 )
@@ -282,14 +284,17 @@ func main() int {
 }
 
 func TestBuildCreatesTypedIRForIO(t *testing.T) {
-	program := mustParse(t, `package main
+	program := mustLoadProgram(t, `package main
+import "io"
+import "csv"
+
 func main() int {
-    let line string = readLine()
-    let count int = readInt()
-    let text string = readFile("input.txt")
-    writeFile("out.txt", text + line)
-    let cells list[string] = readCsv("in.csv", 2)
-    writeCsv("out.csv", cells, 2)
+    let line string = io.readLine()
+    let count int = io.readInt()
+    let text string = io.readFile("input.txt")
+    io.writeFile("out.txt", text + line)
+    let cells list[string] = csv.read("in.csv", 2)
+    csv.write("out.csv", cells, 2)
     print(line, " ", count, " ", len(cells))
     return 0
 }`)
@@ -349,4 +354,15 @@ func mustParse(t *testing.T, src string) *ast.Program {
 	}
 
 	return program
+}
+
+func mustLoadProgram(t *testing.T, src string) *ast.Program {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "main.tx")
+	result, err := modules.LoadWithSources(path, map[string]string{path: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result.Program
 }

@@ -280,6 +280,7 @@ type CallExpr struct {
 	Package        string
 	Callee         string
 	ResolvedCallee string
+	Stdlib         bool
 	Args           []Expression
 }
 

@@ -1,10 +1,12 @@
 package types
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/claudioscheer/trux/internal/ast"
+	"github.com/claudioscheer/trux/internal/modules"
 	"github.com/claudioscheer/trux/internal/parser"
 )
 
@@ -367,17 +369,20 @@ func main() int {
 	}
 }
 
-func TestCheckAllowsIOBuiltins(t *testing.T) {
-	program := mustParse(t, `package main
+func TestCheckAllowsStandardIOPackages(t *testing.T) {
+	program := mustLoadProgram(t, `package main
+import "io"
+import "csv"
+
 func main() int {
-    let line string = readLine()
-    let count int = readInt()
-    let ratio float = readFloat()
-    let ready bool = readBool()
-    let text string = readFile("input.txt")
-    writeFile("out.txt", text + line)
-    let cells list[string] = readCsv("in.csv", 2)
-    writeCsv("out.csv", cells, 2)
+    let line string = io.readLine()
+    let count int = io.readInt()
+    let ratio float = io.readFloat()
+    let ready bool = io.readBool()
+    let text string = io.readFile("input.txt")
+    io.writeFile("out.txt", text + line)
+    let cells list[string] = csv.read("in.csv", 2)
+    csv.write("out.csv", cells, 2)
     print(line, " ", count, " ", ratio, " ", ready, " ", len(cells))
     return 0
 }`)
@@ -761,53 +766,72 @@ func main() int {
 		{
 			name: "readLine arity",
 			src: `package main
+import "io"
+
 func main() int {
-    let line string = readLine("prompt")
+    let line string = io.readLine("prompt")
     return 0
 }`,
-			want: `readLine expects 0 arguments, got 1`,
+			want: `io.readLine expects 0 arguments, got 1`,
 		},
 		{
 			name: "readFile path type",
 			src: `package main
+import "io"
+
 func main() int {
-    let text string = readFile(1)
+    let text string = io.readFile(1)
     return 0
 }`,
-			want: `readFile path has type int, want string`,
+			want: `io.readFile path has type int, want string`,
 		},
 		{
 			name: "writeFile expression",
 			src: `package main
+import "io"
+
 func main() int {
-    return writeFile("out.txt", "contents")
+    return io.writeFile("out.txt", "contents")
 }`,
-			want: `writeFile can only be used as a statement`,
+			want: `io.writeFile can only be used as a statement`,
 		},
 		{
 			name: "readCsv columns type",
 			src: `package main
+import "csv"
+
 func main() int {
-    let cells list[string] = readCsv("in.csv", "2")
+    let cells list[string] = csv.read("in.csv", "2")
     return 0
 }`,
-			want: `readCsv columns has type string, want int`,
+			want: `csv.read columns has type string, want int`,
 		},
 		{
 			name: "writeCsv cells type",
 			src: `package main
+import "csv"
+
 func main() int {
     let cells list[int] = list[int]{1}
-    writeCsv("out.csv", cells, 1)
+    csv.write("out.csv", cells, 1)
     return 0
 }`,
-			want: `writeCsv cells has type list[int], want list[string]`,
+			want: `csv.write cells has type list[int], want list[string]`,
+		},
+		{
+			name: "legacy io builtin",
+			src: `package main
+func main() int {
+    let text string = readFile("in.txt")
+    return len(text)
+}`,
+			want: `undefined function "readFile"; use io.readFile after import "io"`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			program := mustParse(t, tt.src)
+			program := mustParseOrLoadProgram(t, tt.src)
 			_, err := Check(program)
 			if err == nil {
 				t.Fatal("expected error")
@@ -840,4 +864,24 @@ func mustParse(t *testing.T, src string) *ast.Program {
 	}
 
 	return program
+}
+
+func mustLoadProgram(t *testing.T, src string) *ast.Program {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "main.tx")
+	result, err := modules.LoadWithSources(path, map[string]string{path: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result.Program
+}
+
+func mustParseOrLoadProgram(t *testing.T, src string) *ast.Program {
+	t.Helper()
+
+	if strings.Contains(src, "\nimport ") {
+		return mustLoadProgram(t, src)
+	}
+	return mustParse(t, src)
 }

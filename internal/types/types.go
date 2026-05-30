@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/claudioscheer/trux/internal/ast"
+	"github.com/claudioscheer/trux/internal/stdlib"
 	"github.com/claudioscheer/trux/internal/token"
 )
 
@@ -47,14 +48,14 @@ type CloneSig struct {
 type IOCallKind string
 
 const (
-	IOCallReadLine  IOCallKind = "readLine"
-	IOCallReadInt   IOCallKind = "readInt"
-	IOCallReadFloat IOCallKind = "readFloat"
-	IOCallReadBool  IOCallKind = "readBool"
-	IOCallReadFile  IOCallKind = "readFile"
-	IOCallWriteFile IOCallKind = "writeFile"
-	IOCallReadCSV   IOCallKind = "readCsv"
-	IOCallWriteCSV  IOCallKind = "writeCsv"
+	IOCallReadLine  IOCallKind = IOCallKind(stdlib.CallReadLine)
+	IOCallReadInt   IOCallKind = IOCallKind(stdlib.CallReadInt)
+	IOCallReadFloat IOCallKind = IOCallKind(stdlib.CallReadFloat)
+	IOCallReadBool  IOCallKind = IOCallKind(stdlib.CallReadBool)
+	IOCallReadFile  IOCallKind = IOCallKind(stdlib.CallReadFile)
+	IOCallWriteFile IOCallKind = IOCallKind(stdlib.CallWriteFile)
+	IOCallReadCSV   IOCallKind = IOCallKind(stdlib.CallReadCSV)
+	IOCallWriteCSV  IOCallKind = IOCallKind(stdlib.CallWriteCSV)
 )
 
 type IOCallSig struct {
@@ -506,6 +507,18 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 	}
 
 	if expr.Package != "" && expr.ResolvedCallee == "" {
+		if expr.Stdlib {
+			member, ok := stdlib.LookupMember(expr.Package, expr.Callee)
+			if !ok {
+				return nil, typeError(expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
+			}
+			typ, origin, err := c.checkStdlibCall(expr, member, argTypes, allowPrint)
+			if err != nil {
+				return nil, err
+			}
+			c.setExpr(expr, typ, origin)
+			return typ, nil
+		}
 		return nil, typeError(expr.Start, "package %q is not imported", expr.Package)
 	}
 
@@ -568,20 +581,15 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		c.setExpr(expr, argTypes[0], c.exprOrigin(expr.Args[0]))
 		return argTypes[0], nil
 	}
-	if expr.Package == "" {
-		if typ, origin, ok, err := c.checkIOCall(expr, argTypes, allowPrint); ok {
-			if err != nil {
-				return nil, err
-			}
-			c.setExpr(expr, typ, origin)
-			return typ, nil
-		}
-	}
-
 	targetName := expr.TargetName()
 	displayName := expr.SourceName()
 	sig, ok := c.info.Funcs[targetName]
 	if !ok {
+		if expr.Package == "" {
+			if member, ok := stdlib.LookupLegacy(expr.Callee); ok {
+				return nil, typeError(expr.Start, "undefined function %q; use %s after import %q", expr.Callee, member.SourceName(), member.Package)
+			}
+		}
 		return nil, typeError(expr.Start, "undefined function %q", displayName)
 	}
 	if len(argTypes) != len(sig.Params) {
@@ -599,88 +607,33 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 	return sig.ReturnType, nil
 }
 
-func (c *checker) checkIOCall(expr *ast.CallExpr, argTypes []ast.Type, allowStatementOnly bool) (ast.Type, Origin, bool, error) {
-	switch IOCallKind(expr.Callee) {
-	case IOCallReadLine:
-		if len(argTypes) != 0 {
-			return nil, "", true, typeError(expr.Start, "readLine expects 0 arguments, got %d", len(argTypes))
+func (c *checker) checkStdlibCall(expr *ast.CallExpr, member stdlib.Member, argTypes []ast.Type, allowStatementOnly bool) (ast.Type, Origin, error) {
+	displayName := member.SourceName()
+	if member.StatementOnly && !allowStatementOnly {
+		return nil, "", typeError(expr.Start, "%s can only be used as a statement", displayName)
+	}
+	if len(argTypes) != len(member.Params) {
+		return nil, "", typeError(expr.Start, "%s expects %d arguments, got %d", displayName, len(member.Params), len(argTypes))
+	}
+	for i, argType := range argTypes {
+		want := member.Params[i].Type
+		if !ast.TypeEqual(argType, want) {
+			return nil, "", typeError(expr.Args[i].Pos(), "%s %s has type %s, want %s", displayName, member.Params[i].Name, argType, want)
 		}
-		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadLine}
-		return ast.StringType, OriginFrameOwned, true, nil
-	case IOCallReadInt:
-		if len(argTypes) != 0 {
-			return nil, "", true, typeError(expr.Start, "readInt expects 0 arguments, got %d", len(argTypes))
-		}
-		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadInt}
-		return ast.IntType, OriginOwned, true, nil
-	case IOCallReadFloat:
-		if len(argTypes) != 0 {
-			return nil, "", true, typeError(expr.Start, "readFloat expects 0 arguments, got %d", len(argTypes))
-		}
-		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadFloat}
-		return ast.FloatType, OriginOwned, true, nil
-	case IOCallReadBool:
-		if len(argTypes) != 0 {
-			return nil, "", true, typeError(expr.Start, "readBool expects 0 arguments, got %d", len(argTypes))
-		}
-		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadBool}
-		return ast.BoolType, OriginOwned, true, nil
-	case IOCallReadFile:
-		if len(argTypes) != 1 {
-			return nil, "", true, typeError(expr.Start, "readFile expects 1 argument, got %d", len(argTypes))
-		}
-		if !ast.TypeEqual(argTypes[0], ast.StringType) {
-			return nil, "", true, typeError(expr.Args[0].Pos(), "readFile path has type %s, want string", argTypes[0])
-		}
-		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadFile}
-		return ast.StringType, OriginFrameOwned, true, nil
-	case IOCallWriteFile:
-		if !allowStatementOnly {
-			return nil, "", true, typeError(expr.Start, "writeFile can only be used as a statement")
-		}
-		if len(argTypes) != 2 {
-			return nil, "", true, typeError(expr.Start, "writeFile expects 2 arguments, got %d", len(argTypes))
-		}
-		if !ast.TypeEqual(argTypes[0], ast.StringType) {
-			return nil, "", true, typeError(expr.Args[0].Pos(), "writeFile path has type %s, want string", argTypes[0])
-		}
-		if !ast.TypeEqual(argTypes[1], ast.StringType) {
-			return nil, "", true, typeError(expr.Args[1].Pos(), "writeFile contents has type %s, want string", argTypes[1])
-		}
-		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallWriteFile}
-		return ast.StringType, OriginUnknown, true, nil
-	case IOCallReadCSV:
-		if len(argTypes) != 2 {
-			return nil, "", true, typeError(expr.Start, "readCsv expects 2 arguments, got %d", len(argTypes))
-		}
-		if !ast.TypeEqual(argTypes[0], ast.StringType) {
-			return nil, "", true, typeError(expr.Args[0].Pos(), "readCsv path has type %s, want string", argTypes[0])
-		}
-		if !ast.TypeEqual(argTypes[1], ast.IntType) {
-			return nil, "", true, typeError(expr.Args[1].Pos(), "readCsv columns has type %s, want int", argTypes[1])
-		}
-		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadCSV}
-		return &ast.ListType{Elem: ast.StringType}, OriginFrameOwned, true, nil
-	case IOCallWriteCSV:
-		if !allowStatementOnly {
-			return nil, "", true, typeError(expr.Start, "writeCsv can only be used as a statement")
-		}
-		if len(argTypes) != 3 {
-			return nil, "", true, typeError(expr.Start, "writeCsv expects 3 arguments, got %d", len(argTypes))
-		}
-		if !ast.TypeEqual(argTypes[0], ast.StringType) {
-			return nil, "", true, typeError(expr.Args[0].Pos(), "writeCsv path has type %s, want string", argTypes[0])
-		}
-		if !ast.TypeEqual(argTypes[1], &ast.ListType{Elem: ast.StringType}) {
-			return nil, "", true, typeError(expr.Args[1].Pos(), "writeCsv cells has type %s, want list[string]", argTypes[1])
-		}
-		if !ast.TypeEqual(argTypes[2], ast.IntType) {
-			return nil, "", true, typeError(expr.Args[2].Pos(), "writeCsv columns has type %s, want int", argTypes[2])
-		}
-		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallWriteCSV}
-		return ast.StringType, OriginUnknown, true, nil
+	}
+
+	c.info.IOCalls[expr] = IOCallSig{Kind: IOCallKind(member.Kind)}
+	return member.ReturnType, originForStdlibResult(member.ResultOrigin), nil
+}
+
+func originForStdlibResult(origin stdlib.ResultOrigin) Origin {
+	switch origin {
+	case stdlib.ResultOwned:
+		return OriginOwned
+	case stdlib.ResultFrameOwned:
+		return OriginFrameOwned
 	default:
-		return nil, "", false, nil
+		return OriginUnknown
 	}
 }
 

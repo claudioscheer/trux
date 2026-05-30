@@ -1,10 +1,12 @@
 package c
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/claudioscheer/trux/internal/ir"
+	"github.com/claudioscheer/trux/internal/modules"
 	"github.com/claudioscheer/trux/internal/parser"
 	semtypes "github.com/claudioscheer/trux/internal/types"
 )
@@ -583,15 +585,18 @@ func main() int {
 
 func TestGenerateCreatesCForIO(t *testing.T) {
 	cSource := mustGenerateC(t, `package main
+import "io"
+import "csv"
+
 func main() int {
-    let line string = readLine()
-    let count int = readInt()
-    let ratio float = readFloat()
-    let ready bool = readBool()
-    let text string = readFile("input.txt")
-    writeFile("out.txt", text + line)
-    let cells list[string] = readCsv("in.csv", 2)
-    writeCsv("out.csv", cells, 2)
+    let line string = io.readLine()
+    let count int = io.readInt()
+    let ratio float = io.readFloat()
+    let ready bool = io.readBool()
+    let text string = io.readFile("input.txt")
+    io.writeFile("out.txt", text + line)
+    let cells list[string] = csv.read("in.csv", 2)
+    csv.write("out.csv", cells, 2)
     print(line, " ", count, " ", ratio, " ", ready, " ", len(cells))
     return 0
 }`)
@@ -616,10 +621,12 @@ func main() int {
 func mustGenerateC(t *testing.T, src string) string {
 	t.Helper()
 
-	program, err := parser.Parse(src)
+	path := filepath.Join(t.TempDir(), "main.tx")
+	result, err := modules.LoadWithSources(path, map[string]string{path: src})
 	if err != nil {
 		t.Fatal(err)
 	}
+	program := result.Program
 	info, err := semtypes.Check(program)
 	if err != nil {
 		t.Fatal(err)

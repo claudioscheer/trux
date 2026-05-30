@@ -1,16 +1,19 @@
 package main
 
+import "io"
+import "csv"
+
 func main() int {
-  let name string = readLine()
-  let bonus int = readInt()
+  let name string = io.readLine()
+  let bonus int = io.readInt()
 
-  let note string = readFile("examples/projects/io_basics/input.txt")
-  writeFile("examples/projects/io_basics/copy.txt", note + "\n" + name)
+  let note string = io.readFile("examples/projects/io_basics/input.txt")
+  io.writeFile("examples/projects/io_basics/copy.txt", note + "\n" + name)
 
-  let cells list[string] = readCsv("examples/projects/io_basics/input.csv", 2)
+  let cells list[string] = csv.read("examples/projects/io_basics/input.csv", 2)
   append(cells, name)
   append(cells, "interactive")
-  writeCsv("examples/projects/io_basics/output.csv", cells, 2)
+  csv.write("examples/projects/io_basics/output.csv", cells, 2)
 
   print("hello ", name)
   print(bonus + 1)

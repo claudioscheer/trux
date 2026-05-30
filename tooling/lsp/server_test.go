@@ -76,6 +76,28 @@ pub func add(a int, b int) int {
 	}
 }
 
+func TestDiagnosticsTypeChecksStandardLibraryImports(t *testing.T) {
+	uri := "file:///tmp/main.tx"
+	src := `package main
+import "io"
+import "csv"
+
+func main() int {
+    let line string = io.readLine()
+    let cells list[string] = csv.read("input.csv", 2)
+    io.writeFile("out.txt", line)
+    csv.write("out.csv", cells, 2)
+    return 0
+}
+`
+
+	diagnostics := diagnosticsForDocuments(uri, src, map[string]string{uri: src})
+
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v, want none", diagnostics)
+	}
+}
+
 func TestDiagnosticsForMissingImportedFunctionArguments(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := filepath.Join(dir, "main.tx")
@@ -452,6 +474,43 @@ pub func add(a int, b int) int {
 	assertRange(t, &link.TargetSelectionRange, positionOf(t, mainSrc, "calc.tx"), "calc.tx")
 }
 
+func TestDefinitionForStandardLibraryPackageQualifier(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+import "io"
+
+func main() int {
+    let line string = io.readLine()
+    return len(line)
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleDefinition(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "line string = ", "io"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	links, ok := result.([]LocationLink)
+	if !ok {
+		t.Fatalf("result = %T, want []LocationLink", result)
+	}
+	if len(links) != 1 {
+		t.Fatalf("link count = %d, want 1: %#v", len(links), links)
+	}
+	link := links[0]
+	assertRange(t, link.OriginSelectionRange, positionOfAfter(t, src, "line string = ", "io"), "io")
+	if link.TargetURI != uri {
+		t.Fatalf("target URI = %q, want %q", link.TargetURI, uri)
+	}
+	assertRange(t, &link.TargetRange, positionOf(t, src, "io\""), "io")
+	assertRange(t, &link.TargetSelectionRange, positionOf(t, src, "io\""), "io")
+}
+
 func TestReferencesForLocalVariable(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	uri := "file:///tmp/main.tx"
@@ -659,6 +718,82 @@ pub func add(a int, b int) int {
 	assertMissingCompletion(t, items, "add")
 }
 
+func TestCompletionIncludesStandardLibraryPackagesAndFunctions(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+import "io"
+import "csv"
+
+func main() int {
+    return
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "    return", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	want := map[string]int{
+		"io":          completionKindModule,
+		"io.readLine": completionKindFunction,
+		"csv":         completionKindModule,
+		"csv.read":    completionKindFunction,
+	}
+	for label, kind := range want {
+		item, ok := findCompletionItem(items, label)
+		if !ok {
+			t.Fatalf("missing completion %q in %#v", label, items)
+		}
+		if item.Kind != kind {
+			t.Fatalf("completion %q kind = %d, want %d", label, item.Kind, kind)
+		}
+	}
+	if item, ok := findCompletionItem(items, "io.readLine"); !ok {
+		t.Fatalf("missing completion io.readLine in %#v", items)
+	} else if item.FilterText != "io.readLine readLine" {
+		t.Fatalf("io.readLine filterText = %q, want io.readLine readLine", item.FilterText)
+	}
+}
+
+func TestCompletionIncludesStandardLibraryImportPaths(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+import "i"
+
+func main() int {
+    return 0
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, `import "`, "i"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	if item, ok := findCompletionItem(items, "io"); !ok {
+		t.Fatalf("missing standard package io in %#v", items)
+	} else if item.Detail != "standard package" {
+		t.Fatalf("io detail = %q, want standard package", item.Detail)
+	}
+	if _, ok := findCompletionItem(items, "csv"); !ok {
+		t.Fatalf("missing standard package csv in %#v", items)
+	}
+	assertMissingCompletion(t, items, "print")
+}
+
 func TestCompletionFiltersPackageMembersAfterDot(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	dir := t.TempDir()
@@ -729,6 +864,41 @@ pub func trim(value string) string {
 	assertMissingCompletion(t, items, "hidden")
 	assertMissingCompletion(t, items, "trim")
 	assertMissingCompletion(t, items, "strings")
+}
+
+func TestCompletionFiltersStandardLibraryMembersAfterDot(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+import "io"
+import "csv"
+
+func main() int {
+    io.re
+    return 0
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "io.", "re"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	if item, ok := findCompletionItem(items, "readLine"); !ok {
+		t.Fatalf("missing package member readLine in %#v", items)
+	} else if item.Detail != "io.readLine() string" {
+		t.Fatalf("readLine detail = %q, want io.readLine() string", item.Detail)
+	}
+	if _, ok := findCompletionItem(items, "readFile"); !ok {
+		t.Fatalf("missing package member readFile in %#v", items)
+	}
+	assertMissingCompletion(t, items, "write")
+	assertMissingCompletion(t, items, "csv")
 }
 
 func TestCompletionUsesDeclaredPackageName(t *testing.T) {
@@ -834,6 +1004,34 @@ pub func add(a int, b int) int {
 		t.Fatalf("hover = %#v, want imported function signature", hover)
 	}
 	assertRange(t, hover.Range, positionOfAfter(t, mainSrc, "math.", "add"), "add")
+}
+
+func TestHoverReturnsStandardLibraryFunctionSignature(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+import "csv"
+
+func main() int {
+    let cells list[string] = csv.read("input.csv", 2)
+    return len(cells)
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleHover(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "csv.", "read"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hover := result.(Hover)
+	if hover.Contents.Value != "`csv.read(path string, columns int) list[string]`" {
+		t.Fatalf("hover = %#v, want standard library function signature", hover)
+	}
+	assertRange(t, hover.Range, positionOfAfter(t, src, "csv.", "read"), "read")
 }
 
 func TestHoverHighlightsFullImportPath(t *testing.T) {

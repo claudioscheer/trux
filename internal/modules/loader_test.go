@@ -138,6 +138,109 @@ func main() int {
 	}
 }
 
+func TestLoadResolvesStandardLibraryImports(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "io"
+import "csv"
+
+func main() int {
+    let line string = io.readLine()
+    let cells list[string] = csv.read("input.csv", 2)
+    io.writeFile("out.txt", line)
+    csv.write("out.csv", cells, 2)
+    return 0
+}`)
+
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sources) != 1 {
+		t.Fatalf("source count = %d, want only entry source for stdlib imports", len(result.Sources))
+	}
+	if _, err := semtypes.Check(result.Program); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadRejectsUnknownStandardLibraryImport(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "net"
+
+func main() int {
+    return 0
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, `unknown standard package "net"`)
+}
+
+func TestLoadRejectsStandardLibraryCallsWithoutDirectImport(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "a.tx"
+
+func main() int {
+    let line string = io.readLine()
+    return len(line)
+}`)
+	writeSource(t, dir, "a.tx", `package a
+import "io"
+
+pub func value() string {
+    return io.readLine()
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, `package "io" is not imported`)
+}
+
+func TestLoadRejectsSourcePackageNameConflictingWithStandardLibraryImport(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "io"
+import "local_io.tx"
+
+func main() int {
+    return 0
+}`)
+	writeSource(t, dir, "local_io.tx", `package io
+pub func value() int {
+    return 1
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, `package "io" imported from both standard package "io"`)
+}
+
+func TestLoadRejectsMissingStandardLibraryFunction(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "io"
+
+func main() int {
+    io.missing()
+    return 0
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, `package "io" has no function "missing"`)
+}
+
 func TestLoadRejectsDirectoryImport(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "module.tx"), 0o755); err != nil {

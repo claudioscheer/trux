@@ -9,6 +9,7 @@ import (
 
 	"github.com/claudioscheer/trux/internal/ast"
 	"github.com/claudioscheer/trux/internal/parser"
+	"github.com/claudioscheer/trux/internal/stdlib"
 	"github.com/claudioscheer/trux/internal/token"
 )
 
@@ -43,8 +44,9 @@ type fileUnit struct {
 }
 
 type importRef struct {
-	decl *ast.ImportDecl
-	unit *fileUnit
+	decl    *ast.ImportDecl
+	unit    *fileUnit
+	stdName string
 }
 
 type functionInfo struct {
@@ -196,6 +198,11 @@ func (l *loader) loadFile(path string, importPos token.Position, stack []string)
 
 	stack = append(stack, path)
 	for _, importDecl := range program.Imports {
+		if stdlib.IsPackage(importDecl.Path) {
+			unit.imports = append(unit.imports, importRef{decl: importDecl, stdName: importDecl.Path})
+			continue
+		}
+
 		importPath, err := l.resolveImport(unit, importDecl)
 		if err != nil {
 			return nil, err
@@ -215,6 +222,9 @@ func (l *loader) resolveImport(unit *fileUnit, importDecl *ast.ImportDecl) (stri
 		return "", l.errorInUnit(unit, importDecl.Pos, "import path %q must be relative", importDecl.Path)
 	}
 	if filepath.Ext(importDecl.Path) != ".tx" {
+		if isBareImport(importDecl.Path) {
+			return "", l.errorInUnit(unit, importDecl.Pos, "unknown standard package %q", importDecl.Path)
+		}
 		return "", l.errorInUnit(unit, importDecl.Pos, "import path %q must end in .tx", importDecl.Path)
 	}
 
@@ -300,12 +310,12 @@ func (l *loader) validateAndMerge(entry *fileUnit) error {
 	for _, unit := range l.order {
 		direct := map[string]importRef{}
 		for _, ref := range unit.imports {
-			packageName := ref.unit.program.PackageName
+			packageName := ref.packageName()
 			if existing, ok := direct[packageName]; ok {
-				if existing.unit.path == ref.unit.path {
+				if existing.sameTarget(ref) {
 					continue
 				}
-				return l.errorInUnit(unit, ref.decl.Pos, "package %q imported from both %s and %s", packageName, existing.unit.path, ref.unit.path)
+				return l.errorInUnit(unit, ref.decl.Pos, "package %q imported from both %s and %s", packageName, existing.describe(), ref.describe())
 			}
 			direct[packageName] = ref
 		}
@@ -446,6 +456,14 @@ func (l *loader) resolveQualifiedCall(unit *fileUnit, expr *ast.CallExpr, ctx re
 		return l.errorInUnit(unit, expr.Start, "package %q is not imported by %s", expr.Package, unit.path)
 	}
 
+	if ref.isStdlib() {
+		if _, ok := stdlib.LookupMember(expr.Package, expr.Callee); !ok {
+			return l.errorInUnit(unit, expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
+		}
+		expr.Stdlib = true
+		return nil
+	}
+
 	info := ctx.funcs[ref.unit][expr.Callee]
 	if info == nil {
 		return l.errorInUnit(unit, expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
@@ -467,6 +485,12 @@ func (l *loader) directExportingPackage(unit *fileUnit, name string, ctx resolut
 
 	for _, packageName := range packages {
 		ref := ctx.directImports[unit][packageName]
+		if ref.isStdlib() {
+			if _, ok := stdlib.LookupMember(packageName, name); ok {
+				return packageName, true
+			}
+			continue
+		}
 		info := ctx.funcs[ref.unit][name]
 		if info != nil && info.public {
 			return packageName, true
@@ -483,6 +507,35 @@ func isBuiltin(name string) bool {
 	default:
 		return false
 	}
+}
+
+func (ref importRef) isStdlib() bool {
+	return ref.stdName != ""
+}
+
+func (ref importRef) packageName() string {
+	if ref.isStdlib() {
+		return ref.stdName
+	}
+	return ref.unit.program.PackageName
+}
+
+func (ref importRef) sameTarget(other importRef) bool {
+	if ref.isStdlib() || other.isStdlib() {
+		return ref.stdName == other.stdName
+	}
+	return ref.unit.path == other.unit.path
+}
+
+func (ref importRef) describe() string {
+	if ref.isStdlib() {
+		return fmt.Sprintf("standard package %q", ref.stdName)
+	}
+	return ref.unit.path
+}
+
+func isBareImport(path string) bool {
+	return filepath.Clean(path) == path && !strings.ContainsAny(path, `/\`) && filepath.Ext(path) == ""
 }
 
 func indexPath(paths []string, path string) int {

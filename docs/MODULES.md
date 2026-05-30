@@ -4,7 +4,7 @@
 
 Trux now has initial module support. Programs can load multiple `.tx` source files through relative imports, while the backend still compiles the loaded program into a single generated `.c` file.
 
-The implemented stage supports `import "relative/path.tx"`, `pub func`, package-qualified calls such as `math.add(...)`, private file-local functions, private-name hygiene, import de-duplication, different package names per loaded file, and cycle detection. Directory-based packages, standard-library imports, reusable package artifacts, and separate C compilation are still deferred.
+The implemented stage supports `import "relative/path.tx"`, standard package imports such as `import "io"` and `import "csv"`, `pub func`, package-qualified calls such as `math.add(...)`, private file-local functions, private-name hygiene, import de-duplication, different package names per loaded file, and cycle detection. Directory-based packages, reusable package artifacts, and separate C compilation are still deferred.
 
 ## Generated C Code and Modules
 
@@ -43,7 +43,7 @@ A proper module system will eventually require the C backend to emit multiple `.
 The first cut of module support uses the following concrete design:
 
 - **Source model**: Multiple `.tx` source files are supported, but the backend still emits exactly one `.c` file for the whole loaded program.
-- **Import syntax**: `import "relative/path/to/mod.tx"`. Paths are resolved relative to the directory of the file containing the `import` statement. The `.tx` extension is required and explicit.
+- **Import syntax**: `import "relative/path/to/mod.tx"` for source modules, plus bare standard package imports such as `import "io"` and `import "csv"`. Source paths are resolved relative to the directory of the file containing the `import` statement. The `.tx` extension is required and explicit for source modules.
 - **Import placement**: Imports are top-level declarations after `package` and before any `func` declarations. Grouped imports and imports inside functions are not part of the initial implementation.
 - **Visibility**: `pub func` makes a function visible to direct importers through `package.function(...)`. Functions without `pub` are private to their declaring source file.
 - **Name rules**:
@@ -59,7 +59,7 @@ The first cut of module support uses the following concrete design:
 
 This approach deliberately stays inside the "controlled change, not a rewrite" constraint. The existing single-file `Parse` → `Check` → `ir.Build` → `Generate` pipeline continues to work for both single-file programs and the merged multi-file case.
 
-Directory-based packages, standard-library imports, and separate C compilation are deferred to later stages.
+Directory-based packages and separate C compilation are deferred to later stages.
 
 ## Loader and Import Rules
 
@@ -79,11 +79,12 @@ entry file
 
 Concrete loader rules:
 
-- Import paths must be relative string literals. Absolute paths are rejected.
+- Source import paths must be relative string literals. Absolute paths are rejected.
+- Bare imports are reserved for standard packages. Currently supported standard packages are `io` and `csv`; other bare imports are rejected.
 - Import paths are normalized with `filepath.Clean` and resolved to canonical absolute paths before de-duplication and cycle detection.
 - A source file is loaded at most once, even if reached through multiple import paths such as `foo.tx` and `./foo.tx`.
 - Import cycles are reported with the import chain, including file paths.
-- Missing imports, directories, and non-`.tx` paths are compile errors.
+- Missing source imports, directories, and non-`.tx` source paths are compile errors.
 - Public functions from directly imported files are visible only through `package.function(...)`.
 - Transitive imports are loaded for dependencies, but they do not introduce callable package qualifiers into the importing file.
 

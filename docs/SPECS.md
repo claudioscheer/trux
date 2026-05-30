@@ -129,20 +129,22 @@ slicing
 make([]T, n)
 clone(x)
 len(x)
-readLine()
-readInt()
-readFloat()
-readBool()
-readFile(path)
-readCsv(path, columns)
+io.readLine()
+io.readInt()
+io.readFloat()
+io.readBool()
+io.readFile(path)
+csv.read(path, columns)
 ```
 
-Imported public functions must be called through the package declared by the imported file:
+Imported public functions must be called through the package declared by the imported file. Multiple direct imports may declare the same package name, and the shared package qualifier resolves across all uniquely named public functions in those files:
 
 ```trux
-import "math.tx"
+import "math/add.tx"
+import "math/mul.tx"
 
 let total int = math.add(1, 2)
+let product int = math.mul(3, 4)
 ```
 
 Arithmetic operators:
@@ -190,8 +192,8 @@ if / else
 while
 print(...)
 append(list, value)
-writeFile(path, contents)
-writeCsv(path, cells, columns)
+io.writeFile(path, contents)
+csv.write(path, cells, columns)
 ```
 
 `if` and `while` require `bool` conditions:
@@ -231,26 +233,29 @@ append(items, 2)
 
 ## IO
 
-Input, file, and CSV operations are builtins:
+Input and file operations require `import "io"`. CSV operations require `import "csv"`:
 
 ```trux
-let line string = readLine()
-let count int = readInt()
-let ratio float = readFloat()
-let ok bool = readBool()
+import "io"
+import "csv"
 
-let contents string = readFile("input.txt")
-writeFile("copy.txt", contents)
+let line string = io.readLine()
+let count int = io.readInt()
+let ratio float = io.readFloat()
+let ok bool = io.readBool()
 
-let cells list[string] = readCsv("input.csv", 2)
-writeCsv("copy.csv", cells, 2)
+let contents string = io.readFile("input.txt")
+io.writeFile("copy.txt", contents)
+
+let cells list[string] = csv.read("input.csv", 2)
+csv.write("copy.csv", cells, 2)
 ```
 
-`readLine` reads one line from stdin without the trailing newline. `readInt`, `readFloat`, and `readBool` read one line from stdin and parse it as the requested scalar type. Invalid typed input is a runtime error.
+`io.readLine` reads one line from stdin without the trailing newline. `io.readInt`, `io.readFloat`, and `io.readBool` read one line from stdin and parse it as the requested scalar type. Invalid typed input is a runtime error.
 
-`readFile` returns the complete file contents as a `string`. `writeFile` overwrites the target path with the provided contents.
+`io.readFile` returns the complete file contents as a `string`. `io.writeFile` overwrites the target path with the provided contents.
 
-`readCsv` returns a flat row-major `list[string]`. The `columns` argument must be positive and each CSV row must have exactly that many columns. `writeCsv` writes a flat row-major `list[string]` using the same column count.
+`csv.read` returns a flat row-major `list[string]`. The `columns` argument must be positive and each CSV row must have exactly that many columns. `csv.write` writes a flat row-major `list[string]` using the same column count.
 
 CSV supports quoted fields and escaped quotes using doubled quotes.
 
@@ -400,8 +405,8 @@ append values with the wrong element type
 mutation of parameter-owned collections or aliases/views of them
 make with a non-slice type or non-int length
 clone with the wrong arity or unsupported type
-IO builtins with the wrong arity or argument types
-writeFile and writeCsv outside statement position
+standard `io` and `csv` package calls with the wrong arity or argument types
+io.writeFile and csv.write outside statement position
 ```
 
 ## Build Commands
@@ -423,7 +428,7 @@ trux emit-c main.tx
 
 These ideas are not implemented and should not drive current language usage:
 
-- directory-based packages and standard-library imports
+- directory-based packages
 - multi-file C output
 - GPU kernels
 

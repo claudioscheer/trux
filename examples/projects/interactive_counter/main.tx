@@ -1,8 +1,10 @@
 package main
 
+import "io"
+
 func main() int {
-  let name string = readLine()
-  let start int = readInt()
+  let name string = io.readLine()
+  let start int = io.readInt()
   let i int = 0
 
   print("counter for ", name)

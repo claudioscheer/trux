@@ -11,6 +11,7 @@ import (
 	"github.com/claudioscheer/trux/internal/ast"
 	"github.com/claudioscheer/trux/internal/lexer"
 	"github.com/claudioscheer/trux/internal/parser"
+	"github.com/claudioscheer/trux/internal/stdlib"
 	"github.com/claudioscheer/trux/internal/token"
 )
 
@@ -69,8 +70,9 @@ type sourceFile struct {
 }
 
 type importedPackage struct {
-	name string
-	file *sourceFile
+	name   string
+	file   *sourceFile
+	stdlib bool
 }
 
 type completionContext struct {
@@ -156,6 +158,10 @@ func (s *Server) handleCompletion(raw json.RawMessage) (any, error) {
 	}
 
 	path := normalizePath(pathFromURI(params.TextDocument.URI))
+	if importStringCompletionAt(path, text, params.Position) {
+		return completionListFromItems(standardPackageImportCompletionItems()), nil
+	}
+
 	imports := directImportedPackages(path, text, s.documents)
 	context := completionContextAt(text, params.Position)
 	if context.member {
@@ -225,6 +231,16 @@ func (s *Server) hoverFunction(uri string, pos Position) (Hover, bool, error) {
 		}, true, nil
 	}
 
+	if member, ok := stdlibMemberCallAt(text, uri, pos); ok {
+		return Hover{
+			Contents: MarkupContent{
+				Kind:  "markdown",
+				Value: "`" + member.Signature() + "`",
+			},
+			Range: rangeForWord(text, pos),
+		}, true, nil
+	}
+
 	def, graph, ok, err := s.resolveSymbolWithGraph(uri, pos)
 	if err != nil || !ok || def.Kind != functionSymbol {
 		return Hover{}, ok && def.Kind == functionSymbol, err
@@ -244,10 +260,136 @@ func (s *Server) hoverFunction(uri string, pos Position) (Hover, bool, error) {
 	}, true, nil
 }
 
+func stdlibMemberCallAt(text string, uri string, pos Position) (stdlib.Member, bool) {
+	path := normalizePath(pathFromURI(uri))
+	program, err := parser.ParseFile(path, text)
+	if err != nil {
+		return stdlib.Member{}, false
+	}
+	cursor := tokenPositionFromLSP(pos)
+	imports := stdlibImports(program)
+	for _, fn := range program.Functions {
+		if member, ok := stdlibMemberCallInBlock(fn.Body, imports, cursor); ok {
+			return member, true
+		}
+	}
+	return stdlib.Member{}, false
+}
+
+func stdlibImports(program *ast.Program) map[string]struct{} {
+	imports := map[string]struct{}{}
+	for _, importDecl := range program.Imports {
+		if stdlib.IsPackage(importDecl.Path) {
+			imports[importDecl.Path] = struct{}{}
+		}
+	}
+	return imports
+}
+
+func stdlibMemberCallInBlock(block ast.Block, imports map[string]struct{}, cursor token.Position) (stdlib.Member, bool) {
+	for _, stmt := range block.Statements {
+		if member, ok := stdlibMemberCallInStmt(stmt, imports, cursor); ok {
+			return member, true
+		}
+	}
+	return stdlib.Member{}, false
+}
+
+func stdlibMemberCallInStmt(stmt ast.Statement, imports map[string]struct{}, cursor token.Position) (stdlib.Member, bool) {
+	switch stmt := stmt.(type) {
+	case *ast.LetStmt:
+		return stdlibMemberCallInExpr(stmt.Value, imports, cursor)
+	case *ast.ReturnStmt:
+		return stdlibMemberCallInExpr(stmt.Value, imports, cursor)
+	case *ast.AssignStmt:
+		return stdlibMemberCallInExpr(stmt.Value, imports, cursor)
+	case *ast.IndexAssignStmt:
+		if member, ok := stdlibMemberCallInExpr(stmt.Target, imports, cursor); ok {
+			return member, true
+		}
+		return stdlibMemberCallInExpr(stmt.Value, imports, cursor)
+	case *ast.IfStmt:
+		if member, ok := stdlibMemberCallInExpr(stmt.Condition, imports, cursor); ok {
+			return member, true
+		}
+		if member, ok := stdlibMemberCallInBlock(stmt.Then, imports, cursor); ok {
+			return member, true
+		}
+		if stmt.Else != nil {
+			return stdlibMemberCallInBlock(*stmt.Else, imports, cursor)
+		}
+	case *ast.WhileStmt:
+		if member, ok := stdlibMemberCallInExpr(stmt.Condition, imports, cursor); ok {
+			return member, true
+		}
+		return stdlibMemberCallInBlock(stmt.Body, imports, cursor)
+	case *ast.ExprStmt:
+		return stdlibMemberCallInExpr(stmt.Expr, imports, cursor)
+	}
+	return stdlib.Member{}, false
+}
+
+func stdlibMemberCallInExpr(expr ast.Expression, imports map[string]struct{}, cursor token.Position) (stdlib.Member, bool) {
+	switch expr := expr.(type) {
+	case *ast.CallExpr:
+		if _, imported := imports[expr.Package]; imported && containsName(cursor, callCalleePosition(expr), expr.Callee) {
+			if member, ok := stdlib.LookupMember(expr.Package, expr.Callee); ok {
+				return member, true
+			}
+		}
+		for _, arg := range expr.Args {
+			if member, ok := stdlibMemberCallInExpr(arg, imports, cursor); ok {
+				return member, true
+			}
+		}
+	case *ast.ArrayLiteral:
+		return stdlibMemberCallInExprs(expr.Elements, imports, cursor)
+	case *ast.ListLiteral:
+		return stdlibMemberCallInExprs(expr.Elements, imports, cursor)
+	case *ast.MakeExpr:
+		return stdlibMemberCallInExpr(expr.Len, imports, cursor)
+	case *ast.BinaryExpr:
+		if member, ok := stdlibMemberCallInExpr(expr.Left, imports, cursor); ok {
+			return member, true
+		}
+		return stdlibMemberCallInExpr(expr.Right, imports, cursor)
+	case *ast.IndexExpr:
+		if member, ok := stdlibMemberCallInExpr(expr.Collection, imports, cursor); ok {
+			return member, true
+		}
+		return stdlibMemberCallInExpr(expr.Index, imports, cursor)
+	case *ast.SliceExpr:
+		if member, ok := stdlibMemberCallInExpr(expr.Collection, imports, cursor); ok {
+			return member, true
+		}
+		if expr.StartIndex != nil {
+			if member, ok := stdlibMemberCallInExpr(expr.StartIndex, imports, cursor); ok {
+				return member, true
+			}
+		}
+		if expr.EndIndex != nil {
+			return stdlibMemberCallInExpr(expr.EndIndex, imports, cursor)
+		}
+	}
+	return stdlib.Member{}, false
+}
+
+func stdlibMemberCallInExprs(exprs []ast.Expression, imports map[string]struct{}, cursor token.Position) (stdlib.Member, bool) {
+	for _, expr := range exprs {
+		if member, ok := stdlibMemberCallInExpr(expr, imports, cursor); ok {
+			return member, true
+		}
+	}
+	return stdlib.Member{}, false
+}
+
 func (s *Server) resolveImportPath(uri string, pos Position) (LocationLink, bool, error) {
 	ref, ok, err := s.importPathAt(uri, pos)
 	if err != nil || !ok {
 		return LocationLink{}, ok, err
+	}
+	if stdlib.IsPackage(ref.path) {
+		return LocationLink{}, false, nil
 	}
 
 	importPath := normalizePath(filepath.Join(filepath.Dir(normalizePath(pathFromURI(uri))), ref.path))
@@ -286,7 +428,7 @@ func (s *Server) importPathAt(uri string, pos Position) (importPathReference, bo
 		if !containsStringToken(cursor, importToken) {
 			continue
 		}
-		if filepath.IsAbs(importToken.Lexeme) || filepath.Ext(importToken.Lexeme) != ".tx" {
+		if !stdlib.IsPackage(importToken.Lexeme) && (filepath.IsAbs(importToken.Lexeme) || filepath.Ext(importToken.Lexeme) != ".tx") {
 			return importPathReference{}, false, nil
 		}
 
@@ -335,6 +477,12 @@ func (s *Server) resolveImportPackageQualifier(uri string, pos Position) (Locati
 
 func directImportTokenForPackage(file *sourceFile, graph *sourceGraph, packageName string) (token.Token, bool) {
 	for _, importDecl := range file.program.Imports {
+		if stdlib.IsPackage(importDecl.Path) {
+			if importDecl.Path == packageName {
+				return importPathTokenForDecl(file, importDecl)
+			}
+			continue
+		}
 		if filepath.IsAbs(importDecl.Path) || filepath.Ext(importDecl.Path) != ".tx" {
 			continue
 		}
@@ -545,6 +693,17 @@ func completionListFromItems(items []CompletionItem) CompletionList {
 	}
 }
 
+func importStringCompletionAt(path string, text string, pos Position) bool {
+	cursor := tokenPositionFromLSP(pos)
+	tokens := lexer.LexFile(path, text)
+	for i := 0; i < len(tokens)-1; i++ {
+		if tokens[i].Type == token.Import && tokens[i+1].Type == token.String && containsStringToken(cursor, tokens[i+1]) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) resolveSymbolWithGraph(uri string, pos Position) (symbolDefinition, *sourceGraph, bool, error) {
 	text, ok := s.documents[uri]
 	if !ok {
@@ -651,8 +810,20 @@ func directImportedPackages(activePath string, activeText string, documents map[
 	imports := []importedPackage{}
 	seenPaths := map[string]struct{}{}
 	seenPackages := map[string]struct{}{}
-	for _, path := range importPathsFromText(activePath, activeText) {
-		path = normalizePath(path)
+	for _, importDecl := range importDeclsFromText(activePath, activeText) {
+		if pkg, ok := stdlib.LookupPackage(importDecl.Path); ok {
+			if _, seen := seenPackages[pkg.Name]; seen {
+				continue
+			}
+			seenPackages[pkg.Name] = struct{}{}
+			imports = append(imports, importedPackage{name: pkg.Name, stdlib: true})
+			continue
+		}
+		if filepath.IsAbs(importDecl.Path) || filepath.Ext(importDecl.Path) != ".tx" {
+			continue
+		}
+
+		path := normalizePath(filepath.Join(filepath.Dir(activePath), importDecl.Path))
 		if _, ok := seenPaths[path]; ok {
 			continue
 		}
@@ -672,16 +843,16 @@ func directImportedPackages(activePath string, activeText string, documents map[
 			continue
 		}
 
-		if _, ok := seenPackages[program.PackageName]; ok {
-			continue
-		}
-		seenPackages[program.PackageName] = struct{}{}
 		file := &sourceFile{
 			path:    path,
 			uri:     uriFromPath(path),
 			text:    text,
 			program: program,
 		}
+		if _, ok := seenPackages[program.PackageName]; ok {
+			continue
+		}
+		seenPackages[program.PackageName] = struct{}{}
 		imports = append(imports, importedPackage{name: program.PackageName, file: file})
 	}
 
@@ -704,9 +875,36 @@ func importedPackageCompletionItems(imports []importedPackage) []CompletionItem 
 	return items
 }
 
+func standardPackageImportCompletionItems() []CompletionItem {
+	packages := stdlib.Packages()
+	items := make([]CompletionItem, 0, len(packages))
+	for _, pkg := range packages {
+		items = append(items, CompletionItem{
+			Label:      pkg.Name,
+			Kind:       completionKindModule,
+			Detail:     "standard package",
+			InsertText: pkg.Name,
+		})
+	}
+	return items
+}
+
 func qualifiedImportedFunctionCompletionItems(imports []importedPackage) []CompletionItem {
 	items := []CompletionItem{}
 	for _, pkg := range imports {
+		if pkg.stdlib {
+			for _, member := range stdlibMembers(pkg.name) {
+				label := pkg.name + "." + member.Name
+				items = append(items, CompletionItem{
+					Label:      label,
+					Kind:       completionKindFunction,
+					Detail:     member.Detail,
+					InsertText: label,
+					FilterText: label + " " + member.Name,
+				})
+			}
+			continue
+		}
 		for _, fn := range pkg.file.program.Functions {
 			if !fn.Public {
 				continue
@@ -726,6 +924,17 @@ func qualifiedImportedFunctionCompletionItems(imports []importedPackage) []Compl
 
 func packageMemberCompletionItems(pkg importedPackage) []CompletionItem {
 	items := []CompletionItem{}
+	if pkg.stdlib {
+		for _, member := range stdlibMembers(pkg.name) {
+			items = append(items, CompletionItem{
+				Label:      member.Name,
+				Kind:       completionKindFunction,
+				Detail:     member.Signature(),
+				InsertText: member.Name,
+			})
+		}
+		return items
+	}
 	for _, fn := range pkg.file.program.Functions {
 		if !fn.Public {
 			continue
@@ -738,6 +947,14 @@ func packageMemberCompletionItems(pkg importedPackage) []CompletionItem {
 		})
 	}
 	return items
+}
+
+func stdlibMembers(packageName string) []stdlib.Member {
+	pkg, ok := stdlib.LookupPackage(packageName)
+	if !ok {
+		return nil
+	}
+	return pkg.Members
 }
 
 func completionContextAt(text string, pos Position) completionContext {
@@ -774,20 +991,16 @@ func completionContextAt(text string, pos Position) completionContext {
 	}
 }
 
-func importPathsFromText(activePath string, text string) []string {
+func importDeclsFromText(activePath string, text string) []*ast.ImportDecl {
 	tokens := lexer.LexFile(activePath, text)
-	paths := []string{}
+	imports := []*ast.ImportDecl{}
 	for i := 0; i < len(tokens)-1; i++ {
 		if tokens[i].Type != token.Import || tokens[i+1].Type != token.String {
 			continue
 		}
-		importPath := tokens[i+1].Lexeme
-		if filepath.IsAbs(importPath) || filepath.Ext(importPath) != ".tx" {
-			continue
-		}
-		paths = append(paths, filepath.Join(filepath.Dir(activePath), importPath))
+		imports = append(imports, &ast.ImportDecl{Pos: tokens[i].Pos, Path: tokens[i+1].Lexeme})
 	}
-	return paths
+	return imports
 }
 
 func findLocalDefinition(file *sourceFile, word string, cursor token.Position) (localDefinition, bool) {

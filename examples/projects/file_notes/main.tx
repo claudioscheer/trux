@@ -1,11 +1,13 @@
 package main
 
+import "io"
+
 func main() int {
-  let seed string = readFile("examples/projects/file_notes/seed.txt")
-  let extra string = readLine()
+  let seed string = io.readFile("examples/projects/file_notes/seed.txt")
+  let extra string = io.readLine()
   let summary string = seed + "\n" + extra
 
-  writeFile("examples/projects/file_notes/summary.txt", summary)
+  io.writeFile("examples/projects/file_notes/summary.txt", summary)
   print(summary)
 
   return 0

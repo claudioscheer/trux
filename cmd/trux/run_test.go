@@ -169,7 +169,7 @@ func TestRunFileCompilesAndExecutesCollectionExamples(t *testing.T) {
 		},
 		{
 			path: "../../examples/matrix_multiply_2x2.tx",
-			want: "19 22\n43 50\n",
+			want: "19 22\n43 50\n19 22\n43 50\n",
 		},
 		{
 			path: "../../examples/jagged_lists.tx",

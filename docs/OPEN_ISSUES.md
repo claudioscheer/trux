@@ -30,10 +30,10 @@ Current shape:
 package main
 
 func main() int {
-    let name string = read_line()
-    let note string = read_file("input.txt")
-    write_file("copy.txt", note + "\n" + name)
-    return 0
+  let name string = read_line()
+  let note string = read_file("input.txt")
+  write_file("copy.txt", note + "\n" + name)
+  return 0
 }
 ```
 
@@ -45,10 +45,10 @@ package main
 import "io"
 
 func main() int {
-    let name string = io.read_line()
-    let note string = io.read_file("input.txt")
-    io.write_file("copy.txt", note + "\n" + name)
-    return 0
+  let name string = io.read_line()
+  let note string = io.read_file("input.txt")
+  io.write_file("copy.txt", note + "\n" + name)
+  return 0
 }
 ```
 

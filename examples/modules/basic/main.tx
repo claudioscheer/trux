@@ -2,6 +2,6 @@ package main
 import "math.tx"
 
 func main() int {
-    print(math.add(3, 4))
-    return 0
+  print(math.add(3, 4))
+  return 0
 }

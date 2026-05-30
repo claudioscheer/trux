@@ -1,24 +1,24 @@
 package main
 
 func sum(row list[int]) int {
-    let total int = 0
-    let i int = 0
+  let total int = 0
+  let i int = 0
 
-    while i < len(row) {
-        total = total + row[i]
-        i = i + 1
-    }
+  while i < len(row) {
+    total = total + row[i]
+    i = i + 1
+  }
 
-    return total
+  return total
 }
 
 func main() int {
-    let rows list[list[int]] = list[list[int]]{list[int]{1, 2}, list[int]{3, 4, 5}, list[int]{}}
+  let rows list[list[int]] = list[list[int]]{list[int]{1, 2}, list[int]{3, 4, 5}, list[int]{}}
 
-    append(rows[0], 9)
-    append(rows[2], 6)
+  append(rows[0], 9)
+  append(rows[2], 6)
 
-    print(len(rows[0]), " ", len(rows[1]), " ", len(rows[2]))
-    print(sum(rows[0]), " ", sum(rows[1]), " ", sum(rows[2]))
-    return 0
+  print(len(rows[0]), " ", len(rows[1]), " ", len(rows[2]))
+  print(sum(rows[0]), " ", sum(rows[1]), " ", sum(rows[2]))
+  return 0
 }

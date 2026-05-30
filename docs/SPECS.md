@@ -87,7 +87,7 @@ Functions must declare parameter types and return type:
 
 ```trux
 func add(a int, b int) int {
-    return a + b
+  return a + b
 }
 ```
 
@@ -196,13 +196,13 @@ write_csv(path, cells, columns)
 
 ```trux
 if x > 5 {
-    print("big")
+  print("big")
 } else {
-    print("small")
+  print("small")
 }
 
 while x < 10 {
-    x = x + 1
+  x = x + 1
 }
 ```
 
@@ -327,7 +327,7 @@ Returning a parameter or a parameter-backed slice is borrowed by default:
 
 ```trux
 func mid(xs []int) []int {
-    return xs[1:2]
+  return xs[1:2]
 }
 ```
 
@@ -335,7 +335,7 @@ Use `clone(x)` when an owned copy is required:
 
 ```trux
 func midOwned(xs []int) []int {
-    return clone(xs[1:2])
+  return clone(xs[1:2])
 }
 ```
 
@@ -343,9 +343,9 @@ func midOwned(xs []int) []int {
 
 ```trux
 func frameOwnedLocal() []int {
-    let xs [3]int = [3]int{1, 2, 3}
-    let ys []int = clone(xs[:])
-    return ys
+  let xs [3]int = [3]int{1, 2, 3}
+  let ys []int = clone(xs[:])
+  return ys
 }
 ```
 
@@ -355,8 +355,8 @@ Inside a function, collection parameters are borrowed. The function may read the
 
 ```trux
 func bad(xs list[int]) int {
-    append(xs, 1) // rejected
-    return len(xs)
+  append(xs, 1) // rejected
+  return len(xs)
 }
 ```
 
@@ -431,11 +431,11 @@ Possible package/export syntax:
 package math
 
 pub func add(a int, b int) int {
-    return a + b
+  return a + b
 }
 
 func double(x int) int {
-    return x * 2
+  return x * 2
 }
 ```
 
@@ -443,11 +443,11 @@ Possible GPU kernel syntax:
 
 ```trux
 kernel func fill(out gpu.Buffer[int], n int) {
-    let i int = gpu.global_id()
+  let i int = gpu.global_id()
 
-    if i < n {
-        out[i] = 42
-    }
+  if i < n {
+    out[i] = 42
+  }
 }
 ```
 

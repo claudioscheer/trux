@@ -20,7 +20,7 @@ return 0
 	got := readFile(t, path)
 	want := `package main
 func main() int {
-	return 0
+  return 0
 }
 `
 	if got != want {
@@ -59,10 +59,10 @@ return 1
 		t.Fatal(err)
 	}
 
-	if got := readFile(t, mainPath); got != "package main\nfunc main() int {\n\treturn helper()\n}\n" {
+	if got := readFile(t, mainPath); got != "package main\nfunc main() int {\n  return helper()\n}\n" {
 		t.Fatalf("main source = %q", got)
 	}
-	if got := readFile(t, libPath); got != "package lib\npub func helper() int {\n\treturn 1\n}\n" {
+	if got := readFile(t, libPath); got != "package lib\npub func helper() int {\n  return 1\n}\n" {
 		t.Fatalf("lib source = %q", got)
 	}
 	if got := readFile(t, textPath); got != "not trux" {

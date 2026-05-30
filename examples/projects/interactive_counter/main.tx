@@ -1,15 +1,15 @@
 package main
 
 func main() int {
-    let name string = read_line()
-    let start int = read_int()
-    let i int = 0
+  let name string = read_line()
+  let start int = read_int()
+  let i int = 0
 
-    print("counter for ", name)
-    while i < 3 {
-        print(start + i)
-        i = i + 1
-    }
+  print("counter for ", name)
+  while i < 3 {
+    print(start + i)
+    i = i + 1
+  }
 
-    return 0
+  return 0
 }

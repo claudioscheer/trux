@@ -38,6 +38,13 @@
         "path": "./syntaxes/trux.tmLanguage.json"
       }
     ],
+    "configurationDefaults": {
+      "[trux]": {
+        "editor.detectIndentation": false,
+        "editor.insertSpaces": true,
+        "editor.tabSize": 2
+      }
+    },
     "configuration": {
       "title": "Trux",
       "properties": {

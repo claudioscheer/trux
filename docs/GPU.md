@@ -18,25 +18,25 @@ let d_data gpu.Buffer[int] = gpu.alloc(n)
 
 ```trux
 func main() int {
-    let n int = 1024 * 1024
+  let n int = 1024 * 1024
 
-    // Data starts on the CPU.
-    let h_data []int = make([]int, n)
+  // Data starts on the CPU.
+  let h_data []int = make([]int, n)
 
-    // Device memory is explicit.
-    let d_data gpu.Buffer[int] = gpu.alloc(n)
+  // Device memory is explicit.
+  let d_data gpu.Buffer[int] = gpu.alloc(n)
 
-    // Copies are explicit so cost is visible in source.
-    gpu.copy_to_device(h_data, d_data)
+  // Copies are explicit so cost is visible in source.
+  gpu.copy_to_device(h_data, d_data)
 
-    gpu.launch(fill, d_data, n)
+  gpu.launch(fill, d_data, n)
 
-    // Copy results back only when host code needs them.
-    gpu.copy_to_host(d_data, h_data)
+  // Copy results back only when host code needs them.
+  gpu.copy_to_host(d_data, h_data)
 
-    print(h_data[0])
+  print(h_data[0])
 
-    return 0
+  return 0
 }
 ```
 
@@ -46,11 +46,11 @@ Possible kernel syntax:
 
 ```trux
 kernel func fill(out gpu.Buffer[int], n int) {
-    let i int = gpu.global_id()
+  let i int = gpu.global_id()
 
-    if i < n {
-        out[i] = 42
-    }
+  if i < n {
+    out[i] = 42
+  }
 }
 ```
 

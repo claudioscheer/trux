@@ -2,6 +2,6 @@ package main
 import "app.tx"
 
 func main() int {
-    print(app.message(), " ", app.score())
-    return 0
+  print(app.message(), " ", app.score())
+  return 0
 }

@@ -77,13 +77,13 @@ Minimal integer program:
 package main
 
 func add(a int, b int) int {
-    return a + b
+  return a + b
 }
 
 func main() int {
-    let x int = add(1, 2)
-    print(x)
-    return 0
+  let x int = add(1, 2)
+  print(x)
+  return 0
 }
 ```
 
@@ -99,18 +99,18 @@ Strings, booleans, floats, and multi-argument print:
 package main
 
 func mean(a float, b float) float {
-    return (a + b) / 2.0
+  return (a + b) / 2.0
 }
 
 func main() int {
-    let name string = "trux"
-    let stable bool = false
-    let average float = mean(1.5, 2.5)
+  let name string = "trux"
+  let stable bool = false
+  let average float = mean(1.5, 2.5)
 
-    print(name, " ", stable)
-    print(average)
+  print(name, " ", stable)
+  print(average)
 
-    return 0
+  return 0
 }
 ```
 

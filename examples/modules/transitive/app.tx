@@ -2,9 +2,9 @@ package app
 import "text.tx"
 
 pub func message() string {
-    return text.prefix() + " modules"
+  return text.prefix() + " modules"
 }
 
 pub func score() int {
-    return 40 + text.bonus()
+  return 40 + text.bonus()
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/claudioscheer/trux/internal/token"
 )
 
-const indent = "\t"
+const indent = "  "
 
 func Format(path string, src string) (string, error) {
 	if _, err := parser.ParseFile(path, src); err != nil {
@@ -123,7 +123,7 @@ func formatCodeLine(path string, line string) (string, error) {
 	var prev token.Token
 	hasPrev := false
 
-	for _, tok := range tokens {
+	for i, tok := range tokens {
 		if tok.Type == token.EOF {
 			break
 		}
@@ -131,7 +131,7 @@ func formatCodeLine(path string, line string) (string, error) {
 			return "", fmt.Errorf("%d:%d: illegal token %q", tok.Pos.Line, tok.Pos.Column, tok.Lexeme)
 		}
 
-		if hasPrev && needsSpace(prevprev, prev, tok) {
+		if hasPrev && needsSpace(tokens, i, prevprev, prev, tok) {
 			builder.WriteByte(' ')
 		}
 		builder.WriteString(formatLexeme(tok))
@@ -144,7 +144,7 @@ func formatCodeLine(path string, line string) (string, error) {
 	return builder.String(), nil
 }
 
-func needsSpace(prevprev token.Token, prev token.Token, curr token.Token) bool {
+func needsSpace(tokens []token.Token, index int, prevprev token.Token, prev token.Token, curr token.Token) bool {
 	if noSpaceBefore(curr.Type) || noSpaceAfter(prev.Type) {
 		return false
 	}
@@ -153,12 +153,28 @@ func needsSpace(prevprev token.Token, prev token.Token, curr token.Token) bool {
 		return false
 	}
 
+	if curr.Type == token.RBrace && prev.Type == token.LBrace {
+		return false
+	}
+
+	if curr.Type == token.RBrace && isCollectionLiteralCloseBrace(tokens, index) {
+		return false
+	}
+
+	if prev.Type == token.LBrace && isCollectionLiteralOpenBrace(tokens, index-1) {
+		return false
+	}
+
 	if curr.Type == token.LBracket {
 		switch prev.Type {
 		case token.List, token.RBracket:
 			return false
 		case token.Ident:
-			return prevprev.Type == token.Let || prevprev.Type == token.LParen || prevprev.Type == token.Comma
+			return prevprev.Type == token.Let || isFunctionParamType(tokens, index)
+		case token.String:
+			return false
+		case token.RParen:
+			return isFunctionReturnType(tokens, index)
 		default:
 			return true
 		}
@@ -169,6 +185,9 @@ func needsSpace(prevprev token.Token, prev token.Token, curr token.Token) bool {
 	}
 
 	if curr.Type == token.LBrace {
+		if isFunctionBodyBrace(tokens, index) {
+			return true
+		}
 		if prev.Type == token.RBracket || (isTypeToken(prev.Type) && prevprev.Type == token.RBracket) {
 			return false
 		}
@@ -186,9 +205,137 @@ func needsSpace(prevprev token.Token, prev token.Token, curr token.Token) bool {
 	return true
 }
 
+func isCollectionLiteralCloseBrace(tokens []token.Token, index int) bool {
+	lbrace := innermostOpenBrace(tokens, index)
+	if lbrace < 0 {
+		return false
+	}
+	return isCollectionLiteralOpenBrace(tokens, lbrace)
+}
+
+func isFunctionParamType(tokens []token.Token, index int) bool {
+	lparen := innermostOpenParen(tokens, index)
+	return isFunctionParamsOpenParen(tokens, lparen)
+}
+
+func isFunctionReturnType(tokens []token.Token, index int) bool {
+	lparen := matchingOpenParen(tokens, index-1)
+	return isFunctionParamsOpenParen(tokens, lparen)
+}
+
+func isFunctionBodyBrace(tokens []token.Token, index int) bool {
+	for i := 0; i+2 < index; i++ {
+		if tokens[i].Type != token.Func || tokens[i+1].Type != token.Ident || tokens[i+2].Type != token.LParen {
+			continue
+		}
+
+		rparen := matchingCloseParen(tokens, i+2, index)
+		if rparen < 0 {
+			return false
+		}
+		for j := rparen + 1; j < index; j++ {
+			if tokens[j].Type == token.LBrace {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func innermostOpenParen(tokens []token.Token, before int) int {
+	depth := 0
+	for i := before - 1; i >= 0; i-- {
+		switch tokens[i].Type {
+		case token.RParen:
+			depth++
+		case token.LParen:
+			if depth == 0 {
+				return i
+			}
+			depth--
+		}
+	}
+	return -1
+}
+
+func innermostOpenBrace(tokens []token.Token, before int) int {
+	depth := 0
+	for i := before - 1; i >= 0; i-- {
+		switch tokens[i].Type {
+		case token.RBrace:
+			depth++
+		case token.LBrace:
+			if depth == 0 {
+				return i
+			}
+			depth--
+		}
+	}
+	return -1
+}
+
+func isCollectionLiteralOpenBrace(tokens []token.Token, lbrace int) bool {
+	if lbrace < 1 {
+		return false
+	}
+	switch prev := tokens[lbrace-1]; prev.Type {
+	case token.RBracket:
+		return true
+	case token.IntType, token.FloatType, token.StringType, token.BoolType:
+		return lbrace >= 2 && tokens[lbrace-2].Type == token.RBracket
+	default:
+		return false
+	}
+}
+
+func matchingOpenParen(tokens []token.Token, rparen int) int {
+	if rparen < 0 || rparen >= len(tokens) || tokens[rparen].Type != token.RParen {
+		return -1
+	}
+
+	depth := 0
+	for i := rparen; i >= 0; i-- {
+		switch tokens[i].Type {
+		case token.RParen:
+			depth++
+		case token.LParen:
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func matchingCloseParen(tokens []token.Token, lparen int, before int) int {
+	if lparen < 0 || lparen >= len(tokens) || tokens[lparen].Type != token.LParen {
+		return -1
+	}
+
+	depth := 0
+	for i := lparen; i < before; i++ {
+		switch tokens[i].Type {
+		case token.LParen:
+			depth++
+		case token.RParen:
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func isFunctionParamsOpenParen(tokens []token.Token, lparen int) bool {
+	return lparen >= 2 && tokens[lparen-1].Type == token.Ident && tokens[lparen-2].Type == token.Func
+}
+
 func noSpaceBefore(typ token.Type) bool {
 	switch typ {
-	case token.RParen, token.RBracket, token.Comma, token.Colon:
+	case token.RParen, token.RBracket, token.Comma, token.Colon, token.Dot:
 		return true
 	default:
 		return false
@@ -197,7 +344,7 @@ func noSpaceBefore(typ token.Type) bool {
 
 func noSpaceAfter(typ token.Type) bool {
 	switch typ {
-	case token.LParen, token.LBracket, token.Colon:
+	case token.LParen, token.LBracket, token.Colon, token.Dot:
 		return true
 	default:
 		return false

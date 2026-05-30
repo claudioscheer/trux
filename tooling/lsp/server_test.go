@@ -169,7 +169,7 @@ return 0
 	if len(edits) != 1 {
 		t.Fatalf("edit count = %d, want 1", len(edits))
 	}
-	want := "package main\nfunc main() int {\n\treturn 0\n}\n"
+	want := "package main\nfunc main() int {\n  return 0\n}\n"
 	if edits[0].NewText != want {
 		t.Fatalf("new text = %q, want %q", edits[0].NewText, want)
 	}

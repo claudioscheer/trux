@@ -1,9 +1,9 @@
 package alpha
 
 func value() int {
-    return 10
+  return 10
 }
 
 pub func alpha() int {
-    return value() + 1
+  return value() + 1
 }

@@ -1,9 +1,9 @@
 package beta
 
 func value() int {
-    return 20
+  return 20
 }
 
 pub func beta() int {
-    return value() + 2
+  return value() + 2
 }

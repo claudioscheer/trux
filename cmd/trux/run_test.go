@@ -183,6 +183,41 @@ func TestRunFileCompilesAndExecutesCollectionExamples(t *testing.T) {
 	}
 }
 
+func TestRunFileCompilesAndExecutesModuleExamples(t *testing.T) {
+	requireCC(t)
+
+	tests := []struct {
+		path string
+		want string
+	}{
+		{
+			path: "../../examples/modules/basic/main.tx",
+			want: "7\n",
+		},
+		{
+			path: "../../examples/modules/transitive/main.tx",
+			want: "hello modules 42\n",
+		},
+		{
+			path: "../../examples/modules/private_names/main.tx",
+			want: "11 22\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			var out bytes.Buffer
+			err := runFile(&out, tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != tt.want {
+				t.Fatalf("output = %q, want %q", out.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestRunFileCompilesAndExecutesOwnershipCopyOut(t *testing.T) {
 	requireCC(t)
 
@@ -242,6 +277,42 @@ func main() int {
 	}
 }
 
+func TestRunFileCompilesAndExecutesModuleProgram(t *testing.T) {
+	requireCC(t)
+
+	dir := t.TempDir()
+	mainPath := writeTempFile(t, dir, "main.tx", `package main
+import "math.tx"
+import "words.tx"
+
+func main() int {
+    print(label(), " ", add(2, 5))
+    return 0
+}`)
+	writeTempFile(t, dir, "math.tx", `package math
+func base() int {
+    return 2
+}
+
+pub func add(a int, b int) int {
+    return a + b + base()
+}`)
+	writeTempFile(t, dir, "words.tx", `package words
+pub func label() string {
+    return "module"
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if out.String() != "module 9\n" {
+		t.Fatalf("output = %q, want module 9\\n", out.String())
+	}
+}
+
 func TestRunFileReturnsRuntimeBoundsError(t *testing.T) {
 	requireCC(t)
 
@@ -262,6 +333,110 @@ func main() int {
 	}
 	if !strings.Contains(err.Error(), "trux runtime error: index 1 out of bounds for length 1") {
 		t.Fatalf("error = %q, want bounds error", err.Error())
+	}
+}
+
+func TestRunFileReturnsMissingImportWithSourceContext(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := writeTempFile(t, dir, "main.tx", `package main
+import "missing.tx"
+
+func main() int {
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, mainPath)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if out.String() != "" {
+		t.Fatalf("output = %q, want empty output", out.String())
+	}
+
+	wantParts := []string{
+		mainPath + ":2:1: cannot find module \"missing.tx\"",
+		"1 | package main",
+		"2 | import \"missing.tx\"",
+		"  | ^",
+		"4 | func main() int {",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("error = %q, want it to contain %q", err.Error(), part)
+		}
+	}
+}
+
+func TestRunFileReturnsImportedTypeErrorWithImportedSourceContext(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := writeTempFile(t, dir, "main.tx", `package main
+import "lib.tx"
+
+func main() int {
+    return bad()
+}`)
+	libPath := writeTempFile(t, dir, "lib.tx", `package main
+pub func bad() int {
+    return "wrong"
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, mainPath)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if out.String() != "" {
+		t.Fatalf("output = %q, want empty output", out.String())
+	}
+
+	wantParts := []string{
+		libPath + ":3:12: cannot return string from function returning int",
+		"1 | package main",
+		"2 | pub func bad() int {",
+		"3 |     return \"wrong\"",
+		"  |            ^",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("error = %q, want it to contain %q", err.Error(), part)
+		}
+	}
+}
+
+func TestRunFileReturnsImportedParseErrorWithImportedSourceContext(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := writeTempFile(t, dir, "main.tx", `package main
+import "lib.tx"
+
+func main() int {
+    return 0
+}`)
+	libPath := writeTempFile(t, dir, "lib.tx", `package main
+pub func bad( int {
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, mainPath)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if out.String() != "" {
+		t.Fatalf("output = %q, want empty output", out.String())
+	}
+
+	wantParts := []string{
+		libPath + ":2:15: expected IDENT, got \"int\"",
+		"1 | package main",
+		"2 | pub func bad( int {",
+		"  |               ^",
+		"3 |     return 0",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("error = %q, want it to contain %q", err.Error(), part)
+		}
 	}
 }
 
@@ -479,6 +654,32 @@ func main() int {
 	}
 }
 
+func TestEmitCFileSupportsModuleProgram(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := writeTempFile(t, dir, "main.tx", `package main
+import "math.tx"
+
+func main() int {
+    return add(1, 2)
+}`)
+	writeTempFile(t, dir, "math.tx", `package math
+pub func add(a int, b int) int {
+    return a + b
+}`)
+
+	result, err := compileFile(mainPath, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(result.CSource, "int64_t trux_add(") {
+		t.Fatalf("generated C = %q, want module function add", result.CSource)
+	}
+	if !strings.Contains(result.CSource, "int main(void)") {
+		t.Fatalf("generated C = %q, want C main", result.CSource)
+	}
+}
+
 func TestBuildCommandRequiresOutput(t *testing.T) {
 	oldOutput := buildOutput
 	t.Cleanup(func() {
@@ -526,10 +727,7 @@ func main() int {
 func TestGeneratedExamplesCompileWithStrictCWarnings(t *testing.T) {
 	requireCC(t)
 
-	paths, err := filepath.Glob("../../examples/*.tx")
-	if err != nil {
-		t.Fatal(err)
-	}
+	paths := exampleEntrypoints(t)
 	if len(paths) == 0 {
 		t.Fatal("no example programs found")
 	}
@@ -564,10 +762,51 @@ func TestGeneratedExamplesCompileWithStrictCWarnings(t *testing.T) {
 	}
 }
 
+func exampleEntrypoints(t *testing.T) []string {
+	t.Helper()
+
+	paths, err := filepath.Glob("../../examples/*.tx")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = filepath.WalkDir("../../examples", func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) == "main.tx" && filepath.Dir(path) != "../../examples" {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return paths
+}
+
 func writeTempSource(t *testing.T, src string) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "main.tx")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+func writeTempFile(t *testing.T, dir string, name string, src string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}

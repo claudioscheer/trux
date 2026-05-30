@@ -96,6 +96,17 @@ func TestPrintIsIdentifier(t *testing.T) {
 	})
 }
 
+func TestLexesImportAndPubTokens(t *testing.T) {
+	assertTokens(t, Lex(`import "math.tx" pub func add`), []expectedToken{
+		{token.Import, "import"},
+		{token.String, "math.tx"},
+		{token.Pub, "pub"},
+		{token.Func, "func"},
+		{token.Ident, "add"},
+		{token.EOF, ""},
+	})
+}
+
 func TestLexesPrimitiveLiteralsAndTypes(t *testing.T) {
 	assertTokens(t, Lex(`let name string = "trux\n" let ready bool = true false`), []expectedToken{
 		{token.Let, "let"},

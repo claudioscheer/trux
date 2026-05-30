@@ -1,0 +1,10 @@
+package app
+import "text.tx"
+
+pub func message() string {
+    return prefix() + " modules"
+}
+
+pub func score() int {
+    return 40 + bonus()
+}

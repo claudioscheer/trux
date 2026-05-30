@@ -1,0 +1,7 @@
+package main
+import "math.tx"
+
+func main() int {
+    print(add(3, 4))
+    return 0
+}

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/claudioscheer/trux/internal/modules"
 	"github.com/claudioscheer/trux/internal/parser"
 	"github.com/claudioscheer/trux/internal/token"
 	semtypes "github.com/claudioscheer/trux/internal/types"
@@ -66,7 +67,12 @@ func runFileWithOptions(out io.Writer, path string, opts runOptions) error {
 	return runExecutable(out, executablePath)
 }
 
-func formatSourceError(path string, src string, err error) error {
+func formatSourceError(path string, src string, sources map[string]string, err error) error {
+	var moduleErr *modules.Error
+	if errors.As(err, &moduleErr) {
+		return formatErrorAt(moduleErr.File, moduleErr.Source, moduleErr.Pos, moduleErr.Msg)
+	}
+
 	var parseErr *parser.ParseError
 	if !errors.As(err, &parseErr) {
 		var typeErr *semtypes.Error
@@ -74,10 +80,25 @@ func formatSourceError(path string, src string, err error) error {
 			return err
 		}
 
-		return formatErrorAt(path, src, typeErr.Pos, typeErr.Msg)
+		errorPath, errorSource := sourceForPosition(path, src, sources, typeErr.Pos)
+		return formatErrorAt(errorPath, errorSource, typeErr.Pos, typeErr.Msg)
 	}
 
-	return formatErrorAt(path, src, parseErr.Pos, parseErr.Msg)
+	errorPath, errorSource := sourceForPosition(path, src, sources, parseErr.Pos)
+	return formatErrorAt(errorPath, errorSource, parseErr.Pos, parseErr.Msg)
+}
+
+func sourceForPosition(path string, src string, sources map[string]string, pos token.Position) (string, string) {
+	if pos.File == "" {
+		return path, src
+	}
+	if sources != nil {
+		if source, ok := sources[pos.File]; ok {
+			return pos.File, source
+		}
+	}
+
+	return pos.File, src
 }
 
 func formatErrorAt(path string, src string, pos token.Position, msg string) error {

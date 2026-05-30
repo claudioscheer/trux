@@ -1,0 +1,414 @@
+package modules
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/claudioscheer/trux/internal/ast"
+	semtypes "github.com/claudioscheer/trux/internal/types"
+)
+
+func TestLoadResolvesRelativeImportsAndDeduplicatesFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "math.tx"
+import "./math.tx"
+
+func main() int {
+    return add(1, 2)
+}`)
+	writeSource(t, dir, "math.tx", `package main
+pub func add(a int, b int) int {
+    return a + b
+}`)
+
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Program.Functions) != 2 {
+		t.Fatalf("function count = %d, want 2", len(result.Program.Functions))
+	}
+	if len(result.Sources) != 2 {
+		t.Fatalf("source count = %d, want 2", len(result.Sources))
+	}
+	if _, err := semtypes.Check(result.Program); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadAllowsDifferentPackageNames(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package app
+import "math.tx"
+
+func main() int {
+    return add(1, 2)
+}`)
+	writeSource(t, dir, "math.tx", `package math
+pub func add(a int, b int) int {
+    return a + b
+}`)
+
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Program.PackageName != "app" {
+		t.Fatalf("merged package = %q, want entry package app", result.Program.PackageName)
+	}
+	if _, err := semtypes.Check(result.Program); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadDetectsImportCycle(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "a.tx"
+
+func main() int {
+    return 0
+}`)
+	writeSource(t, dir, "a.tx", `package main
+import "b.tx"
+
+pub func a() int {
+    return 1
+}`)
+	writeSource(t, dir, "b.tx", `package main
+import "a.tx"
+
+pub func b() int {
+    return 2
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, "import cycle detected:")
+	assertErrorContains(t, err, filepath.Join(dir, "a.tx"))
+	assertErrorContains(t, err, filepath.Join(dir, "b.tx"))
+}
+
+func TestLoadRejectsInvalidImportPaths(t *testing.T) {
+	dir := t.TempDir()
+	absImport := filepath.Join(dir, "abs.tx")
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "missing",
+			path: "missing.tx",
+			want: "cannot find module \"missing.tx\"",
+		},
+		{
+			name: "absolute",
+			path: absImport,
+			want: "must be relative",
+		},
+		{
+			name: "non tx",
+			path: "notes.txt",
+			want: "must end in .tx",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeSource(t, dir, "main.tx", `package main
+import "`+tt.path+`"
+
+func main() int {
+    return 0
+}`)
+
+			_, err := Load(filepath.Join(dir, "main.tx"))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			assertErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestLoadRejectsDirectoryImport(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "module.tx"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSource(t, dir, "main.tx", `package main
+import "module.tx"
+
+func main() int {
+    return 0
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, "resolved to directory")
+	assertErrorContains(t, err, "expected .tx file")
+}
+
+func TestLoadAllowsSameNamedPrivateFunctionsInDifferentFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "a.tx"
+import "b.tx"
+
+func main() int {
+    return a() + b()
+}`)
+	writeSource(t, dir, "a.tx", `package main
+func value() int {
+    return 1
+}
+
+pub func a() int {
+    return value()
+}`)
+	writeSource(t, dir, "b.tx", `package main
+func value() int {
+    return 2
+}
+
+pub func b() int {
+    return value()
+}`)
+
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := semtypes.Check(result.Program); err != nil {
+		t.Fatal(err)
+	}
+
+	if !hasFunctionPrefix(result.Program, "__trux_mod_1_value") || !hasFunctionPrefix(result.Program, "__trux_mod_2_value") {
+		t.Fatalf("functions = %#v, want private functions rewritten with module prefixes", functionNames(result.Program))
+	}
+}
+
+func TestLoadRejectsDuplicatePublicFunctions(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "a.tx"
+import "b.tx"
+
+func main() int {
+    return 0
+}`)
+	writeSource(t, dir, "a.tx", `package main
+pub func value() int {
+    return 1
+}`)
+	writeSource(t, dir, "b.tx", `package main
+pub func value() int {
+    return 2
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, `duplicate public function "value"`)
+	assertErrorContains(t, err, filepath.Join(dir, "a.tx"))
+}
+
+func TestLoadRejectsReservedFunctionPrefixAndImportedMain(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{
+			name: "reserved prefix",
+			files: map[string]string{
+				"main.tx": `package main
+func __trux_user() int {
+    return 1
+}
+
+func main() int {
+    return __trux_user()
+}`,
+			},
+			want: `reserved compiler prefix "__trux_"`,
+		},
+		{
+			name: "imported main",
+			files: map[string]string{
+				"main.tx": `package main
+import "lib.tx"
+
+func main() int {
+    return 0
+}`,
+				"lib.tx": `package main
+func main() int {
+    return 1
+}`,
+			},
+			want: "must not define main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, src := range tt.files {
+				writeSource(t, dir, name, src)
+			}
+
+			_, err := Load(filepath.Join(dir, "main.tx"))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			assertErrorContains(t, err, tt.want)
+		})
+	}
+}
+
+func TestLoadRejectsCallsToOtherFilePrivateFunction(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "lib.tx"
+
+func main() int {
+    return secret()
+}`)
+	writeSource(t, dir, "lib.tx", `package main
+func secret() int {
+    return 42
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, `cannot call private function "secret"`)
+	assertErrorContains(t, err, filepath.Join(dir, "lib.tx"))
+}
+
+func TestLoadResolvesTransitivePublicFunctions(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "a.tx"
+
+func main() int {
+    return b()
+}`)
+	writeSource(t, dir, "a.tx", `package main
+import "b.tx"
+
+pub func a() int {
+    return b()
+}`)
+	writeSource(t, dir, "b.tx", `package main
+pub func b() int {
+    return 7
+}`)
+
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := semtypes.Check(result.Program); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadResolvesSameFilePrivateBeforeLoadedPublic(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "lib.tx"
+
+func value() int {
+    return 1
+}
+
+func main() int {
+    return value()
+}`)
+	writeSource(t, dir, "lib.tx", `package main
+pub func value() int {
+    return 2
+}`)
+
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := semtypes.Check(result.Program); err != nil {
+		t.Fatal(err)
+	}
+
+	call := findMainReturnCall(t, result.Program)
+	if !strings.HasPrefix(call.Callee, "__trux_mod_0_value") {
+		t.Fatalf("callee = %q, want entry private function rewrite", call.Callee)
+	}
+}
+
+func writeSource(t *testing.T, dir string, name string, src string) {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertErrorContains(t *testing.T, err error, want string) {
+	t.Helper()
+
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want it to contain %q", err.Error(), want)
+	}
+}
+
+func hasFunctionPrefix(program *ast.Program, prefix string) bool {
+	for _, fn := range program.Functions {
+		if strings.HasPrefix(fn.Name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func functionNames(program *ast.Program) []string {
+	names := make([]string, 0, len(program.Functions))
+	for _, fn := range program.Functions {
+		names = append(names, fn.Name)
+	}
+	return names
+}
+
+func findMainReturnCall(t *testing.T, program *ast.Program) *ast.CallExpr {
+	t.Helper()
+
+	for _, fn := range program.Functions {
+		if fn.Name != "main" {
+			continue
+		}
+		stmt := fn.Body.Statements[len(fn.Body.Statements)-1].(*ast.ReturnStmt)
+		call, ok := stmt.Value.(*ast.CallExpr)
+		if !ok {
+			t.Fatalf("main return = %T, want call", stmt.Value)
+		}
+		return call
+	}
+
+	t.Fatal("missing main")
+	return nil
+}

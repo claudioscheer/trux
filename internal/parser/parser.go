@@ -25,7 +25,11 @@ type Parser struct {
 }
 
 func Parse(input string) (*ast.Program, error) {
-	tokens := lexer.Lex(input)
+	return ParseFile("", input)
+}
+
+func ParseFile(path string, input string) (*ast.Program, error) {
+	tokens := lexer.LexFile(path, input)
 	for _, tok := range tokens {
 		if tok.Type == token.Illegal {
 			if strings.HasPrefix(tok.Lexeme, "error: ") {
@@ -57,7 +61,18 @@ func (p *Parser) parseProgram() (*ast.Program, error) {
 
 	program := &ast.Program{PackageName: packageName.Lexeme}
 
+	for p.check(token.Import) {
+		importDecl, err := p.parseImportDecl()
+		if err != nil {
+			return nil, err
+		}
+		program.Imports = append(program.Imports, importDecl)
+	}
+
 	for !p.check(token.EOF) {
+		if p.check(token.Import) {
+			return nil, p.errorf(p.current(), "imports must appear after package and before functions")
+		}
 		fn, err := p.parseFuncDecl()
 		if err != nil {
 			return nil, err
@@ -68,10 +83,34 @@ func (p *Parser) parseProgram() (*ast.Program, error) {
 	return program, nil
 }
 
-func (p *Parser) parseFuncDecl() (*ast.FuncDecl, error) {
-	start, err := p.expect(token.Func)
+func (p *Parser) parseImportDecl() (*ast.ImportDecl, error) {
+	start, err := p.expect(token.Import)
 	if err != nil {
 		return nil, err
+	}
+
+	path, err := p.expect(token.String)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ast.ImportDecl{Pos: start.Pos, Path: path.Lexeme}, nil
+}
+
+func (p *Parser) parseFuncDecl() (*ast.FuncDecl, error) {
+	public := false
+	start := p.current()
+	if p.match(token.Pub) {
+		public = true
+		if _, err := p.expect(token.Func); err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		start, err = p.expect(token.Func)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	name, err := p.expect(token.Ident)
@@ -105,6 +144,7 @@ func (p *Parser) parseFuncDecl() (*ast.FuncDecl, error) {
 	return &ast.FuncDecl{
 		Pos:        start.Pos,
 		Name:       name.Lexeme,
+		Public:     public,
 		Params:     params,
 		ReturnType: returnType,
 		Body:       body,

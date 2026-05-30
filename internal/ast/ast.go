@@ -8,12 +8,19 @@ import (
 
 type Program struct {
 	PackageName string
+	Imports     []*ImportDecl
 	Functions   []*FuncDecl
+}
+
+type ImportDecl struct {
+	Pos  token.Position
+	Path string
 }
 
 type FuncDecl struct {
 	Pos        token.Position
 	Name       string
+	Public     bool
 	Params     []Param
 	ReturnType Type
 	Body       Block

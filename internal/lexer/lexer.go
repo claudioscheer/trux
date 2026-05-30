@@ -3,6 +3,7 @@ package lexer
 import "github.com/claudioscheer/trux/internal/token"
 
 type Lexer struct {
+	file   string
 	input  string
 	offset int
 	line   int
@@ -10,7 +11,12 @@ type Lexer struct {
 }
 
 func New(input string) *Lexer {
+	return NewFile("", input)
+}
+
+func NewFile(file string, input string) *Lexer {
 	return &Lexer{
+		file:   file,
 		input:  input,
 		line:   1,
 		column: 1,
@@ -18,7 +24,11 @@ func New(input string) *Lexer {
 }
 
 func Lex(input string) []token.Token {
-	l := New(input)
+	return LexFile("", input)
+}
+
+func LexFile(file string, input string) []token.Token {
+	l := NewFile(file, input)
 	tokens := []token.Token{}
 
 	for {
@@ -256,6 +266,7 @@ func (l *Lexer) atEnd() bool {
 
 func (l *Lexer) position() token.Position {
 	return token.Position{
+		File:   l.file,
 		Offset: l.offset,
 		Line:   l.line,
 		Column: l.column,

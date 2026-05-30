@@ -1,0 +1,7 @@
+package main
+import "app.tx"
+
+func main() int {
+    print(message(), " ", score())
+    return 0
+}

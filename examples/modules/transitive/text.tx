@@ -1,0 +1,9 @@
+package text
+
+pub func prefix() string {
+    return "hello"
+}
+
+pub func bonus() int {
+    return 2
+}

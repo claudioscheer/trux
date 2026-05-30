@@ -12,7 +12,7 @@ import (
 	codegenc "github.com/claudioscheer/trux/internal/codegen/c"
 	"github.com/claudioscheer/trux/internal/ir"
 	"github.com/claudioscheer/trux/internal/lexer"
-	"github.com/claudioscheer/trux/internal/parser"
+	"github.com/claudioscheer/trux/internal/modules"
 	semtypes "github.com/claudioscheer/trux/internal/types"
 )
 
@@ -26,9 +26,14 @@ type compileResult struct {
 }
 
 func compileFile(path string, opts compileOptions) (*compileResult, error) {
-	src, err := os.ReadFile(path)
+	loaded, err := modules.Load(path)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, formatSourceError(path, "", nil, err)
+	}
+
+	src := loaded.Sources[loaded.EntryPath]
+	if src == "" {
+		return nil, fmt.Errorf("missing loaded source for %s", loaded.EntryPath)
 	}
 
 	var debug *debugWriter
@@ -40,7 +45,7 @@ func compileFile(path string, opts compileOptions) (*compileResult, error) {
 		if err := debug.writeText("00-source.tx", string(src)); err != nil {
 			return nil, err
 		}
-		tokens := lexer.Lex(string(src))
+		tokens := lexer.LexFile(loaded.EntryPath, string(src))
 		if err := debug.writeText("01-tokens.txt", formatTokens(tokens)); err != nil {
 			return nil, err
 		}
@@ -49,10 +54,7 @@ func compileFile(path string, opts compileOptions) (*compileResult, error) {
 		}
 	}
 
-	program, err := parser.Parse(string(src))
-	if err != nil {
-		return nil, formatSourceError(path, string(src), err)
-	}
+	program := loaded.Program
 	if debug != nil {
 		if err := debug.writeJSON("02-ast.json", program); err != nil {
 			return nil, err
@@ -61,7 +63,7 @@ func compileFile(path string, opts compileOptions) (*compileResult, error) {
 
 	info, err := semtypes.Check(program)
 	if err != nil {
-		return nil, formatSourceError(path, string(src), err)
+		return nil, formatSourceError(path, string(src), loaded.Sources, err)
 	}
 	if debug != nil {
 		if err := debug.writeText("03-types.txt", formatTypeInfo(program, info)); err != nil {

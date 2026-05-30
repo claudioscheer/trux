@@ -1,0 +1,8 @@
+package main
+import "alpha.tx"
+import "beta.tx"
+
+func main() int {
+    print(alpha(), " ", beta())
+    return 0
+}

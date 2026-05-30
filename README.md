@@ -36,11 +36,13 @@ The compiler currently supports:
 - fixed arrays `[N]T`, slices `[]T`, and mutable lists `list[T]` for scalar element types
 - array and list literals, `make([]T, n)`, `len(x)`, indexing, slicing, list `append`, and indexed assignment
 - explicit `clone(x)` for owned copies of strings, arrays, slices, and lists
+- relative module imports with `import "path/to/file.tx"` across files that may declare different package names
+- `pub func` exports, file-local private functions, transitive public function visibility, and import-cycle detection
 - typed IR
 - C code generation and execution through `cc` or `$CC`
 - `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
 
-Nested collections, imports, modules, public package exports, and GPU kernels are not implemented.
+Nested collections, qualified module names, directory-based packages, separate module compilation, reusable package artifacts, and GPU kernels are not implemented.
 
 ## Building
 
@@ -118,7 +120,7 @@ trux false
 2
 ```
 
-More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/collections.tx](examples/collections.tx) and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current collection and ownership model.
+More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/collections.tx](examples/collections.tx) and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current collection and ownership model. Module examples live under [examples/modules/](examples/modules/).
 
 ## Commands
 

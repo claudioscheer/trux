@@ -12,6 +12,8 @@ const (
 	String Type = "STRING"
 
 	Package    Type = "PACKAGE"
+	Import     Type = "IMPORT"
+	Pub        Type = "PUB"
 	Func       Type = "FUNC"
 	Return     Type = "RETURN"
 	Let        Type = "LET"
@@ -51,6 +53,7 @@ const (
 )
 
 type Position struct {
+	File   string
 	Offset int
 	Line   int
 	Column int
@@ -64,6 +67,8 @@ type Token struct {
 
 var keywords = map[string]Type{
 	"package": Package,
+	"import":  Import,
+	"pub":     Pub,
 	"func":    Func,
 	"return":  Return,
 	"let":     Let,

@@ -47,6 +47,54 @@ func TestParsesHelloExample(t *testing.T) {
 	}
 }
 
+func TestParsesImportsAndPublicFunctions(t *testing.T) {
+	program := mustParse(t, `package main
+import "math.tx"
+import "text/format.tx"
+
+pub func add(a int, b int) int {
+    return a + b
+}
+
+func main() int {
+    return add(1, 2)
+}`)
+
+	if len(program.Imports) != 2 {
+		t.Fatalf("import count = %d, want 2", len(program.Imports))
+	}
+	if program.Imports[0].Path != "math.tx" {
+		t.Fatalf("first import = %q, want math.tx", program.Imports[0].Path)
+	}
+	if program.Imports[1].Path != "text/format.tx" {
+		t.Fatalf("second import = %q, want text/format.tx", program.Imports[1].Path)
+	}
+	if len(program.Functions) != 2 {
+		t.Fatalf("function count = %d, want 2", len(program.Functions))
+	}
+	if !program.Functions[0].Public {
+		t.Fatal("first function should be public")
+	}
+	if program.Functions[1].Public {
+		t.Fatal("main function should be private")
+	}
+}
+
+func TestRejectsImportAfterFunctionDeclaration(t *testing.T) {
+	_, err := Parse(`package main
+func main() int {
+    return 0
+}
+import "late.tx"`)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	if !strings.Contains(err.Error(), "imports must appear after package and before functions") {
+		t.Fatalf("error = %q, want import placement error", err.Error())
+	}
+}
+
 func TestParsesLetWithCallExpression(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

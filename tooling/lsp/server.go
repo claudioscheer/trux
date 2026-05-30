@@ -237,7 +237,7 @@ func initializeResult() map[string]any {
 			"referencesProvider":         true,
 			"hoverProvider":              true,
 			"completionProvider": map[string]any{
-				"triggerCharacters": []string{"."},
+				"triggerCharacters": []string{".", "\"", "/"},
 			},
 		},
 		"serverInfo": map[string]any{
@@ -649,11 +649,13 @@ type CompletionList struct {
 }
 
 type CompletionItem struct {
-	Label      string `json:"label"`
-	Kind       int    `json:"kind"`
-	Detail     string `json:"detail,omitempty"`
-	InsertText string `json:"insertText,omitempty"`
-	FilterText string `json:"filterText,omitempty"`
+	Label               string     `json:"label"`
+	Kind                int        `json:"kind"`
+	Detail              string     `json:"detail,omitempty"`
+	InsertText          string     `json:"insertText,omitempty"`
+	FilterText          string     `json:"filterText,omitempty"`
+	TextEdit            *TextEdit  `json:"textEdit,omitempty"`
+	AdditionalTextEdits []TextEdit `json:"additionalTextEdits,omitempty"`
 }
 
 type MarkupContent struct {

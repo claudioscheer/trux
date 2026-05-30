@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/claudioscheer/trux/internal/ast"
@@ -71,13 +73,26 @@ type sourceFile struct {
 
 type importedPackage struct {
 	name   string
-	file   *sourceFile
+	files  []*sourceFile
 	stdlib bool
 }
 
 type completionContext struct {
 	member      bool
 	packageName string
+}
+
+type importStringCompletionContext struct {
+	prefix string
+	edit   TextEdit
+}
+
+type sourceModuleCandidate struct {
+	packageName  string
+	functionName string
+	importPath   string
+	path         string
+	fn           *ast.FuncDecl
 }
 
 type importPathReference struct {
@@ -158,19 +173,31 @@ func (s *Server) handleCompletion(raw json.RawMessage) (any, error) {
 	}
 
 	path := normalizePath(pathFromURI(params.TextDocument.URI))
-	if importStringCompletionAt(path, text, params.Position) {
-		return completionListFromItems(standardPackageImportCompletionItems()), nil
+	if importContext, ok := importStringCompletionAt(text, params.Position); ok {
+		return completionListFromItems(importPathCompletionItems(path, importContext)), nil
 	}
 
 	imports := directImportedPackages(path, text, s.documents)
+	if !expressionCompletionAt(text, params.Position) {
+		return completionListFromItems(declarationCompletionItems()), nil
+	}
+
 	context := completionContextAt(text, params.Position)
 	if context.member {
+		items := []CompletionItem{}
 		for _, pkg := range imports {
-			if pkg.name == context.packageName {
-				return completionListFromItems(packageMemberCompletionItems(pkg)), nil
+			if pkg.name != context.packageName {
+				continue
+			}
+			items = append(items, packageMemberCompletionItems(pkg)...)
+		}
+		if !importedPackageName(imports, context.packageName) {
+			if pkg, ok := stdlib.LookupPackage(context.packageName); ok {
+				items = append(items, standardPackageMemberCompletionItems(pkg, importEdit(text, pkg.Name))...)
 			}
 		}
-		return completionListFromItems(nil), nil
+		items = append(items, sourceAutoImportMemberCompletionItems(path, text, s.documents, imports, context.packageName)...)
+		return completionListFromItems(items), nil
 	}
 
 	items := baseCompletionItems()
@@ -190,6 +217,15 @@ func (s *Server) handleCompletion(raw json.RawMessage) (any, error) {
 	}
 	for _, item := range qualifiedImportedFunctionCompletionItems(imports) {
 		items = appendCompletionItem(items, seen, item)
+	}
+	for _, item := range standardAutoImportFunctionCompletionItems(text, imports) {
+		items = appendCompletionItem(items, seen, item)
+	}
+	for _, item := range sourceAutoImportFunctionCompletionItems(path, text, s.documents, imports) {
+		if _, ok := seen[item.Label]; ok {
+			continue
+		}
+		items = append(items, item)
 	}
 
 	return completionListFromItems(items), nil
@@ -487,7 +523,7 @@ func directImportTokenForPackage(file *sourceFile, graph *sourceGraph, packageNa
 			continue
 		}
 
-		importPath := normalizePath(filepath.Join(filepath.Dir(file.path), importDecl.Path))
+		importPath := normalizePath(filepath.Join(normalizePath(filepath.Dir(file.path)), importDecl.Path))
 		importedFile := graph.files[importPath]
 		if importedFile == nil || importedFile.program.PackageName != packageName {
 			continue
@@ -693,15 +729,111 @@ func completionListFromItems(items []CompletionItem) CompletionList {
 	}
 }
 
-func importStringCompletionAt(path string, text string, pos Position) bool {
-	cursor := tokenPositionFromLSP(pos)
-	tokens := lexer.LexFile(path, text)
-	for i := 0; i < len(tokens)-1; i++ {
-		if tokens[i].Type == token.Import && tokens[i+1].Type == token.String && containsStringToken(cursor, tokens[i+1]) {
-			return true
+func importStringCompletionAt(text string, pos Position) (importStringCompletionContext, bool) {
+	lines := strings.Split(text, "\n")
+	if pos.Line < 0 || pos.Line >= len(lines) {
+		return importStringCompletionContext{}, false
+	}
+
+	line := []rune(lines[pos.Line])
+	if pos.Character < 0 || pos.Character > len(line) {
+		return importStringCompletionContext{}, false
+	}
+
+	before := string(line[:pos.Character])
+	leading := len([]rune(before)) - len([]rune(strings.TrimLeft(before, " \t")))
+	rest := string(line[leading:pos.Character])
+	if !strings.HasPrefix(rest, "import") {
+		return importStringCompletionContext{}, false
+	}
+	afterImport := rest[len("import"):]
+	if afterImport == "" || isWordRune([]rune(afterImport)[0]) {
+		return importStringCompletionContext{}, false
+	}
+	afterImport = strings.TrimLeft(afterImport, " \t")
+	if !strings.HasPrefix(afterImport, "\"") {
+		return importStringCompletionContext{}, false
+	}
+
+	prefix := afterImport[1:]
+	if strings.Contains(prefix, "\"") {
+		return importStringCompletionContext{}, false
+	}
+
+	start := pos.Character - len([]rune(prefix))
+	edit := TextEdit{
+		Range: Range{
+			Start: Position{Line: pos.Line, Character: start},
+			End:   pos,
+		},
+	}
+	return importStringCompletionContext{prefix: prefix, edit: edit}, true
+}
+
+func expressionCompletionAt(text string, pos Position) bool {
+	offset := offsetFromPosition(text, pos)
+	if offset < 0 {
+		return false
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	for i := 0; i < offset && i < len(text); i++ {
+		ch := text[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+
+		if ch == '/' && i+1 < offset && i+1 < len(text) && text[i+1] == '/' {
+			for i < offset && i < len(text) && text[i] != '\n' {
+				i++
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+			}
 		}
 	}
-	return false
+	return depth > 0
+}
+
+func offsetFromPosition(text string, pos Position) int {
+	line := 0
+	character := 0
+	for offset, r := range text {
+		if line == pos.Line && character == pos.Character {
+			return offset
+		}
+		if r == '\n' {
+			line++
+			character = 0
+			continue
+		}
+		character++
+	}
+	if line == pos.Line && character == pos.Character {
+		return len(text)
+	}
+	return -1
 }
 
 func (s *Server) resolveSymbolWithGraph(uri string, pos Position) (symbolDefinition, *sourceGraph, bool, error) {
@@ -793,7 +925,7 @@ func loadSourceGraph(activePath string, activeText string, documents map[string]
 			if filepath.IsAbs(importDecl.Path) || filepath.Ext(importDecl.Path) != ".tx" {
 				continue
 			}
-			load(filepath.Join(filepath.Dir(path), importDecl.Path))
+			load(filepath.Join(normalizePath(filepath.Dir(path)), importDecl.Path))
 		}
 	}
 
@@ -809,13 +941,13 @@ func directImportedPackages(activePath string, activeText string, documents map[
 
 	imports := []importedPackage{}
 	seenPaths := map[string]struct{}{}
-	seenPackages := map[string]struct{}{}
+	packageIndex := map[string]int{}
 	for _, importDecl := range importDeclsFromText(activePath, activeText) {
 		if pkg, ok := stdlib.LookupPackage(importDecl.Path); ok {
-			if _, seen := seenPackages[pkg.Name]; seen {
+			if _, seen := packageIndex[pkg.Name]; seen {
 				continue
 			}
-			seenPackages[pkg.Name] = struct{}{}
+			packageIndex[pkg.Name] = len(imports)
 			imports = append(imports, importedPackage{name: pkg.Name, stdlib: true})
 			continue
 		}
@@ -823,7 +955,7 @@ func directImportedPackages(activePath string, activeText string, documents map[
 			continue
 		}
 
-		path := normalizePath(filepath.Join(filepath.Dir(activePath), importDecl.Path))
+		path := normalizePath(filepath.Join(normalizePath(filepath.Dir(activePath)), importDecl.Path))
 		if _, ok := seenPaths[path]; ok {
 			continue
 		}
@@ -849,11 +981,12 @@ func directImportedPackages(activePath string, activeText string, documents map[
 			text:    text,
 			program: program,
 		}
-		if _, ok := seenPackages[program.PackageName]; ok {
+		if index, ok := packageIndex[program.PackageName]; ok {
+			imports[index].files = append(imports[index].files, file)
 			continue
 		}
-		seenPackages[program.PackageName] = struct{}{}
-		imports = append(imports, importedPackage{name: program.PackageName, file: file})
+		packageIndex[program.PackageName] = len(imports)
+		imports = append(imports, importedPackage{name: program.PackageName, files: []*sourceFile{file}})
 	}
 
 	return imports
@@ -875,18 +1008,140 @@ func importedPackageCompletionItems(imports []importedPackage) []CompletionItem 
 	return items
 }
 
-func standardPackageImportCompletionItems() []CompletionItem {
+func standardPackageImportCompletionItems(context importStringCompletionContext) []CompletionItem {
+	if strings.Contains(context.prefix, "/") || strings.Contains(context.prefix, "\\") || strings.HasPrefix(context.prefix, ".") {
+		return nil
+	}
+
 	packages := stdlib.Packages()
 	items := make([]CompletionItem, 0, len(packages))
 	for _, pkg := range packages {
+		edit := context.edit
+		edit.NewText = pkg.Name
 		items = append(items, CompletionItem{
 			Label:      pkg.Name,
 			Kind:       completionKindModule,
 			Detail:     "standard package",
 			InsertText: pkg.Name,
+			TextEdit:   &edit,
 		})
 	}
 	return items
+}
+
+func importPathCompletionItems(activePath string, context importStringCompletionContext) []CompletionItem {
+	items := standardPackageImportCompletionItems(context)
+	items = append(items, sourceImportPathCompletionItems(activePath, context)...)
+	return items
+}
+
+func sourceImportPathCompletionItems(activePath string, context importStringCompletionContext) []CompletionItem {
+	activeDir := normalizePath(filepath.Dir(activePath))
+	dirPrefix, basePrefix := splitImportPrefix(context.prefix)
+	targetDir := normalizePath(filepath.Join(activeDir, filepath.FromSlash(dirPrefix)))
+
+	if root, ok := findRepoRoot(activeDir); ok && !pathWithinRoot(targetDir, root) {
+		return nil
+	}
+
+	entries, err := os.ReadDir(targetDir)
+	if err != nil {
+		return nil
+	}
+
+	items := []CompletionItem{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if shouldSkipCompletionDir(name) {
+			continue
+		}
+		if !strings.HasPrefix(name, basePrefix) {
+			continue
+		}
+
+		entryPath := filepath.Join(targetDir, name)
+		if entry.IsDir() {
+			if !directoryCanLeadToTx(entryPath) {
+				continue
+			}
+			importPath := joinImportPath(dirPrefix, name) + "/"
+			edit := context.edit
+			edit.NewText = importPath
+			items = append(items, CompletionItem{
+				Label:      name + "/",
+				Kind:       completionKindModule,
+				Detail:     "directory",
+				InsertText: name + "/",
+				TextEdit:   &edit,
+			})
+			continue
+		}
+
+		if filepath.Ext(name) != ".tx" || normalizePath(entryPath) == activePath {
+			continue
+		}
+		importPath := joinImportPath(dirPrefix, name)
+		edit := context.edit
+		edit.NewText = importPath
+		items = append(items, CompletionItem{
+			Label:      name,
+			Kind:       completionKindModule,
+			Detail:     "source module",
+			InsertText: name,
+			TextEdit:   &edit,
+		})
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].Label < items[j].Label
+	})
+	return items
+}
+
+func splitImportPrefix(prefix string) (string, string) {
+	prefix = strings.ReplaceAll(prefix, "\\", "/")
+	index := strings.LastIndex(prefix, "/")
+	if index < 0 {
+		return "", prefix
+	}
+	return prefix[:index+1], prefix[index+1:]
+}
+
+func joinImportPath(dirPrefix string, name string) string {
+	dirPrefix = strings.ReplaceAll(dirPrefix, "\\", "/")
+	if dirPrefix == "" {
+		return name
+	}
+	return dirPrefix + name
+}
+
+func directoryCanLeadToTx(dir string) bool {
+	found := false
+	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || found {
+			return nil
+		}
+		if entry.IsDir() {
+			if path != dir && shouldSkipCompletionDir(entry.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(entry.Name()) == ".tx" {
+			found = true
+		}
+		return nil
+	})
+	return found
+}
+
+func shouldSkipCompletionDir(name string) bool {
+	switch name {
+	case ".git", "node_modules", "tmp":
+		return true
+	default:
+		return false
+	}
 }
 
 func qualifiedImportedFunctionCompletionItems(imports []importedPackage) []CompletionItem {
@@ -905,19 +1160,56 @@ func qualifiedImportedFunctionCompletionItems(imports []importedPackage) []Compl
 			}
 			continue
 		}
-		for _, fn := range pkg.file.program.Functions {
-			if !fn.Public {
-				continue
+		for _, file := range pkg.files {
+			for _, fn := range file.program.Functions {
+				if !fn.Public {
+					continue
+				}
+				label := pkg.name + "." + fn.Name
+				items = append(items, CompletionItem{
+					Label:      label,
+					Kind:       completionKindFunction,
+					Detail:     "imported function",
+					InsertText: label,
+					FilterText: label + " " + fn.Name,
+				})
 			}
-			label := pkg.name + "." + fn.Name
+		}
+	}
+	return items
+}
+
+func standardAutoImportFunctionCompletionItems(text string, imports []importedPackage) []CompletionItem {
+	items := []CompletionItem{}
+	for _, pkg := range stdlib.Packages() {
+		if importedPackageName(imports, pkg.Name) {
+			continue
+		}
+		for _, member := range pkg.Members {
+			label := pkg.Name + "." + member.Name
 			items = append(items, CompletionItem{
-				Label:      label,
-				Kind:       completionKindFunction,
-				Detail:     "imported function",
-				InsertText: label,
-				FilterText: label + " " + fn.Name,
+				Label:               label,
+				Kind:                completionKindFunction,
+				Detail:              member.Detail,
+				InsertText:          label,
+				FilterText:          label + " " + member.Name,
+				AdditionalTextEdits: []TextEdit{importEdit(text, pkg.Name)},
 			})
 		}
+	}
+	return items
+}
+
+func standardPackageMemberCompletionItems(pkg stdlib.Package, edit TextEdit) []CompletionItem {
+	items := make([]CompletionItem, 0, len(pkg.Members))
+	for _, member := range pkg.Members {
+		items = append(items, CompletionItem{
+			Label:               member.Name,
+			Kind:                completionKindFunction,
+			Detail:              member.Signature(),
+			InsertText:          member.Name,
+			AdditionalTextEdits: []TextEdit{edit},
+		})
 	}
 	return items
 }
@@ -935,18 +1227,161 @@ func packageMemberCompletionItems(pkg importedPackage) []CompletionItem {
 		}
 		return items
 	}
-	for _, fn := range pkg.file.program.Functions {
-		if !fn.Public {
-			continue
+	for _, file := range pkg.files {
+		for _, fn := range file.program.Functions {
+			if !fn.Public {
+				continue
+			}
+			items = append(items, CompletionItem{
+				Label:      fn.Name,
+				Kind:       completionKindFunction,
+				Detail:     "function from " + pkg.name,
+				InsertText: fn.Name,
+			})
 		}
+	}
+	return items
+}
+
+func sourceAutoImportFunctionCompletionItems(activePath string, activeText string, documents map[string]string, imports []importedPackage) []CompletionItem {
+	candidates := sourceAutoImportCandidates(activePath, activeText, documents, imports, "")
+	items := make([]CompletionItem, 0, len(candidates))
+	for _, candidate := range candidates {
+		label := candidate.packageName + "." + candidate.functionName
 		items = append(items, CompletionItem{
-			Label:      fn.Name,
-			Kind:       completionKindFunction,
-			Detail:     "function from " + pkg.name,
-			InsertText: fn.Name,
+			Label:               label,
+			Kind:                completionKindFunction,
+			Detail:              "import \"" + candidate.importPath + "\"",
+			InsertText:          label,
+			FilterText:          label + " " + candidate.functionName,
+			AdditionalTextEdits: []TextEdit{importEdit(activeText, candidate.importPath)},
 		})
 	}
 	return items
+}
+
+func sourceAutoImportMemberCompletionItems(activePath string, activeText string, documents map[string]string, imports []importedPackage, packageName string) []CompletionItem {
+	candidates := sourceAutoImportCandidates(activePath, activeText, documents, imports, packageName)
+	items := make([]CompletionItem, 0, len(candidates))
+	for _, candidate := range candidates {
+		items = append(items, CompletionItem{
+			Label:               candidate.functionName,
+			Kind:                completionKindFunction,
+			Detail:              functionSignature(candidate.fn) + " from " + candidate.importPath,
+			InsertText:          candidate.functionName,
+			AdditionalTextEdits: []TextEdit{importEdit(activeText, candidate.importPath)},
+		})
+	}
+	return items
+}
+
+func sourceAutoImportCandidates(activePath string, activeText string, documents map[string]string, imports []importedPackage, packageName string) []sourceModuleCandidate {
+	activeDir := normalizePath(filepath.Dir(activePath))
+	root, ok := findRepoRoot(activeDir)
+	if !ok {
+		root = activeDir
+	}
+
+	openDocuments := map[string]string{}
+	for uri, text := range documents {
+		openDocuments[normalizePath(pathFromURI(uri))] = text
+	}
+	openDocuments[activePath] = activeText
+
+	importedPaths := importedSourcePaths(imports)
+	importedFunctions := importedFunctionNamesByPackage(imports)
+	importedStdlibPackages := importedStdlibPackageNames(imports)
+
+	seenPaths := map[string]struct{}{}
+	candidates := []sourceModuleCandidate{}
+	visit := func(path string) {
+		path = normalizePath(path)
+		if _, seen := seenPaths[path]; seen {
+			return
+		}
+		seenPaths[path] = struct{}{}
+		if path == activePath {
+			return
+		}
+		if _, imported := importedPaths[path]; imported {
+			return
+		}
+
+		text, ok := openDocuments[path]
+		if !ok {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return
+			}
+			text = string(data)
+		}
+
+		program, err := parser.ParseFile(path, text)
+		if err != nil {
+			return
+		}
+		if packageName != "" && program.PackageName != packageName {
+			return
+		}
+		if stdlib.IsPackage(program.PackageName) {
+			return
+		}
+		if _, conflict := importedStdlibPackages[program.PackageName]; conflict {
+			return
+		}
+
+		importPath, ok := relativeImportPath(activeDir, path)
+		if !ok {
+			return
+		}
+		for _, fn := range program.Functions {
+			if !fn.Public {
+				continue
+			}
+			if names := importedFunctions[program.PackageName]; names != nil {
+				if _, duplicate := names[fn.Name]; duplicate {
+					continue
+				}
+			}
+			candidates = append(candidates, sourceModuleCandidate{
+				packageName:  program.PackageName,
+				functionName: fn.Name,
+				importPath:   importPath,
+				path:         path,
+				fn:           fn,
+			})
+		}
+	}
+
+	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.IsDir() {
+			if path != root && shouldSkipCompletionDir(entry.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(entry.Name()) == ".tx" {
+			visit(path)
+		}
+		return nil
+	})
+
+	for path := range openDocuments {
+		if filepath.Ext(path) != ".tx" || !pathWithinRoot(path, root) {
+			continue
+		}
+		visit(path)
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		left := candidates[i].packageName + "." + candidates[i].functionName + " " + candidates[i].importPath
+		right := candidates[j].packageName + "." + candidates[j].functionName + " " + candidates[j].importPath
+		return left < right
+	})
+	return candidates
 }
 
 func stdlibMembers(packageName string) []stdlib.Member {
@@ -955,6 +1390,127 @@ func stdlibMembers(packageName string) []stdlib.Member {
 		return nil
 	}
 	return pkg.Members
+}
+
+func importedPackageName(imports []importedPackage, name string) bool {
+	for _, pkg := range imports {
+		if pkg.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func importedSourcePaths(imports []importedPackage) map[string]struct{} {
+	paths := map[string]struct{}{}
+	for _, pkg := range imports {
+		if pkg.stdlib {
+			continue
+		}
+		for _, file := range pkg.files {
+			paths[file.path] = struct{}{}
+		}
+	}
+	return paths
+}
+
+func importedStdlibPackageNames(imports []importedPackage) map[string]struct{} {
+	names := map[string]struct{}{}
+	for _, pkg := range imports {
+		if pkg.stdlib {
+			names[pkg.name] = struct{}{}
+		}
+	}
+	return names
+}
+
+func importedFunctionNamesByPackage(imports []importedPackage) map[string]map[string]struct{} {
+	out := map[string]map[string]struct{}{}
+	for _, pkg := range imports {
+		if pkg.stdlib {
+			continue
+		}
+		names := out[pkg.name]
+		if names == nil {
+			names = map[string]struct{}{}
+			out[pkg.name] = names
+		}
+		for _, file := range pkg.files {
+			for _, fn := range file.program.Functions {
+				if fn.Public {
+					names[fn.Name] = struct{}{}
+				}
+			}
+		}
+	}
+	return out
+}
+
+func importEdit(text string, importPath string) TextEdit {
+	lines := strings.Split(text, "\n")
+	insertLine := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "package ") && insertLine == 0 {
+			insertLine = i + 1
+		}
+		if strings.HasPrefix(trimmed, "import ") {
+			insertLine = i + 1
+		}
+	}
+	pos := Position{Line: insertLine, Character: 0}
+	return TextEdit{
+		Range:   Range{Start: pos, End: pos},
+		NewText: "import \"" + importPath + "\"\n",
+	}
+}
+
+func declarationCompletionItems() []CompletionItem {
+	items := []CompletionItem{}
+	for _, item := range baseCompletionItems() {
+		switch item.Label {
+		case "package", "import", "pub", "func", "int", "float", "string", "bool", "list":
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func findRepoRoot(start string) (string, bool) {
+	dir := normalizePath(start)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir, true
+		}
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+func pathWithinRoot(path string, root string) bool {
+	path = normalizePath(path)
+	root = normalizePath(root)
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+func relativeImportPath(activeDir string, targetPath string) (string, bool) {
+	activeDir = normalizePath(activeDir)
+	targetPath = normalizePath(targetPath)
+	rel, err := filepath.Rel(activeDir, targetPath)
+	if err != nil || rel == "." {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }
 
 func completionContextAt(text string, pos Position) completionContext {

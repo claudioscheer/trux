@@ -211,8 +211,9 @@ func TestInitializeAdvertisesDefinitionAndReferences(t *testing.T) {
 	}
 	completionProvider := capabilities["completionProvider"].(map[string]any)
 	triggerCharacters := completionProvider["triggerCharacters"].([]string)
-	if len(triggerCharacters) != 1 || triggerCharacters[0] != "." {
-		t.Fatalf("trigger characters = %#v, want dot trigger", triggerCharacters)
+	wantTriggers := []string{".", "\"", "/"}
+	if strings.Join(triggerCharacters, ",") != strings.Join(wantTriggers, ",") {
+		t.Fatalf("trigger characters = %#v, want %#v", triggerCharacters, wantTriggers)
 	}
 	serverInfo := result["serverInfo"].(map[string]any)
 	if serverInfo["version"] != language.Version {
@@ -762,6 +763,82 @@ func main() int {
 	}
 }
 
+func TestCompletionIncludesMissingStandardLibraryFunctionsWithImportEdits(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+
+func main() int {
+    return
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "    return", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	ioItem, ok := findCompletionItem(items, "io.readLine")
+	if !ok {
+		t.Fatalf("missing completion io.readLine in %#v", items)
+	}
+	assertCompletionImportEdit(t, ioItem, 1, `import "io"`+"\n")
+	if ioItem.InsertText != "io.readLine" {
+		t.Fatalf("io.readLine insertText = %q, want io.readLine", ioItem.InsertText)
+	}
+	if ioItem.FilterText != "io.readLine readLine" {
+		t.Fatalf("io.readLine filterText = %q, want io.readLine readLine", ioItem.FilterText)
+	}
+
+	csvItem, ok := findCompletionItem(items, "csv.read")
+	if !ok {
+		t.Fatalf("missing completion csv.read in %#v", items)
+	}
+	assertCompletionImportEdit(t, csvItem, 1, `import "csv"`+"\n")
+	assertMissingCompletion(t, items, "readLine")
+}
+
+func TestCompletionDoesNotDuplicateExistingStandardLibraryImportEdit(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+import "io"
+
+func main() int {
+    return
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "    return", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	ioItem, ok := findCompletionItem(items, "io.readLine")
+	if !ok {
+		t.Fatalf("missing completion io.readLine in %#v", items)
+	}
+	if len(ioItem.AdditionalTextEdits) != 0 {
+		t.Fatalf("io.readLine additional edits = %#v, want none", ioItem.AdditionalTextEdits)
+	}
+
+	csvItem, ok := findCompletionItem(items, "csv.read")
+	if !ok {
+		t.Fatalf("missing completion csv.read in %#v", items)
+	}
+	assertCompletionImportEdit(t, csvItem, 2, `import "csv"`+"\n")
+}
+
 func TestCompletionIncludesStandardLibraryImportPaths(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	uri := "file:///tmp/main.tx"
@@ -792,6 +869,133 @@ func main() int {
 		t.Fatalf("missing standard package csv in %#v", items)
 	}
 	assertMissingCompletion(t, items, "print")
+}
+
+func TestCompletionIncludesSourceImportPathsAndDirectories(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	utilPath := filepath.Join(dir, "util.tx")
+	nestedDir := filepath.Join(dir, "math")
+	emptyDir := filepath.Join(dir, "empty")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(emptyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(utilPath, []byte("package util\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "add.tx"), []byte("package math\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := `package main
+import "
+
+func main() int {
+    return 0
+}
+`
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = src
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, src, `import "`, ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	if _, ok := findCompletionItem(items, "io"); !ok {
+		t.Fatalf("missing standard package io in %#v", items)
+	}
+	if _, ok := findCompletionItem(items, "csv"); !ok {
+		t.Fatalf("missing standard package csv in %#v", items)
+	}
+	if item, ok := findCompletionItem(items, "util.tx"); !ok {
+		t.Fatalf("missing source file util.tx in %#v", items)
+	} else {
+		assertCompletionTextEdit(t, item, "util.tx")
+	}
+	if item, ok := findCompletionItem(items, "math/"); !ok {
+		t.Fatalf("missing directory math/ in %#v", items)
+	} else {
+		assertCompletionTextEdit(t, item, "math/")
+	}
+	assertMissingCompletion(t, items, "empty/")
+	assertMissingCompletion(t, items, "print")
+	assertMissingCompletion(t, items, "io.readLine")
+}
+
+func TestCompletionIncludesParentSourceImportPaths(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	childDir := filepath.Join(dir, "app")
+	if err := os.MkdirAll(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(childDir, "main.tx")
+	if err := os.WriteFile(filepath.Join(dir, "math.tx"), []byte("package math\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := `package main
+import "../"
+
+func main() int {
+    return 0
+}
+`
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = src
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, src, `import "../`, ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	item, ok := findCompletionItem(items, "math.tx")
+	if !ok {
+		t.Fatalf("missing parent source file math.tx in %#v", items)
+	}
+	assertCompletionTextEdit(t, item, "../math.tx")
+	assertMissingCompletion(t, items, "io")
+	assertMissingCompletion(t, items, "print")
+}
+
+func TestCompletionOmitsFunctionNoiseInDeclarationArea(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+io.
+
+func main() int {
+    return 0
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "io.", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	if _, ok := findCompletionItem(items, "import"); !ok {
+		t.Fatalf("missing declaration completion import in %#v", items)
+	}
+	assertMissingCompletion(t, items, "print")
+	assertMissingCompletion(t, items, "readLine")
+	assertMissingCompletion(t, items, "io.readLine")
 }
 
 func TestCompletionFiltersPackageMembersAfterDot(t *testing.T) {
@@ -901,6 +1105,41 @@ func main() int {
 	assertMissingCompletion(t, items, "csv")
 }
 
+func TestCompletionImportsMissingStandardLibraryMembersAfterDot(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+
+func main() int {
+    io.re
+    return 0
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "io.", "re"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	if item, ok := findCompletionItem(items, "readLine"); !ok {
+		t.Fatalf("missing package member readLine in %#v", items)
+	} else {
+		assertCompletionImportEdit(t, item, 1, `import "io"`+"\n")
+	}
+	if item, ok := findCompletionItem(items, "readFile"); !ok {
+		t.Fatalf("missing package member readFile in %#v", items)
+	} else if item.InsertText != "readFile" {
+		t.Fatalf("readFile insertText = %q, want readFile", item.InsertText)
+	}
+	assertMissingCompletion(t, items, "print")
+	assertMissingCompletion(t, items, "io")
+}
+
 func TestCompletionUsesDeclaredPackageName(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	dir := t.TempDir()
@@ -944,6 +1183,274 @@ pub func add(a int, b int) int {
 	}
 	assertMissingCompletion(t, items, "calc")
 	assertMissingCompletion(t, items, "calc.add")
+}
+
+func TestCompletionIncludesSourceAutoImportFunctions(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	mathPath := filepath.Join(dir, "math.tx")
+	mainSrc := `package main
+
+func main() int {
+    return
+}
+`
+	mathSrc := `package math
+pub func add(a int, b int) int {
+    return a + b
+}
+
+func hidden() int {
+    return 0
+}
+`
+	if err := os.WriteFile(mathPath, []byte(mathSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = mainSrc
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, mainSrc, "    return", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	item, ok := findCompletionItem(items, "math.add")
+	if !ok {
+		t.Fatalf("missing source auto-import completion math.add in %#v", items)
+	}
+	if item.InsertText != "math.add" {
+		t.Fatalf("math.add insertText = %q, want math.add", item.InsertText)
+	}
+	if item.FilterText != "math.add add" {
+		t.Fatalf("math.add filterText = %q, want math.add add", item.FilterText)
+	}
+	assertCompletionImportEdit(t, item, 1, `import "math.tx"`+"\n")
+	assertMissingCompletion(t, items, "math.hidden")
+	assertMissingCompletion(t, items, "hidden")
+}
+
+func TestCompletionSourceAutoImportUsesDeclaredPackageName(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	calcPath := filepath.Join(dir, "calc.tx")
+	mainSrc := `package main
+
+func main() int {
+    return
+}
+`
+	calcSrc := `package math
+pub func add(a int, b int) int {
+    return a + b
+}
+`
+	if err := os.WriteFile(calcPath, []byte(calcSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = mainSrc
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, mainSrc, "    return", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	item, ok := findCompletionItem(items, "math.add")
+	if !ok {
+		t.Fatalf("missing source auto-import completion math.add in %#v", items)
+	}
+	assertCompletionImportEdit(t, item, 1, `import "calc.tx"`+"\n")
+	assertMissingCompletion(t, items, "calc.add")
+}
+
+func TestCompletionImportsMissingSourceMembersAfterDot(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	mathPath := filepath.Join(dir, "math.tx")
+	mainSrc := `package main
+
+func main() int {
+    return math.a
+}
+`
+	mathSrc := `package math
+pub func add(a int, b int) int {
+    return a + b
+}
+`
+	if err := os.WriteFile(mathPath, []byte(mathSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = mainSrc
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, mainSrc, "math.", "a"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	item, ok := findCompletionItem(items, "add")
+	if !ok {
+		t.Fatalf("missing source member auto-import completion add in %#v", items)
+	}
+	assertCompletionImportEdit(t, item, 1, `import "math.tx"`+"\n")
+	assertMissingCompletion(t, items, "math.add")
+	assertMissingCompletion(t, items, "print")
+}
+
+func TestCompletionAllowsSamePackageAutoImportForUniqueExports(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	mathDir := filepath.Join(dir, "math")
+	if err := os.MkdirAll(mathDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.tx")
+	addPath := filepath.Join(mathDir, "add.tx")
+	doublePath := filepath.Join(mathDir, "double.tx")
+	duplicatePath := filepath.Join(mathDir, "duplicate_add.tx")
+	mainSrc := `package main
+import "math/add.tx"
+
+func main() int {
+    return
+}
+`
+	addSrc := `package math
+pub func add(a int, b int) int {
+    return a + b
+}
+`
+	doubleSrc := `package math
+pub func double(n int) int {
+    return n + n
+}
+`
+	duplicateSrc := `package math
+pub func add(a int, b int) int {
+    return a - b
+}
+`
+	for path, src := range map[string]string{
+		addPath:       addSrc,
+		doublePath:    doubleSrc,
+		duplicatePath: duplicateSrc,
+	} {
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = mainSrc
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, mainSrc, "    return", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	doubleItem, ok := findCompletionItem(items, "math.double")
+	if !ok {
+		t.Fatalf("missing same-package auto-import completion math.double in %#v", items)
+	}
+	assertCompletionImportEdit(t, doubleItem, 2, `import "math/double.tx"`+"\n")
+
+	addItem, ok := findCompletionItem(items, "math.add")
+	if !ok {
+		t.Fatalf("missing imported completion math.add in %#v", items)
+	}
+	if len(addItem.AdditionalTextEdits) != 0 {
+		t.Fatalf("math.add additional edits = %#v, want none", addItem.AdditionalTextEdits)
+	}
+	if countCompletionLabels(items, "math.add") != 1 {
+		t.Fatalf("math.add completion count = %d, want 1", countCompletionLabels(items, "math.add"))
+	}
+}
+
+func TestCompletionKeepsAmbiguousSourceAutoImportsPathSpecific(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	firstDir := filepath.Join(dir, "first")
+	secondDir := filepath.Join(dir, "second")
+	if err := os.MkdirAll(firstDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(secondDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.tx")
+	mainSrc := `package main
+
+func main() int {
+    return
+}
+`
+	moduleSrc := `package math
+pub func add(a int, b int) int {
+    return a + b
+}
+`
+	for _, path := range []string{filepath.Join(firstDir, "math.tx"), filepath.Join(secondDir, "math.tx")} {
+		if err := os.WriteFile(path, []byte(moduleSrc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = mainSrc
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, mainSrc, "    return", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	if countCompletionLabels(items, "math.add") != 2 {
+		t.Fatalf("math.add completion count = %d, want 2 in %#v", countCompletionLabels(items, "math.add"), items)
+	}
+	wantEdits := map[string]struct{}{
+		`import "first/math.tx"` + "\n":  {},
+		`import "second/math.tx"` + "\n": {},
+	}
+	for _, item := range items {
+		if item.Label != "math.add" {
+			continue
+		}
+		if len(item.AdditionalTextEdits) != 1 {
+			t.Fatalf("math.add additional edits = %#v, want one", item.AdditionalTextEdits)
+		}
+		if _, ok := wantEdits[item.AdditionalTextEdits[0].NewText]; !ok {
+			t.Fatalf("math.add import edit = %q, want one of %#v", item.AdditionalTextEdits[0].NewText, wantEdits)
+		}
+		delete(wantEdits, item.AdditionalTextEdits[0].NewText)
+		if !strings.Contains(item.Detail, "math.tx") {
+			t.Fatalf("math.add detail = %q, want path-specific detail", item.Detail)
+		}
+	}
+	if len(wantEdits) != 0 {
+		t.Fatalf("missing import edits %#v", wantEdits)
+	}
 }
 
 func TestHoverReturnsKnownSymbolDocumentation(t *testing.T) {
@@ -1178,10 +1685,50 @@ func findCompletionItem(items []CompletionItem, label string) (CompletionItem, b
 	return CompletionItem{}, false
 }
 
+func countCompletionLabels(items []CompletionItem, label string) int {
+	count := 0
+	for _, item := range items {
+		if item.Label == label {
+			count++
+		}
+	}
+	return count
+}
+
 func assertMissingCompletion(t *testing.T, items []CompletionItem, label string) {
 	t.Helper()
 
 	if item, ok := findCompletionItem(items, label); ok {
 		t.Fatalf("completion %q = %#v, want missing", label, item)
+	}
+}
+
+func assertCompletionTextEdit(t *testing.T, item CompletionItem, newText string) {
+	t.Helper()
+
+	if item.TextEdit == nil {
+		t.Fatalf("completion %q text edit = nil, want %q", item.Label, newText)
+	}
+	if item.TextEdit.NewText != newText {
+		t.Fatalf("completion %q text edit newText = %q, want %q", item.Label, item.TextEdit.NewText, newText)
+	}
+}
+
+func assertCompletionImportEdit(t *testing.T, item CompletionItem, line int, newText string) {
+	t.Helper()
+
+	if len(item.AdditionalTextEdits) != 1 {
+		t.Fatalf("completion %q additional edits = %#v, want one import edit", item.Label, item.AdditionalTextEdits)
+	}
+	edit := item.AdditionalTextEdits[0]
+	wantRange := Range{
+		Start: Position{Line: line, Character: 0},
+		End:   Position{Line: line, Character: 0},
+	}
+	if edit.Range != wantRange {
+		t.Fatalf("completion %q import edit range = %#v, want %#v", item.Label, edit.Range, wantRange)
+	}
+	if edit.NewText != newText {
+		t.Fatalf("completion %q import edit newText = %q, want %q", item.Label, edit.NewText, newText)
 	}
 }

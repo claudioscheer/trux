@@ -123,14 +123,15 @@ trux false
 
 More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/collections.tx](examples/collections.tx) and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current collection and ownership model. Module examples live under [examples/modules/](examples/modules/).
 
-The IO example reads a name and number from stdin, reads/writes text files, and reads/writes flat row-major CSV:
+The IO basics project reads a name and number from stdin, reads/writes text files, and reads/writes flat row-major CSV:
 
 ```bash
-printf 'Ada\n41\n' | make run FILE=examples/io.tx
+printf 'Ada\n41\n' | make run FILE=examples/projects/io_basics/main.tx
 ```
 
 More complete IO examples live under [examples/projects/](examples/projects/):
 
+- `io_basics`: stdin, file IO, and CSV IO in one small program
 - `interactive_counter`: stdin with `read_line` and `read_int`
 - `file_notes`: `read_file` and `write_file`
 - `csv_roster`: `read_csv`, list mutation, and `write_csv`

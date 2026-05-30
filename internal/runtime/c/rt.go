@@ -375,7 +375,7 @@ typedef struct { \
     size_t len; \
     size_t cap; \
 } rt_list_##NAME; \
-static RT_UNUSED rt_array_##NAME rt_array_##NAME##_from_values(rt_arena* arena, const CTYPE* values, size_t len) { \
+static RT_UNUSED rt_array_##NAME rt_array_##NAME##_from_values(rt_arena* arena, CTYPE const* values, size_t len) { \
     rt_check_array_like(values, len, "array values"); \
     CTYPE* data = rt_arena_alloc_count(arena, len, sizeof(CTYPE), false); \
     if (len > 0) { \
@@ -469,7 +469,7 @@ static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_new(rt_arena* arena, size_t ca
     rt_arena_register_list(arena, list, rt_list_##NAME##_free); \
     return list; \
 } \
-static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_from_values(rt_arena* arena, const CTYPE* values, size_t len) { \
+static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_from_values(rt_arena* arena, CTYPE const* values, size_t len) { \
     rt_check_array_like(values, len, "list values"); \
     rt_list_##NAME* list = rt_list_##NAME##_new(arena, len); \
     if (len > 0) { \

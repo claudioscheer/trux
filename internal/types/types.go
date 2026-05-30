@@ -664,7 +664,7 @@ func indexOrigin(collectionType ast.Type, collectionOrigin Origin) Origin {
 		return collectionOrigin
 	}
 	elemType, ok := ast.ElementType(collectionType)
-	if ok && ast.TypeEqual(elemType, ast.StringType) {
+	if ok && dynamicType(elemType) {
 		return collectionOrigin
 	}
 	return OriginOwned
@@ -702,21 +702,14 @@ func validateType(pos token.Position, typ ast.Type) error {
 		if typ.Length <= 0 {
 			return typeError(pos, "array length must be positive")
 		}
-		return validateElementType(pos, typ.Elem)
+		return validateType(pos, typ.Elem)
 	case *ast.SliceType:
-		return validateElementType(pos, typ.Elem)
+		return validateType(pos, typ.Elem)
 	case *ast.ListType:
-		return validateElementType(pos, typ.Elem)
+		return validateType(pos, typ.Elem)
 	default:
 		return typeError(pos, "unsupported type %s", typ)
 	}
-}
-
-func validateElementType(pos token.Position, typ ast.Type) error {
-	if !ast.IsScalarType(typ) {
-		return typeError(pos, "collection element type must be scalar, got %s", typ)
-	}
-	return nil
 }
 
 func typeError(pos token.Position, format string, args ...any) error {

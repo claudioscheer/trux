@@ -531,6 +531,56 @@ func main() int {
 	}
 }
 
+func TestGenerateCreatesCForNestedCollections(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func build() list[list[int]] {
+    let rows list[list[int]] = list[list[int]]{list[int]{1, 2}, list[int]{3}}
+    append(rows, list[int]{4, 5, 6})
+    return rows
+}
+
+func main() int {
+    let rows list[list[int]] = build()
+    let copied list[list[int]] = clone(rows)
+    append(copied[0], 9)
+    let fixed [2][2]int = [2][2]int{[2]int{1, 2}, [2]int{3, 4}}
+    let slices [][]float = make([][]float, 2)
+    slices[0] = make([]float, 2)
+    slices[0][1] = 2.5
+    print(copied[0][2], " ", rows[2][2], " ", fixed[1][1], " ", slices[0][1])
+    return 0
+}`)
+
+	wantParts := []string{
+		"#define RT_CLONE_VALUE_list_int(ARENA, VALUE) rt_list_int_clone((ARENA), (VALUE))",
+		"RT_DEFINE_COLLECTIONS(list_int, rt_list_int*)",
+		"#define RT_CLONE_VALUE_array_int(ARENA, VALUE) rt_array_int_clone((ARENA), (VALUE))",
+		"RT_DEFINE_COLLECTIONS(array_int, rt_array_int)",
+		"#define RT_CLONE_VALUE_slice_float(ARENA, VALUE) rt_slice_float_clone((ARENA), (VALUE))",
+		"RT_DEFINE_COLLECTIONS(slice_float, rt_slice_float)",
+		"rt_list_list_int* trux_build(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"rt_list_list_int* trux_v_4_rows = rt_list_list_int_from_values(&trux_frame, (rt_list_int*[]){rt_list_int_from_values(&trux_frame, (int64_t[]){1, 2}, 2), rt_list_int_from_values(&trux_frame, (int64_t[]){3}, 1)}, 2);",
+		"rt_list_list_int_append(trux_v_4_rows, rt_list_int_from_values(&trux_frame, (int64_t[]){4, 5, 6}, 3));",
+		"trux_return_value = rt_list_list_int_clone(trux_result_arena, trux_v_4_rows);",
+		"rt_list_list_int* trux_v_4_rows = trux_build(trux_ctx, &trux_frame);",
+		"rt_list_list_int* trux_v_6_copied = rt_list_list_int_clone(&trux_frame, trux_v_4_rows);",
+		"rt_list_int_append(rt_list_list_int_get(trux_v_6_copied, 0), 9);",
+		"rt_array_array_int trux_v_5_fixed = rt_array_array_int_from_values(&trux_frame, (rt_array_int[]){rt_array_int_from_values(&trux_frame, (int64_t[]){1, 2}, 2), rt_array_int_from_values(&trux_frame, (int64_t[]){3, 4}, 2)}, 2);",
+		"rt_slice_slice_float trux_v_6_slices = rt_make_slice_slice_float(&trux_frame, 2);",
+		"rt_slice_slice_float_set(trux_v_6_slices, 0, rt_make_slice_float(&trux_frame, 2));",
+		"rt_slice_float_set(rt_slice_slice_float_get(trux_v_6_slices, 0), 1, 2.5);",
+		"rt_print_int(rt_list_int_get(rt_list_list_int_get(trux_v_6_copied, 0), 2));",
+		"rt_print_int(rt_list_int_get(rt_list_list_int_get(trux_v_4_rows, 2), 2));",
+		"rt_print_int(rt_array_int_get(rt_array_array_int_get(trux_v_5_fixed, 1), 1));",
+		"rt_print_float(rt_slice_float_get(rt_slice_slice_float_get(trux_v_6_slices, 0), 1));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
 func mustGenerateC(t *testing.T, src string) string {
 	t.Helper()
 

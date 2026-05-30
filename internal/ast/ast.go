@@ -99,11 +99,6 @@ func TypeEqual(left Type, right Type) bool {
 	}
 }
 
-func IsScalarType(typ Type) bool {
-	_, ok := typ.(ScalarType)
-	return ok
-}
-
 func ElementType(typ Type) (Type, bool) {
 	switch typ := typ.(type) {
 	case *ArrayType:

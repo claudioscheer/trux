@@ -218,6 +218,44 @@ func TestRunFileCompilesAndExecutesModuleExamples(t *testing.T) {
 	}
 }
 
+func TestRunFileCompilesAndExecutesNestedCollections(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func buildRows() list[list[int]] {
+    let rows list[list[int]] = list[list[int]]{list[int]{1, 2}, list[int]{3}}
+    append(rows, list[int]{4, 5, 6})
+    return rows
+}
+
+func main() int {
+    let rows list[list[int]] = buildRows()
+    let copied list[list[int]] = clone(rows)
+    append(copied[0], 9)
+
+    let fixed [2][2]int = [2][2]int{[2]int{1, 2}, [2]int{3, 4}}
+
+    let slices [][]float = make([][]float, 2)
+    slices[0] = make([]float, 2)
+    slices[0][1] = 2.5
+
+    print(len(rows[0]), " ", len(copied[0]), " ", copied[0][2], " ", rows[2][2])
+    print(fixed[1][1], " ", slices[0][1])
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "2 3 9 6\n4 2.5\n"
+	if out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
+	}
+}
+
 func TestRunFileCompilesAndExecutesOwnershipCopyOut(t *testing.T) {
 	requireCC(t)
 

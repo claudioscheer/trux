@@ -22,6 +22,12 @@ type funcUsage struct {
 	resultArena bool
 }
 
+type collectionFamily struct {
+	name    string
+	cType   string
+	cloneFn string
+}
+
 func (u *funcUsage) noteArena(arena string) {
 	switch arena {
 	case durableArena:
@@ -36,6 +42,18 @@ func Generate(program *ir.Program) (string, error) {
 
 	out.WriteString(runtimec.Source)
 	fmt.Fprintln(&out)
+
+	families, err := nestedCollectionFamilies(program)
+	if err != nil {
+		return "", err
+	}
+	if len(families) > 0 {
+		for _, family := range families {
+			fmt.Fprintf(&out, "#define RT_CLONE_VALUE_%s(ARENA, VALUE) %s((ARENA), (VALUE))\n", family.name, family.cloneFn)
+			fmt.Fprintf(&out, "RT_DEFINE_COLLECTIONS(%s, %s)\n", family.name, family.cType)
+		}
+		fmt.Fprintln(&out)
+	}
 
 	for _, fn := range program.Functions {
 		if err := emitPrototype(&out, fn); err != nil {
@@ -502,26 +520,11 @@ func emitType(typ ast.Type) (string, error) {
 	}
 }
 
-func emitScalarType(typ ast.Type) (string, error) {
-	switch {
-	case ast.TypeEqual(typ, ast.IntType):
-		return "int64_t", nil
-	case ast.TypeEqual(typ, ast.FloatType):
-		return "double", nil
-	case ast.TypeEqual(typ, ast.StringType):
-		return "rt_string", nil
-	case ast.TypeEqual(typ, ast.BoolType):
-		return "bool", nil
-	default:
-		return "", fmt.Errorf("unsupported type %s", typ)
-	}
-}
-
 func emitValueArray(elemType ast.Type, elements []ir.Expr, targetArena string, usage *funcUsage) (string, error) {
 	if len(elements) == 0 {
 		return "NULL", nil
 	}
-	cType, err := emitScalarType(elemType)
+	cType, err := emitType(elemType)
 	if err != nil {
 		return "", err
 	}
@@ -621,18 +624,215 @@ func cloneHelper(typ ast.Type) (string, error) {
 }
 
 func elemRuntimeName(typ ast.Type) (string, error) {
-	switch {
-	case ast.TypeEqual(typ, ast.IntType):
-		return "int", nil
-	case ast.TypeEqual(typ, ast.FloatType):
-		return "float", nil
-	case ast.TypeEqual(typ, ast.BoolType):
-		return "bool", nil
-	case ast.TypeEqual(typ, ast.StringType):
-		return "string", nil
+	switch typ := typ.(type) {
+	case ast.ScalarType:
+		switch {
+		case ast.TypeEqual(typ, ast.IntType):
+			return "int", nil
+		case ast.TypeEqual(typ, ast.FloatType):
+			return "float", nil
+		case ast.TypeEqual(typ, ast.BoolType):
+			return "bool", nil
+		case ast.TypeEqual(typ, ast.StringType):
+			return "string", nil
+		default:
+			return "", fmt.Errorf("unsupported element type %s", typ)
+		}
+	case *ast.ArrayType:
+		name, err := elemRuntimeName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "array_" + name, nil
+	case *ast.SliceType:
+		name, err := elemRuntimeName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "slice_" + name, nil
+	case *ast.ListType:
+		name, err := elemRuntimeName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "list_" + name, nil
 	default:
 		return "", fmt.Errorf("unsupported element type %s", typ)
 	}
+}
+
+func nestedCollectionFamilies(program *ir.Program) ([]collectionFamily, error) {
+	seen := map[string]bool{}
+	var families []collectionFamily
+	for _, fn := range program.Functions {
+		if err := collectNestedCollectionFamilies(fn.ReturnType, seen, &families); err != nil {
+			return nil, err
+		}
+		for _, param := range fn.Params {
+			if err := collectNestedCollectionFamilies(param.Type, seen, &families); err != nil {
+				return nil, err
+			}
+		}
+		for _, stmt := range fn.Body {
+			if err := collectStmtNestedCollectionFamilies(stmt, seen, &families); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return families, nil
+}
+
+func collectStmtNestedCollectionFamilies(stmt ir.Stmt, seen map[string]bool, families *[]collectionFamily) error {
+	switch stmt := stmt.(type) {
+	case *ir.LetStmt:
+		if err := collectNestedCollectionFamilies(stmt.Type, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(stmt.Value, seen, families)
+	case *ir.ReturnStmt:
+		return collectExprNestedCollectionFamilies(stmt.Value, seen, families)
+	case *ir.AssignStmt:
+		return collectExprNestedCollectionFamilies(stmt.Value, seen, families)
+	case *ir.IndexAssignStmt:
+		if err := collectExprNestedCollectionFamilies(stmt.Target, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(stmt.Value, seen, families)
+	case *ir.IfStmt:
+		if err := collectExprNestedCollectionFamilies(stmt.Condition, seen, families); err != nil {
+			return err
+		}
+		for _, inner := range stmt.Then {
+			if err := collectStmtNestedCollectionFamilies(inner, seen, families); err != nil {
+				return err
+			}
+		}
+		for _, inner := range stmt.Else {
+			if err := collectStmtNestedCollectionFamilies(inner, seen, families); err != nil {
+				return err
+			}
+		}
+	case *ir.WhileStmt:
+		if err := collectExprNestedCollectionFamilies(stmt.Condition, seen, families); err != nil {
+			return err
+		}
+		for _, inner := range stmt.Body {
+			if err := collectStmtNestedCollectionFamilies(inner, seen, families); err != nil {
+				return err
+			}
+		}
+	case *ir.PrintStmt:
+		for i, arg := range stmt.Args {
+			if err := collectNestedCollectionFamilies(stmt.Types[i], seen, families); err != nil {
+				return err
+			}
+			if err := collectExprNestedCollectionFamilies(arg, seen, families); err != nil {
+				return err
+			}
+		}
+	case *ir.AppendStmt:
+		if err := collectNestedCollectionFamilies(stmt.ListType, seen, families); err != nil {
+			return err
+		}
+		if err := collectNestedCollectionFamilies(stmt.ElemType, seen, families); err != nil {
+			return err
+		}
+		if err := collectExprNestedCollectionFamilies(stmt.List, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(stmt.Value, seen, families)
+	case *ir.ExprStmt:
+		return collectExprNestedCollectionFamilies(stmt.Expr, seen, families)
+	default:
+		return fmt.Errorf("unsupported IR statement %T", stmt)
+	}
+	return nil
+}
+
+func collectExprNestedCollectionFamilies(expr ir.Expr, seen map[string]bool, families *[]collectionFamily) error {
+	if expr == nil {
+		return nil
+	}
+	if err := collectNestedCollectionFamilies(expr.Type(), seen, families); err != nil {
+		return err
+	}
+	switch expr := expr.(type) {
+	case *ir.ArrayLiteral:
+		for _, elem := range expr.Elements {
+			if err := collectExprNestedCollectionFamilies(elem, seen, families); err != nil {
+				return err
+			}
+		}
+	case *ir.ListLiteral:
+		for _, elem := range expr.Elements {
+			if err := collectExprNestedCollectionFamilies(elem, seen, families); err != nil {
+				return err
+			}
+		}
+	case *ir.MakeExpr:
+		return collectExprNestedCollectionFamilies(expr.Len, seen, families)
+	case *ir.CallExpr:
+		for _, arg := range expr.Args {
+			if err := collectExprNestedCollectionFamilies(arg, seen, families); err != nil {
+				return err
+			}
+		}
+	case *ir.CloneExpr:
+		return collectExprNestedCollectionFamilies(expr.Value, seen, families)
+	case *ir.BinaryExpr:
+		if err := collectExprNestedCollectionFamilies(expr.Left, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(expr.Right, seen, families)
+	case *ir.LenExpr:
+		return collectExprNestedCollectionFamilies(expr.Value, seen, families)
+	case *ir.IndexExpr:
+		if err := collectExprNestedCollectionFamilies(expr.Collection, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(expr.Index, seen, families)
+	case *ir.SliceExpr:
+		if err := collectExprNestedCollectionFamilies(expr.Collection, seen, families); err != nil {
+			return err
+		}
+		if err := collectExprNestedCollectionFamilies(expr.Start, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(expr.End, seen, families)
+	}
+	return nil
+}
+
+func collectNestedCollectionFamilies(typ ast.Type, seen map[string]bool, families *[]collectionFamily) error {
+	elem, ok := ast.ElementType(typ)
+	if !ok {
+		return nil
+	}
+	if err := collectNestedCollectionFamilies(elem, seen, families); err != nil {
+		return err
+	}
+	if !isCollectionType(elem) {
+		return nil
+	}
+
+	name, err := elemRuntimeName(elem)
+	if err != nil {
+		return err
+	}
+	if seen[name] {
+		return nil
+	}
+	cType, err := emitType(elem)
+	if err != nil {
+		return err
+	}
+	cloneFn, err := cloneHelper(elem)
+	if err != nil {
+		return err
+	}
+	seen[name] = true
+	*families = append(*families, collectionFamily{name: name, cType: cType, cloneFn: cloneFn})
+	return nil
 }
 
 func mangleFunc(name string) string {

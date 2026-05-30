@@ -219,6 +219,40 @@ int main(void) {
 `)
 }
 
+func TestNestedCollectionCloneDeepCopiesElements(t *testing.T) {
+	compileAndRunRuntimeC(t, Source+`
+#define RT_CLONE_VALUE_list_int(ARENA, VALUE) rt_list_int_clone((ARENA), (VALUE))
+RT_DEFINE_COLLECTIONS(list_int, rt_list_int*)
+
+int main(void) {
+    rt_arena source_arena;
+    rt_arena target_arena;
+    rt_arena_init(&source_arena);
+    rt_arena_init(&target_arena);
+
+    rt_list_int* row = rt_list_int_from_values(&source_arena, (int64_t[]){1, 2}, 2);
+    rt_list_list_int* rows = rt_list_list_int_from_values(&source_arena, (rt_list_int*[]){row}, 1);
+    rt_list_list_int* cloned = rt_list_list_int_clone(&target_arena, rows);
+
+    rt_list_int_set(row, 0, 9);
+    if (rt_list_int_get(rt_list_list_int_get(cloned, 0), 0) != 1) {
+        fprintf(stderr, "nested list clone reused inner storage\n");
+        return 1;
+    }
+
+    rt_arena_reset(&source_arena);
+    if (rt_list_int_get(rt_list_list_int_get(cloned, 0), 1) != 2) {
+        fprintf(stderr, "nested list clone did not survive source arena reset\n");
+        return 1;
+    }
+
+    rt_arena_deinit(&target_arena);
+    rt_arena_deinit(&source_arena);
+    return 0;
+}
+`)
+}
+
 func TestStringConcatCopiesEmptySideOperandsIntoTargetArena(t *testing.T) {
 	compileAndRunRuntimeC(t, Source+`
 int main(void) {

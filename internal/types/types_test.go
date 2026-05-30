@@ -167,7 +167,14 @@ func main() int {
     made[0] = zs[1]
     let ch string = "abc"[1]
     let sub string = "abcd"[1:3]
-    print(len(xs), " ", len(ys), " ", len(zs), " ", xs[1], " ", made[0], " ", ch, " ", sub)
+    let rows list[list[int]] = list[list[int]]{list[int]{1, 2}, list[int]{3}}
+    append(rows, list[int]{4, 5, 6})
+    rows[1] = list[int]{7}
+    let fixed [2][2]int = [2][2]int{[2]int{1, 2}, [2]int{3, 4}}
+    let jagged [][]float = make([][]float, 2)
+    jagged[0] = make([]float, 1)
+    jagged[0][0] = 1.5
+    print(len(xs), " ", len(ys), " ", len(zs), " ", xs[1], " ", made[0], " ", ch, " ", sub, " ", len(rows[0]), " ", fixed[1][1], " ", jagged[0][0])
     return 0
 }`)
 
@@ -192,6 +199,18 @@ func main() int {
 	chLet := mainFn.Body.Statements[7].(*ast.LetStmt)
 	if !ast.TypeEqual(info.ExprTypes[chLet.Value], ast.StringType) {
 		t.Fatalf("string index type = %s, want string", info.ExprTypes[chLet.Value])
+	}
+	rowsLet := mainFn.Body.Statements[9].(*ast.LetStmt)
+	if !ast.TypeEqual(info.ExprTypes[rowsLet.Value], &ast.ListType{Elem: &ast.ListType{Elem: ast.IntType}}) {
+		t.Fatalf("nested list literal type = %s, want list[list[int]]", info.ExprTypes[rowsLet.Value])
+	}
+	fixedLet := mainFn.Body.Statements[12].(*ast.LetStmt)
+	if !ast.TypeEqual(info.ExprTypes[fixedLet.Value], &ast.ArrayType{Length: 2, Elem: &ast.ArrayType{Length: 2, Elem: ast.IntType}}) {
+		t.Fatalf("nested array literal type = %s, want [2][2]int", info.ExprTypes[fixedLet.Value])
+	}
+	jaggedLet := mainFn.Body.Statements[13].(*ast.LetStmt)
+	if !ast.TypeEqual(info.ExprTypes[jaggedLet.Value], &ast.SliceType{Elem: &ast.SliceType{Elem: ast.FloatType}}) {
+		t.Fatalf("nested slice make type = %s, want [][]float", info.ExprTypes[jaggedLet.Value])
 	}
 }
 
@@ -246,6 +265,28 @@ func main() int {
     return 0
 }`,
 		},
+		{
+			name: "append nested list parameter element",
+			src: `package main
+func push(xs list[list[int]], value int) int {
+    append(xs[0], value)
+    return len(xs[0])
+}
+func main() int {
+    return 0
+}`,
+		},
+		{
+			name: "assign through nested slice parameter element",
+			src: `package main
+func write(xs [][]int) int {
+    xs[0][0] = 1
+    return xs[0][0]
+}
+func main() int {
+    return 0
+}`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -290,9 +331,11 @@ func main() int {
     let ys []int = clone(xs[:])
     let zs []int = clone(id(xs[:]))
     let items list[string] = clone(list[string]{name})
+    let rows list[list[int]] = clone(list[list[int]]{list[int]{1, 2}, list[int]{3}})
     ys[0] = 9
     zs[0] = 8
     append(items, "x")
+    append(rows[0], 4)
     return ys[0]
 }`)
 
@@ -314,6 +357,13 @@ func main() int {
 	}
 	if info.ExprOrigins[sliceClone] != OriginFrameOwned {
 		t.Fatalf("slice clone origin = %s, want %s", info.ExprOrigins[sliceClone], OriginFrameOwned)
+	}
+	rowsClone := mainFn.Body.Statements[5].(*ast.LetStmt).Value.(*ast.CallExpr)
+	if !ast.TypeEqual(info.CloneCalls[rowsClone].Type, &ast.ListType{Elem: &ast.ListType{Elem: ast.IntType}}) {
+		t.Fatalf("nested clone type = %s, want list[list[int]]", info.CloneCalls[rowsClone].Type)
+	}
+	if info.ExprOrigins[rowsClone] != OriginFrameOwned {
+		t.Fatalf("nested clone origin = %s, want %s", info.ExprOrigins[rowsClone], OriginFrameOwned)
 	}
 }
 
@@ -592,15 +642,6 @@ func main() int {
     return 0
 }`,
 			want: `operator "in" requires string operands, got string and int`,
-		},
-		{
-			name: "nested collection element",
-			src: `package main
-func main() int {
-    let xs [][]int = make([][]int, 1)
-    return 0
-}`,
-			want: `collection element type must be scalar, got []int`,
 		},
 		{
 			name: "array literal length mismatch",

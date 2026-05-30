@@ -6,7 +6,7 @@ GO := go
 BINARY := trux
 CMD := ./cmd/trux
 
-.PHONY: build run test emit-c clean
+.PHONY: build run test emit-c lsp clean
 
 build:
 	$(GO) build -o bin/$(BINARY) $(CMD)
@@ -29,6 +29,9 @@ emit-c: build
 
 test:
 	$(GO) test ./...
+
+lsp:
+	$(GO) build -o bin/trux-lsp ./tooling/lsp
 
 clean:
 	rm -rf bin/ tmp/ *.tx.c *.tx

@@ -142,8 +142,12 @@ More complete IO examples live under [examples/projects/](examples/projects/):
 make test
 make emit-c FILE=examples/hello.tx
 make build-bin FILE=examples/hello.tx OUT=bin/hello
+./bin/trux fmt examples/hello.tx
+./bin/trux fmt -r
+make lsp
 ```
 
 ## Documentation
 
 See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including arenas, IO, modules, and future GPU ideas.
+Editor tooling lives in [tooling/](tooling/), including the Go language server and VS Code extension.

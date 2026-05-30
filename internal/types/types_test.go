@@ -367,6 +367,55 @@ func main() int {
 	}
 }
 
+func TestCheckAllowsIOBuiltins(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let line string = read_line()
+    let count int = read_int()
+    let ratio float = read_float()
+    let ready bool = read_bool()
+    let text string = read_file("input.txt")
+    write_file("out.txt", text + line)
+    let cells list[string] = read_csv("in.csv", 2)
+    write_csv("out.csv", cells, 2)
+    print(line, " ", count, " ", ratio, " ", ready, " ", len(cells))
+    return 0
+}`)
+
+	info, err := Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kinds := map[IOCallKind]int{}
+	for _, sig := range info.IOCalls {
+		kinds[sig.Kind]++
+	}
+	for _, kind := range []IOCallKind{
+		IOCallReadLine,
+		IOCallReadInt,
+		IOCallReadFloat,
+		IOCallReadBool,
+		IOCallReadFile,
+		IOCallWriteFile,
+		IOCallReadCSV,
+		IOCallWriteCSV,
+	} {
+		if kinds[kind] != 1 {
+			t.Fatalf("IO call count for %s = %d, want 1", kind, kinds[kind])
+		}
+	}
+
+	mainFn := program.Functions[0]
+	readCSVLet := mainFn.Body.Statements[6].(*ast.LetStmt)
+	if !ast.TypeEqual(info.ExprTypes[readCSVLet.Value], &ast.ListType{Elem: ast.StringType}) {
+		t.Fatalf("read_csv type = %s, want list[string]", info.ExprTypes[readCSVLet.Value])
+	}
+	if info.ExprOrigins[readCSVLet.Value] != OriginFrameOwned {
+		t.Fatalf("read_csv origin = %s, want %s", info.ExprOrigins[readCSVLet.Value], OriginFrameOwned)
+	}
+}
+
 func TestCheckRejectsUnsupportedClone(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {
@@ -708,6 +757,51 @@ func main() int {
     return x
 }`,
 			want: `make expects slice type, got int`,
+		},
+		{
+			name: "read_line arity",
+			src: `package main
+func main() int {
+    let line string = read_line("prompt")
+    return 0
+}`,
+			want: `read_line expects 0 arguments, got 1`,
+		},
+		{
+			name: "read_file path type",
+			src: `package main
+func main() int {
+    let text string = read_file(1)
+    return 0
+}`,
+			want: `read_file path has type int, want string`,
+		},
+		{
+			name: "write_file expression",
+			src: `package main
+func main() int {
+    return write_file("out.txt", "contents")
+}`,
+			want: `write_file can only be used as a statement`,
+		},
+		{
+			name: "read_csv columns type",
+			src: `package main
+func main() int {
+    let cells list[string] = read_csv("in.csv", "2")
+    return 0
+}`,
+			want: `read_csv columns has type string, want int`,
+		},
+		{
+			name: "write_csv cells type",
+			src: `package main
+func main() int {
+    let cells list[int] = list[int]{1}
+    write_csv("out.csv", cells, 1)
+    return 0
+}`,
+			want: `write_csv cells has type list[int], want list[string]`,
 		},
 	}
 

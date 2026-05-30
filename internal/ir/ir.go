@@ -87,6 +87,21 @@ type AppendStmt struct {
 
 func (*AppendStmt) stmtNode() {}
 
+type WriteFileStmt struct {
+	Path     Expr
+	Contents Expr
+}
+
+func (*WriteFileStmt) stmtNode() {}
+
+type WriteCSVStmt struct {
+	Path    Expr
+	Cells   Expr
+	Columns Expr
+}
+
+func (*WriteCSVStmt) stmtNode() {}
+
 type ExprStmt struct {
 	Expr Expr
 }
@@ -219,6 +234,75 @@ func (e *CloneExpr) Type() ast.Type { return e.Typ }
 func (e *CloneExpr) Ownership() types.Origin { return e.Origin }
 
 func (*CloneExpr) exprNode() {}
+
+type ReadLineExpr struct {
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *ReadLineExpr) Type() ast.Type { return e.Typ }
+
+func (e *ReadLineExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ReadLineExpr) exprNode() {}
+
+type ReadIntExpr struct {
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *ReadIntExpr) Type() ast.Type { return e.Typ }
+
+func (e *ReadIntExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ReadIntExpr) exprNode() {}
+
+type ReadFloatExpr struct {
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *ReadFloatExpr) Type() ast.Type { return e.Typ }
+
+func (e *ReadFloatExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ReadFloatExpr) exprNode() {}
+
+type ReadBoolExpr struct {
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *ReadBoolExpr) Type() ast.Type { return e.Typ }
+
+func (e *ReadBoolExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ReadBoolExpr) exprNode() {}
+
+type ReadFileExpr struct {
+	Path   Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *ReadFileExpr) Type() ast.Type { return e.Typ }
+
+func (e *ReadFileExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ReadFileExpr) exprNode() {}
+
+type ReadCSVExpr struct {
+	Path    Expr
+	Columns Expr
+	Typ     ast.Type
+	Origin  types.Origin
+}
+
+func (e *ReadCSVExpr) Type() ast.Type { return e.Typ }
+
+func (e *ReadCSVExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ReadCSVExpr) exprNode() {}
 
 type BinaryExpr struct {
 	Left     Expr
@@ -387,6 +471,22 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 				}
 				return &AppendStmt{List: args[0], Value: args[1], ListType: appendSig.ListType, ElemType: appendSig.ElemType}, nil
 			}
+			if ioSig, ok := b.info.IOCalls[call]; ok {
+				switch ioSig.Kind {
+				case types.IOCallWriteFile:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &WriteFileStmt{Path: args[0], Contents: args[1]}, nil
+				case types.IOCallWriteCSV:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &WriteCSVStmt{Path: args[0], Cells: args[1], Columns: args[2]}, nil
+				}
+			}
 		}
 
 		expr, err := b.buildExpr(stmt.Expr)
@@ -439,6 +539,9 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 	case *ast.IdentExpr:
 		return &IdentExpr{Name: expr.Name, Typ: typ, Origin: origin}, nil
 	case *ast.CallExpr:
+		if ioSig, ok := b.info.IOCalls[expr]; ok {
+			return b.buildIOExpr(expr, ioSig, typ, origin)
+		}
 		if _, ok := b.info.CloneCalls[expr]; ok {
 			arg, err := b.buildExpr(expr.Args[0])
 			if err != nil {
@@ -504,6 +607,37 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		return &SliceExpr{Collection: collection, Start: start, End: end, Typ: typ, Origin: origin}, nil
 	default:
 		return nil, fmt.Errorf("unsupported AST expression %T", expr)
+	}
+}
+
+func (b builder) buildIOExpr(expr *ast.CallExpr, sig types.IOCallSig, typ ast.Type, origin types.Origin) (Expr, error) {
+	switch sig.Kind {
+	case types.IOCallReadLine:
+		return &ReadLineExpr{Typ: typ, Origin: origin}, nil
+	case types.IOCallReadInt:
+		return &ReadIntExpr{Typ: typ, Origin: origin}, nil
+	case types.IOCallReadFloat:
+		return &ReadFloatExpr{Typ: typ, Origin: origin}, nil
+	case types.IOCallReadBool:
+		return &ReadBoolExpr{Typ: typ, Origin: origin}, nil
+	case types.IOCallReadFile:
+		path, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &ReadFileExpr{Path: path, Typ: typ, Origin: origin}, nil
+	case types.IOCallReadCSV:
+		path, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		columns, err := b.buildExpr(expr.Args[1])
+		if err != nil {
+			return nil, err
+		}
+		return &ReadCSVExpr{Path: path, Columns: columns, Typ: typ, Origin: origin}, nil
+	default:
+		return nil, fmt.Errorf("%s can only be used as a statement", sig.Kind)
 	}
 }
 

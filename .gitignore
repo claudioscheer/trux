@@ -34,3 +34,9 @@ build/
 testdata/**/*.c
 testdata/**/*.o
 testdata/**/a.out
+
+# Example runtime output
+examples/io_copy.txt
+examples/io_output.csv
+examples/projects/file_notes/summary.txt
+examples/projects/csv_roster/out.csv

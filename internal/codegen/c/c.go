@@ -267,6 +267,30 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) erro
 			return err
 		}
 		fmt.Fprintf(out, "%s%s(%s, %s);\n", indent, appendFn, list, value)
+	case *ir.WriteFileStmt:
+		path, err := emitExpr(stmt.Path, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		contents, err := emitExpr(stmt.Contents, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%srt_write_file(%s, %s);\n", indent, path, contents)
+	case *ir.WriteCSVStmt:
+		path, err := emitExpr(stmt.Path, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		cells, err := emitExpr(stmt.Cells, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		columns, err := emitExpr(stmt.Columns, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%srt_write_csv(%s, %s, %s);\n", indent, path, cells, columns)
 	case *ir.ExprStmt:
 		expr, err := emitExpr(stmt.Expr, frameArena, usage)
 		if err != nil {
@@ -382,6 +406,33 @@ func emitExpr(expr ir.Expr, targetArena string, usage *funcUsage) (string, error
 			return "", err
 		}
 		return emitClone(expr.Value.Type(), targetArena, value, usage)
+	case *ir.ReadLineExpr:
+		usage.noteArena(targetArena)
+		return fmt.Sprintf("rt_read_line(%s)", targetArena), nil
+	case *ir.ReadIntExpr:
+		return "rt_read_int(&trux_frame)", nil
+	case *ir.ReadFloatExpr:
+		return "rt_read_float(&trux_frame)", nil
+	case *ir.ReadBoolExpr:
+		return "rt_read_bool(&trux_frame)", nil
+	case *ir.ReadFileExpr:
+		path, err := emitExpr(expr.Path, frameArena, usage)
+		if err != nil {
+			return "", err
+		}
+		usage.noteArena(targetArena)
+		return fmt.Sprintf("rt_read_file(%s, %s)", targetArena, path), nil
+	case *ir.ReadCSVExpr:
+		path, err := emitExpr(expr.Path, frameArena, usage)
+		if err != nil {
+			return "", err
+		}
+		columns, err := emitExpr(expr.Columns, frameArena, usage)
+		if err != nil {
+			return "", err
+		}
+		usage.noteArena(targetArena)
+		return fmt.Sprintf("rt_read_csv(%s, %s, %s)", targetArena, path, columns), nil
 	case *ir.CallExpr:
 		args := make([]string, 0, len(expr.Args)+1)
 		callResultArena := frameArena
@@ -741,6 +792,19 @@ func collectStmtNestedCollectionFamilies(stmt ir.Stmt, seen map[string]bool, fam
 			return err
 		}
 		return collectExprNestedCollectionFamilies(stmt.Value, seen, families)
+	case *ir.WriteFileStmt:
+		if err := collectExprNestedCollectionFamilies(stmt.Path, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(stmt.Contents, seen, families)
+	case *ir.WriteCSVStmt:
+		if err := collectExprNestedCollectionFamilies(stmt.Path, seen, families); err != nil {
+			return err
+		}
+		if err := collectExprNestedCollectionFamilies(stmt.Cells, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(stmt.Columns, seen, families)
 	case *ir.ExprStmt:
 		return collectExprNestedCollectionFamilies(stmt.Expr, seen, families)
 	default:

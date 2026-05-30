@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -360,6 +361,77 @@ pub func label() string {
 
 	if out.String() != "module 9\n" {
 		t.Fatalf("output = %q, want module 9\\n", out.String())
+	}
+}
+
+func TestRunFileCompilesAndExecutesInputProgram(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func main() int {
+    let name string = read_line()
+    let count int = read_int()
+    let ratio float = read_float()
+    let ready bool = read_bool()
+    print(name, " ", count + 1, " ", ratio, " ", ready)
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFileWithOptions(&out, path, runOptions{Stdin: strings.NewReader("Ada\n41\n2.5\ntrue\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if out.String() != "Ada 42 2.5 true\n" {
+		t.Fatalf("output = %q, want Ada 42 2.5 true\\n", out.String())
+	}
+}
+
+func TestRunFileCompilesAndExecutesFileAndCSVIO(t *testing.T) {
+	requireCC(t)
+
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.txt")
+	copyPath := filepath.Join(dir, "copy.txt")
+	csvPath := filepath.Join(dir, "input.csv")
+	outCSVPath := filepath.Join(dir, "out.csv")
+	if err := os.WriteFile(inputPath, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(csvPath, []byte("name,score\n\"A, B\",2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	path := writeTempSource(t, `package main
+func main() int {
+    let text string = read_file(`+truxString(inputPath)+`)
+    write_file(`+truxString(copyPath)+`, text + "!")
+
+    let cells list[string] = read_csv(`+truxString(csvPath)+`, 2)
+    append(cells, "Cara")
+    append(cells, "3")
+    write_csv(`+truxString(outCSVPath)+`, cells, 2)
+
+    print(text)
+    print(len(cells), " ", cells[2])
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if out.String() != "hello\n6 A, B\n" {
+		t.Fatalf("output = %q, want file/csv output", out.String())
+	}
+	if got := readFile(t, copyPath); got != "hello!" {
+		t.Fatalf("copy file = %q, want hello!", got)
+	}
+	if got := readFile(t, outCSVPath); got != "name,score\n\"A, B\",2\nCara,3\n" {
+		t.Fatalf("written csv = %q, want appended csv", got)
 	}
 }
 
@@ -905,4 +977,8 @@ exit 2
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func truxString(value string) string {
+	return strconv.Quote(value)
 }

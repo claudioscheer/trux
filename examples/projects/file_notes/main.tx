@@ -1,0 +1,12 @@
+package main
+
+func main() int {
+    let seed string = read_file("examples/projects/file_notes/seed.txt")
+    let extra string = read_line()
+    let summary string = seed + "\n" + extra
+
+    write_file("examples/projects/file_notes/summary.txt", summary)
+    print(summary)
+
+    return 0
+}

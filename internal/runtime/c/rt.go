@@ -1,6 +1,8 @@
 package c
 
-const Source = `#include <stdbool.h>
+const Source = `#include <ctype.h>
+#include <errno.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -53,6 +55,12 @@ typedef struct {
     size_t start;
     size_t end;
 } rt_range;
+
+typedef struct {
+    uint8_t* data;
+    size_t len;
+    size_t cap;
+} rt_byte_buffer;
 
 static RT_UNUSED void rt_runtime_fail(const char* message) {
     fprintf(stderr, "trux runtime error: %s\n", message);
@@ -191,6 +199,14 @@ static RT_UNUSED size_t rt_checked_count(int64_t count, const char* what) {
     return (size_t)count;
 }
 
+static RT_UNUSED size_t rt_checked_positive_count(int64_t count, const char* what) {
+    if (count <= 0) {
+        fprintf(stderr, "trux runtime error: %s must be positive, got %" PRId64 "\n", what, count);
+        exit(1);
+    }
+    return (size_t)count;
+}
+
 static RT_UNUSED int64_t rt_checked_len_i64(size_t len) {
     if (len > (size_t)INT64_MAX) {
         rt_runtime_fail("length too large");
@@ -243,6 +259,246 @@ static RT_UNUSED void rt_check_array_like(const void* data, size_t len, const ch
         fprintf(stderr, "trux runtime error: invalid %s: non-zero length with NULL data\n", what);
         exit(1);
     }
+}
+
+static RT_UNUSED void rt_byte_buffer_init(rt_byte_buffer* buffer) {
+    buffer->data = NULL;
+    buffer->len = 0;
+    buffer->cap = 0;
+}
+
+static RT_UNUSED void rt_byte_buffer_free(rt_byte_buffer* buffer) {
+    free(buffer->data);
+    buffer->data = NULL;
+    buffer->len = 0;
+    buffer->cap = 0;
+}
+
+static RT_UNUSED void rt_byte_buffer_reserve(rt_byte_buffer* buffer, size_t needed) {
+    if (needed <= buffer->cap) {
+        return;
+    }
+
+    size_t cap = buffer->cap == 0 ? (size_t)128 : buffer->cap;
+    while (cap < needed) {
+        if (cap > SIZE_MAX / 2) {
+            rt_runtime_fail("buffer size overflow");
+        }
+        cap *= 2;
+    }
+
+    uint8_t* data = realloc(buffer->data, cap);
+    if (data == NULL) {
+        rt_runtime_fail("allocation failed");
+    }
+    buffer->data = data;
+    buffer->cap = cap;
+}
+
+static RT_UNUSED void rt_byte_buffer_append_byte(rt_byte_buffer* buffer, uint8_t value) {
+    if (buffer->len == SIZE_MAX) {
+        rt_runtime_fail("buffer size overflow");
+    }
+    rt_byte_buffer_reserve(buffer, buffer->len + 1);
+    buffer->data[buffer->len] = value;
+    buffer->len++;
+}
+
+static RT_UNUSED void rt_byte_buffer_append_bytes(rt_byte_buffer* buffer, const uint8_t* data, size_t len) {
+    if (len == 0) {
+        return;
+    }
+    if (data == NULL) {
+        rt_runtime_fail("invalid bytes: non-zero length with NULL data");
+    }
+    if (buffer->len > SIZE_MAX - len) {
+        rt_runtime_fail("buffer size overflow");
+    }
+    rt_byte_buffer_reserve(buffer, buffer->len + len);
+    memcpy(buffer->data + buffer->len, data, len);
+    buffer->len += len;
+}
+
+static RT_UNUSED rt_string rt_byte_buffer_to_string(rt_arena* arena, const rt_byte_buffer* buffer) {
+    if (buffer->len == 0) {
+        return (rt_string){NULL, 0};
+    }
+    uint8_t* data = rt_arena_alloc(arena, buffer->len);
+    memcpy(data, buffer->data, buffer->len);
+    return (rt_string){data, buffer->len};
+}
+
+static RT_UNUSED rt_string rt_string_trim_ascii(rt_string value) {
+    rt_check_string(value);
+    size_t start = 0;
+    size_t end = value.len;
+    while (start < end && isspace((unsigned char)value.data[start])) {
+        start++;
+    }
+    while (end > start && isspace((unsigned char)value.data[end - 1])) {
+        end--;
+    }
+    return (rt_string){value.data == NULL ? NULL : value.data + start, end - start};
+}
+
+static RT_UNUSED bool rt_string_equal_c(rt_string value, const char* text) {
+    size_t len = strlen(text);
+    rt_check_string(value);
+    return value.len == len && (len == 0 || memcmp(value.data, text, len) == 0);
+}
+
+static RT_UNUSED char* rt_string_to_c_string(rt_string value, const char* what) {
+    rt_check_string(value);
+    if (value.len == SIZE_MAX) {
+        rt_runtime_fail("string length overflow");
+    }
+    for (size_t i = 0; i < value.len; i++) {
+        if (value.data[i] == 0) {
+            fprintf(stderr, "trux runtime error: %s contains NUL byte\n", what);
+            exit(1);
+        }
+    }
+    char* out = malloc(value.len + 1);
+    if (out == NULL) {
+        rt_runtime_fail("allocation failed");
+    }
+    if (value.len > 0) {
+        memcpy(out, value.data, value.len);
+    }
+    out[value.len] = 0;
+    return out;
+}
+
+static RT_UNUSED void rt_file_fail(const char* operation, const char* path) {
+    fprintf(stderr, "trux runtime error: cannot %s %s: %s\n", operation, path, strerror(errno));
+    exit(1);
+}
+
+static RT_UNUSED void rt_file_write_byte(FILE* file, uint8_t value) {
+    if (fputc(value, file) == EOF) {
+        rt_runtime_fail("write failed");
+    }
+}
+
+static RT_UNUSED void rt_file_write_string(FILE* file, rt_string value) {
+    if (value.len == 0) {
+        return;
+    }
+    rt_check_string(value);
+    if (fwrite(value.data, 1, value.len, file) != value.len) {
+        rt_runtime_fail("write failed");
+    }
+}
+
+static RT_UNUSED rt_string rt_read_line(rt_arena* arena) {
+    rt_byte_buffer buffer;
+    rt_byte_buffer_init(&buffer);
+
+    for (;;) {
+        int ch = fgetc(stdin);
+        if (ch == EOF) {
+            if (ferror(stdin)) {
+                rt_runtime_fail("read failed");
+            }
+            break;
+        }
+        if (ch == '\n') {
+            break;
+        }
+        rt_byte_buffer_append_byte(&buffer, (uint8_t)ch);
+    }
+
+    if (buffer.len > 0 && buffer.data[buffer.len - 1] == '\r') {
+        buffer.len--;
+    }
+
+    rt_string line = rt_byte_buffer_to_string(arena, &buffer);
+    rt_byte_buffer_free(&buffer);
+    return line;
+}
+
+static RT_UNUSED int64_t rt_read_int(rt_arena* arena) {
+    rt_string line = rt_string_trim_ascii(rt_read_line(arena));
+    char* text = rt_string_to_c_string(line, "integer input");
+    errno = 0;
+    char* end = NULL;
+    long long value = strtoll(text, &end, 10);
+    if (errno == ERANGE || end == text || *end != 0) {
+        free(text);
+        rt_runtime_fail("invalid int input");
+    }
+    free(text);
+    return (int64_t)value;
+}
+
+static RT_UNUSED double rt_read_float(rt_arena* arena) {
+    rt_string line = rt_string_trim_ascii(rt_read_line(arena));
+    char* text = rt_string_to_c_string(line, "float input");
+    errno = 0;
+    char* end = NULL;
+    double value = strtod(text, &end);
+    if (errno == ERANGE || end == text || *end != 0) {
+        free(text);
+        rt_runtime_fail("invalid float input");
+    }
+    free(text);
+    return value;
+}
+
+static RT_UNUSED bool rt_read_bool(rt_arena* arena) {
+    rt_string line = rt_string_trim_ascii(rt_read_line(arena));
+    if (rt_string_equal_c(line, "true")) {
+        return true;
+    }
+    if (rt_string_equal_c(line, "false")) {
+        return false;
+    }
+    rt_runtime_fail("invalid bool input");
+    return false;
+}
+
+static RT_UNUSED rt_string rt_read_file(rt_arena* arena, rt_string path) {
+    char* c_path = rt_string_to_c_string(path, "file path");
+    FILE* file = fopen(c_path, "rb");
+    if (file == NULL) {
+        rt_file_fail("open file for reading", c_path);
+    }
+
+    rt_byte_buffer buffer;
+    rt_byte_buffer_init(&buffer);
+    uint8_t chunk[4096];
+    for (;;) {
+        size_t read = fread(chunk, 1, sizeof(chunk), file);
+        rt_byte_buffer_append_bytes(&buffer, chunk, read);
+        if (read < sizeof(chunk)) {
+            if (ferror(file)) {
+                rt_runtime_fail("read failed");
+            }
+            break;
+        }
+    }
+    if (fclose(file) != 0) {
+        rt_file_fail("close file after reading", c_path);
+    }
+
+    rt_string contents = rt_byte_buffer_to_string(arena, &buffer);
+    rt_byte_buffer_free(&buffer);
+    free(c_path);
+    return contents;
+}
+
+static RT_UNUSED void rt_write_file(rt_string path, rt_string contents) {
+    char* c_path = rt_string_to_c_string(path, "file path");
+    FILE* file = fopen(c_path, "wb");
+    if (file == NULL) {
+        rt_file_fail("open file for writing", c_path);
+    }
+
+    rt_file_write_string(file, contents);
+    if (fclose(file) != 0) {
+        rt_file_fail("close file after writing", c_path);
+    }
+    free(c_path);
 }
 
 static RT_UNUSED void rt_print_int(int64_t value) {
@@ -509,4 +765,164 @@ RT_DEFINE_COLLECTIONS(int, int64_t)
 RT_DEFINE_COLLECTIONS(float, double)
 RT_DEFINE_COLLECTIONS(bool, bool)
 RT_DEFINE_COLLECTIONS(string, rt_string)
+
+static RT_UNUSED bool rt_csv_is_newline(uint8_t ch) {
+    return ch == '\n' || ch == '\r';
+}
+
+static RT_UNUSED void rt_csv_consume_newline(rt_string contents, size_t* index) {
+    uint8_t ch = contents.data[*index];
+    (*index)++;
+    if (ch == '\r' && *index < contents.len && contents.data[*index] == '\n') {
+        (*index)++;
+    }
+}
+
+static RT_UNUSED void rt_csv_check_row_columns(size_t got, size_t want) {
+    if (got != want) {
+        fprintf(stderr, "trux runtime error: csv row has %zu columns, want %zu\n", got, want);
+        exit(1);
+    }
+}
+
+static RT_UNUSED rt_string rt_csv_finish_cell(rt_arena* arena, rt_byte_buffer* field) {
+    rt_string cell = rt_byte_buffer_to_string(arena, field);
+    rt_byte_buffer_free(field);
+    return cell;
+}
+
+static RT_UNUSED rt_list_string* rt_read_csv(rt_arena* arena, rt_string path, int64_t columns_value) {
+    size_t columns = rt_checked_positive_count(columns_value, "csv columns");
+    rt_string contents = rt_read_file(arena, path);
+    rt_list_string* cells = rt_list_string_new(arena, 0);
+    if (contents.len == 0) {
+        return cells;
+    }
+
+    size_t index = 0;
+    size_t row_columns = 0;
+    bool pending_empty = false;
+
+    while (index < contents.len || pending_empty) {
+        pending_empty = false;
+        rt_byte_buffer field;
+        rt_byte_buffer_init(&field);
+
+        if (index < contents.len && contents.data[index] == '"') {
+            bool closed = false;
+            index++;
+            while (index < contents.len) {
+                uint8_t ch = contents.data[index];
+                index++;
+                if (ch != '"') {
+                    rt_byte_buffer_append_byte(&field, ch);
+                    continue;
+                }
+                if (index < contents.len && contents.data[index] == '"') {
+                    rt_byte_buffer_append_byte(&field, '"');
+                    index++;
+                    continue;
+                }
+                closed = true;
+                break;
+            }
+            if (!closed) {
+                rt_runtime_fail("unterminated csv quoted field");
+            }
+            if (index < contents.len && contents.data[index] != ',' && !rt_csv_is_newline(contents.data[index])) {
+                rt_runtime_fail("expected csv delimiter after quoted field");
+            }
+        } else {
+            while (index < contents.len && contents.data[index] != ',' && !rt_csv_is_newline(contents.data[index])) {
+                if (contents.data[index] == '"') {
+                    rt_runtime_fail("unexpected quote in csv field");
+                }
+                rt_byte_buffer_append_byte(&field, contents.data[index]);
+                index++;
+            }
+        }
+
+        rt_list_string_append(cells, rt_csv_finish_cell(arena, &field));
+        row_columns++;
+
+        if (index >= contents.len) {
+            rt_csv_check_row_columns(row_columns, columns);
+            break;
+        }
+        if (contents.data[index] == ',') {
+            index++;
+            if (index >= contents.len) {
+                pending_empty = true;
+            }
+            continue;
+        }
+        if (rt_csv_is_newline(contents.data[index])) {
+            rt_csv_consume_newline(contents, &index);
+            rt_csv_check_row_columns(row_columns, columns);
+            row_columns = 0;
+            continue;
+        }
+
+        rt_runtime_fail("invalid csv parser state");
+    }
+
+    return cells;
+}
+
+static RT_UNUSED bool rt_csv_cell_needs_quotes(rt_string cell) {
+    rt_check_string(cell);
+    for (size_t i = 0; i < cell.len; i++) {
+        uint8_t ch = cell.data[i];
+        if (ch == ',' || ch == '"' || ch == '\n' || ch == '\r') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static RT_UNUSED void rt_csv_write_cell(FILE* file, rt_string cell) {
+    if (!rt_csv_cell_needs_quotes(cell)) {
+        rt_file_write_string(file, cell);
+        return;
+    }
+
+    rt_file_write_byte(file, '"');
+    for (size_t i = 0; i < cell.len; i++) {
+        if (cell.data[i] == '"') {
+            rt_file_write_byte(file, '"');
+        }
+        rt_file_write_byte(file, cell.data[i]);
+    }
+    rt_file_write_byte(file, '"');
+}
+
+static RT_UNUSED void rt_write_csv(rt_string path, rt_list_string* cells, int64_t columns_value) {
+    size_t columns = rt_checked_positive_count(columns_value, "csv columns");
+    rt_check_array_like(cells->data, cells->len, "csv cells");
+    if (cells->len % columns != 0) {
+        fprintf(stderr, "trux runtime error: csv cell count %zu is not divisible by columns %zu\n", cells->len, columns);
+        exit(1);
+    }
+
+    char* c_path = rt_string_to_c_string(path, "file path");
+    FILE* file = fopen(c_path, "wb");
+    if (file == NULL) {
+        rt_file_fail("open csv for writing", c_path);
+    }
+
+    for (size_t i = 0; i < cells->len; i++) {
+        if (i > 0) {
+            rt_file_write_byte(file, i % columns == 0 ? '\n' : ',');
+        }
+        rt_csv_write_cell(file, cells->data[i]);
+    }
+    if (cells->len > 0) {
+        rt_file_write_byte(file, '\n');
+    }
+
+    if (fclose(file) != 0) {
+        rt_file_fail("close csv after writing", c_path);
+    }
+    free(c_path);
+}
 `

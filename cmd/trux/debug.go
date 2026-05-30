@@ -160,6 +160,9 @@ func formatExprCalls(out *bytes.Buffer, expr ast.Expression, info *semtypes.Info
 			}
 			fmt.Fprintln(out, ")")
 		}
+		if sig, ok := info.IOCalls[expr]; ok {
+			fmt.Fprintf(out, "  %d:%d %s -> %s\n", expr.Start.Line, expr.Start.Column, expr.Callee, sig.Kind)
+		}
 		for _, arg := range expr.Args {
 			formatExprCalls(out, arg, info)
 		}

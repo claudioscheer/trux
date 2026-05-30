@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -431,6 +432,96 @@ int main(void) {
 `)
 }
 
+func TestInputRuntimeHelpersReadLinesAndTypedValues(t *testing.T) {
+	compileAndRunRuntimeCWithInput(t, Source+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    rt_string line = rt_read_line(&arena);
+    int64_t count = rt_read_int(&arena);
+    double ratio = rt_read_float(&arena);
+    bool ready = rt_read_bool(&arena);
+
+    if (!rt_string_equal(line, (rt_string){(const uint8_t*)"hello", 5}) ||
+        count != 42 ||
+        ratio != 2.5 ||
+        !ready) {
+        fprintf(stderr, "input helpers returned unexpected values\n");
+        return 1;
+    }
+
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`, "hello\r\n42\n2.5\ntrue\n")
+}
+
+func TestFileAndCSVRuntimeHelpers(t *testing.T) {
+	dir := t.TempDir()
+	textPath := filepath.Join(dir, "text.txt")
+	csvPath := filepath.Join(dir, "in.csv")
+	outCSVPath := filepath.Join(dir, "out.csv")
+	source := Source + `
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    rt_string text_path = ` + cString(textPath) + `;
+    rt_string csv_path = ` + cString(csvPath) + `;
+    rt_string out_csv_path = ` + cString(outCSVPath) + `;
+
+    rt_write_file(text_path, (rt_string){(const uint8_t*)"alpha\nbeta", 10});
+    rt_string text = rt_read_file(&arena, text_path);
+    if (!rt_string_equal(text, (rt_string){(const uint8_t*)"alpha\nbeta", 10})) {
+        fprintf(stderr, "read_file returned unexpected contents\n");
+        return 1;
+    }
+
+    rt_write_file(csv_path, (rt_string){(const uint8_t*)"name,score\n\"A, B\",2\n", 20});
+    rt_list_string* cells = rt_read_csv(&arena, csv_path, 2);
+    if (cells->len != 4 ||
+        !rt_string_equal(cells->data[0], (rt_string){(const uint8_t*)"name", 4}) ||
+        !rt_string_equal(cells->data[2], (rt_string){(const uint8_t*)"A, B", 4})) {
+        fprintf(stderr, "read_csv returned unexpected cells\n");
+        return 1;
+    }
+
+    rt_write_csv(out_csv_path, cells, 2);
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`
+
+	compileAndRunRuntimeC(t, source)
+	got, err := os.ReadFile(outCSVPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "name,score\n\"A, B\",2\n"
+	if string(got) != want {
+		t.Fatalf("written CSV = %q, want %q", got, want)
+	}
+}
+
+func TestCSVRuntimeRejectsWrongColumnCount(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "bad.csv")
+	if err := os.WriteFile(csvPath, []byte("a,b\nc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	compileAndRunRuntimeCExpectFailure(t, Source+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+    (void)rt_read_csv(&arena, `+cString(csvPath)+`, 2);
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`, "trux runtime error: csv row has 1 columns, want 2")
+}
+
 func countingRuntimeSource() string {
 	const stdlibInclude = "#include <stdlib.h>\n"
 	const mallocHooks = `#include <stdlib.h>
@@ -464,6 +555,18 @@ func compileAndRunRuntimeC(t *testing.T, source string) {
 
 	exePath := compileRuntimeC(t, source)
 	run := exec.Command(exePath)
+	output, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run runtime C: %v\n%s", err, output)
+	}
+}
+
+func compileAndRunRuntimeCWithInput(t *testing.T, source string, input string) {
+	t.Helper()
+
+	exePath := compileRuntimeC(t, source)
+	run := exec.Command(exePath)
+	run.Stdin = strings.NewReader(input)
 	output, err := run.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run runtime C: %v\n%s", err, output)
@@ -512,4 +615,8 @@ func compileRuntimeC(t *testing.T, source string) string {
 	}
 
 	return exePath
+}
+
+func cString(value string) string {
+	return "(rt_string){(const uint8_t*)" + strconv.Quote(value) + ", " + strconv.Itoa(len(value)) + "}"
 }

@@ -1,0 +1,67 @@
+package main
+
+// Returning a parameter-backed slice is borrowed.
+// This is cheap and keeps the view tied to the caller's storage.
+func borrowedMiddle(xs []int) []int {
+    return xs[1:3]
+}
+
+// clone makes the returned slice owned.
+// Use this when the caller should not observe later changes through the view.
+func ownedMiddle(xs []int) []int {
+    return clone(xs[1:3])
+}
+
+// Local arrays use function scratch memory.
+// Returning a slice of scratch memory copies the selected elements into the result arena.
+func scratchMiddle() []int {
+    let xs [4]int = [4]int{10, 20, 30, 40}
+    return xs[1:3]
+}
+
+// Parameter collections are read-only.
+// The way to edit parameter data is to clone first, then mutate the owned copy.
+func cloneThenEdit(xs []int) []int {
+    let owned []int = clone(xs[:])
+    owned[0] = 42
+    return owned
+}
+
+// A local clone allocates into trux_ctx->arena.
+// Returning it is safe after function scratch memory is rewound.
+func durableLocalClone() []int {
+    let xs [3]int = [3]int{7, 8, 9}
+    let ys []int = clone(xs[:])
+    return ys
+}
+
+// Local lists and string concatenations use scratch memory.
+// Returning the list clones it into the result arena, including deep copies of string elements.
+func builtWords() list[string] {
+    let words list[string] = list[string]{}
+    append(words, "a" + "b")
+    append(words, "c" + "d")
+    return words
+}
+
+func main() int {
+    let xs [4]int = [4]int{1, 2, 3, 4}
+    let borrowed []int = borrowedMiddle(xs[:])
+    let owned []int = ownedMiddle(xs[:])
+    xs[1] = 99
+    print(borrowed[0], " ", owned[0])
+
+    let scratch []int = scratchMiddle()
+    print(scratch[0], " ", scratch[1])
+
+    let edited []int = cloneThenEdit(xs[:])
+    print(xs[0], " ", edited[0])
+
+    let durable []int = durableLocalClone()
+    print(durable[0], " ", durable[2])
+
+    let words list[string] = builtWords()
+    print(words[0], " ", words[1], " ", len(words))
+
+    return 0
+}

@@ -26,10 +26,12 @@ type Info struct {
 	Funcs         map[string]FuncSig
 	Locals        map[*ast.FuncDecl]map[string]ast.Type
 	ExprTypes     map[ast.Expression]ast.Type
+	ExprOrigins   map[ast.Expression]Origin
 	ResolvedCalls map[*ast.CallExpr]FuncSig
 	PrintCalls    map[*ast.CallExpr][]ast.Type
 	LenCalls      map[*ast.CallExpr]ast.Type
 	AppendCalls   map[*ast.CallExpr]AppendSig
+	CloneCalls    map[*ast.CallExpr]CloneSig
 }
 
 type AppendSig struct {
@@ -37,13 +39,26 @@ type AppendSig struct {
 	ElemType ast.Type
 }
 
+type CloneSig struct {
+	Type ast.Type
+}
+
+type Origin string
+
+const (
+	OriginBorrowed Origin = "borrowed"
+	OriginScratch  Origin = "scratch"
+	OriginOwned    Origin = "owned"
+	OriginUnknown  Origin = "unknown"
+)
+
 type checker struct {
 	info *Info
 }
 
 type localInfo struct {
-	typ      ast.Type
-	borrowed bool
+	typ    ast.Type
+	origin Origin
 }
 
 type scope struct {
@@ -85,10 +100,12 @@ func Check(program *ast.Program) (*Info, error) {
 			Funcs:         map[string]FuncSig{},
 			Locals:        map[*ast.FuncDecl]map[string]ast.Type{},
 			ExprTypes:     map[ast.Expression]ast.Type{},
+			ExprOrigins:   map[ast.Expression]Origin{},
 			ResolvedCalls: map[*ast.CallExpr]FuncSig{},
 			PrintCalls:    map[*ast.CallExpr][]ast.Type{},
 			LenCalls:      map[*ast.CallExpr]ast.Type{},
 			AppendCalls:   map[*ast.CallExpr]AppendSig{},
+			CloneCalls:    map[*ast.CallExpr]CloneSig{},
 		},
 	}
 
@@ -160,8 +177,8 @@ func (c *checker) checkFunc(fn *ast.FuncDecl) error {
 		}
 		c.info.Locals[fn][param.Name] = param.Type
 		locals.locals[param.Name] = localInfo{
-			typ:      param.Type,
-			borrowed: isMutableCollection(param.Type),
+			typ:    param.Type,
+			origin: originForParam(param.Type),
 		}
 	}
 
@@ -194,8 +211,8 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 
 		c.info.Locals[fn][stmt.Name] = stmt.Type
 		locals.locals[stmt.Name] = localInfo{
-			typ:      stmt.Type,
-			borrowed: isMutableCollection(stmt.Type) && c.exprBorrows(locals, stmt.Value),
+			typ:    stmt.Type,
+			origin: c.exprOrigin(stmt.Value),
 		}
 		return nil
 	case *ast.AssignStmt:
@@ -210,7 +227,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		if !ast.TypeEqual(valueType, local.typ) {
 			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, local.typ)
 		}
-		local.borrowed = isMutableCollection(local.typ) && c.exprBorrows(locals, stmt.Value)
+		local.origin = c.exprOrigin(stmt.Value)
 		locals.assign(stmt.Name, local)
 		return nil
 	case *ast.IndexAssignStmt:
@@ -232,8 +249,8 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		if !ok {
 			return typeError(stmt.Target.Collection.Pos(), "cannot index %s", collectionType)
 		}
-		if c.exprBorrows(locals, stmt.Target.Collection) {
-			return typeError(stmt.Target.Collection.Pos(), "cannot mutate parameter-owned collection")
+		if err := c.checkCanMutate(stmt.Target.Collection); err != nil {
+			return err
 		}
 		valueType, err := c.checkExpr(locals, stmt.Value, false)
 		if err != nil {
@@ -242,7 +259,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		if !ast.TypeEqual(valueType, elemType) {
 			return typeError(stmt.Value.Pos(), "cannot assign %s to %s element", valueType, elemType)
 		}
-		c.info.ExprTypes[stmt.Target] = elemType
+		c.setExpr(stmt.Target, elemType, indexOrigin(collectionType, c.exprOrigin(stmt.Target.Collection)))
 		return nil
 	case *ast.ReturnStmt:
 		valueType, err := c.checkExpr(locals, stmt.Value, false)
@@ -302,16 +319,16 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool) (ast.Type, error) {
 	switch expr := expr.(type) {
 	case *ast.IntLiteral:
-		c.info.ExprTypes[expr] = ast.IntType
+		c.setExpr(expr, ast.IntType, OriginOwned)
 		return ast.IntType, nil
 	case *ast.FloatLiteral:
-		c.info.ExprTypes[expr] = ast.FloatType
+		c.setExpr(expr, ast.FloatType, OriginOwned)
 		return ast.FloatType, nil
 	case *ast.StringLiteral:
-		c.info.ExprTypes[expr] = ast.StringType
+		c.setExpr(expr, ast.StringType, OriginOwned)
 		return ast.StringType, nil
 	case *ast.BoolLiteral:
-		c.info.ExprTypes[expr] = ast.BoolType
+		c.setExpr(expr, ast.BoolType, OriginOwned)
 		return ast.BoolType, nil
 	case *ast.ArrayLiteral:
 		if err := validateType(expr.Start, expr.Type); err != nil {
@@ -333,7 +350,7 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 				return nil, typeError(elem.Pos(), "array element %d has type %s, want %s", i+1, elemType, arrayType.Elem)
 			}
 		}
-		c.info.ExprTypes[expr] = expr.Type
+		c.setExpr(expr, expr.Type, OriginScratch)
 		return expr.Type, nil
 	case *ast.ListLiteral:
 		if err := validateType(expr.Start, expr.Type); err != nil {
@@ -352,7 +369,7 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 				return nil, typeError(elem.Pos(), "list element %d has type %s, want %s", i+1, elemType, listType.Elem)
 			}
 		}
-		c.info.ExprTypes[expr] = expr.Type
+		c.setExpr(expr, expr.Type, OriginScratch)
 		return expr.Type, nil
 	case *ast.MakeExpr:
 		if err := validateType(expr.Start, expr.Type); err != nil {
@@ -368,14 +385,14 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		if !ast.TypeEqual(lenType, ast.IntType) {
 			return nil, typeError(expr.Len.Pos(), "make length must be int, got %s", lenType)
 		}
-		c.info.ExprTypes[expr] = expr.Type
+		c.setExpr(expr, expr.Type, OriginScratch)
 		return expr.Type, nil
 	case *ast.IdentExpr:
 		local, ok := locals.lookup(expr.Name)
 		if !ok {
 			return nil, typeError(expr.Start, "undefined variable %q", expr.Name)
 		}
-		c.info.ExprTypes[expr] = local.typ
+		c.setExpr(expr, local.typ, local.origin)
 		return local.typ, nil
 	case *ast.BinaryExpr:
 		leftType, err := c.checkExpr(locals, expr.Left, false)
@@ -390,7 +407,7 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		if err != nil {
 			return nil, err
 		}
-		c.info.ExprTypes[expr] = typ
+		c.setExpr(expr, typ, binaryOrigin(expr.Operator, typ))
 		return typ, nil
 	case *ast.CallExpr:
 		return c.checkCall(locals, expr, allowPrint)
@@ -416,7 +433,7 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 			}
 			typ = elemType
 		}
-		c.info.ExprTypes[expr] = typ
+		c.setExpr(expr, typ, indexOrigin(collectionType, c.exprOrigin(expr.Collection)))
 		return typ, nil
 	case *ast.SliceExpr:
 		collectionType, err := c.checkExpr(locals, expr.Collection, false)
@@ -451,7 +468,7 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 			}
 			typ = &ast.SliceType{Elem: elemType}
 		}
-		c.info.ExprTypes[expr] = typ
+		c.setExpr(expr, typ, c.exprOrigin(expr.Collection))
 		return typ, nil
 	default:
 		return nil, typeError(expr.Pos(), "unsupported expression %T", expr)
@@ -481,7 +498,7 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 			}
 		}
 		c.info.PrintCalls[expr] = argTypes
-		c.info.ExprTypes[expr] = argTypes[len(argTypes)-1]
+		c.setExpr(expr, argTypes[len(argTypes)-1], OriginUnknown)
 		return argTypes[len(argTypes)-1], nil
 	}
 	if expr.Callee == "len" {
@@ -492,8 +509,19 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 			return nil, typeError(expr.Args[0].Pos(), "len does not support %s", argTypes[0])
 		}
 		c.info.LenCalls[expr] = argTypes[0]
-		c.info.ExprTypes[expr] = ast.IntType
+		c.setExpr(expr, ast.IntType, OriginOwned)
 		return ast.IntType, nil
+	}
+	if expr.Callee == "clone" {
+		if len(argTypes) != 1 {
+			return nil, typeError(expr.Start, "clone expects 1 argument, got %d", len(argTypes))
+		}
+		if !cloneableType(argTypes[0]) {
+			return nil, typeError(expr.Args[0].Pos(), "clone does not support %s", argTypes[0])
+		}
+		c.info.CloneCalls[expr] = CloneSig{Type: argTypes[0]}
+		c.setExpr(expr, argTypes[0], OriginOwned)
+		return argTypes[0], nil
 	}
 	if expr.Callee == "append" {
 		if !allowPrint {
@@ -509,11 +537,11 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		if !ast.TypeEqual(argTypes[1], listType.Elem) {
 			return nil, typeError(expr.Args[1].Pos(), "append value has type %s, want %s", argTypes[1], listType.Elem)
 		}
-		if c.exprBorrows(locals, expr.Args[0]) {
-			return nil, typeError(expr.Args[0].Pos(), "cannot mutate parameter-owned collection")
+		if err := c.checkCanMutate(expr.Args[0]); err != nil {
+			return nil, err
 		}
 		c.info.AppendCalls[expr] = AppendSig{ListType: argTypes[0], ElemType: listType.Elem}
-		c.info.ExprTypes[expr] = argTypes[0]
+		c.setExpr(expr, argTypes[0], c.exprOrigin(expr.Args[0]))
 		return argTypes[0], nil
 	}
 
@@ -532,7 +560,7 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 	}
 
 	c.info.ResolvedCalls[expr] = sig
-	c.info.ExprTypes[expr] = sig.ReturnType
+	c.setExpr(expr, sig.ReturnType, originForCallResult(sig.ReturnType))
 	return sig.ReturnType, nil
 }
 
@@ -601,15 +629,67 @@ func isMutableCollection(typ ast.Type) bool {
 	return ok
 }
 
-func (c *checker) exprBorrows(locals *scope, expr ast.Expression) bool {
-	switch expr := expr.(type) {
-	case *ast.IdentExpr:
-		local, ok := locals.lookup(expr.Name)
-		return ok && local.borrowed
-	case *ast.SliceExpr:
-		return c.exprBorrows(locals, expr.Collection)
+func cloneableType(typ ast.Type) bool {
+	return ast.TypeEqual(typ, ast.StringType) || isMutableCollection(typ)
+}
+
+func dynamicType(typ ast.Type) bool {
+	return ast.TypeEqual(typ, ast.StringType) || isMutableCollection(typ)
+}
+
+func originForParam(typ ast.Type) Origin {
+	if dynamicType(typ) {
+		return OriginBorrowed
+	}
+	return OriginOwned
+}
+
+func originForCallResult(typ ast.Type) Origin {
+	if dynamicType(typ) {
+		return OriginUnknown
+	}
+	return OriginOwned
+}
+
+func binaryOrigin(operator string, typ ast.Type) Origin {
+	if operator == "+" && ast.TypeEqual(typ, ast.StringType) {
+		return OriginScratch
+	}
+	return OriginOwned
+}
+
+func indexOrigin(collectionType ast.Type, collectionOrigin Origin) Origin {
+	if ast.TypeEqual(collectionType, ast.StringType) {
+		return collectionOrigin
+	}
+	elemType, ok := ast.ElementType(collectionType)
+	if ok && ast.TypeEqual(elemType, ast.StringType) {
+		return collectionOrigin
+	}
+	return OriginOwned
+}
+
+func (c *checker) setExpr(expr ast.Expression, typ ast.Type, origin Origin) {
+	c.info.ExprTypes[expr] = typ
+	c.info.ExprOrigins[expr] = origin
+}
+
+func (c *checker) exprOrigin(expr ast.Expression) Origin {
+	origin, ok := c.info.ExprOrigins[expr]
+	if !ok {
+		return OriginUnknown
+	}
+	return origin
+}
+
+func (c *checker) checkCanMutate(expr ast.Expression) error {
+	switch c.exprOrigin(expr) {
+	case OriginBorrowed:
+		return typeError(expr.Pos(), "cannot mutate parameter-owned collection")
+	case OriginUnknown:
+		return typeError(expr.Pos(), "cannot mutate collection with unknown ownership")
 	default:
-		return false
+		return nil
 	}
 }
 

@@ -274,6 +274,15 @@ static RT_UNUSED rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_
     return (rt_string){data, len};
 }
 
+static RT_UNUSED rt_string rt_string_clone(rt_arena* arena, rt_string value) {
+    if (value.len == 0) {
+        return (rt_string){NULL, 0};
+    }
+    uint8_t* data = rt_arena_alloc(arena, value.len);
+    memcpy(data, value.data, value.len);
+    return (rt_string){data, value.len};
+}
+
 static RT_UNUSED rt_string rt_string_index(rt_string value, int64_t index) {
     size_t checked = rt_check_index(value.len, index);
     return (rt_string){value.data + checked, 1};
@@ -311,6 +320,11 @@ static RT_UNUSED bool rt_string_contains(rt_string needle, rt_string haystack) {
     return false;
 }
 
+#define RT_CLONE_VALUE_int(ARENA, VALUE) (VALUE)
+#define RT_CLONE_VALUE_float(ARENA, VALUE) (VALUE)
+#define RT_CLONE_VALUE_bool(ARENA, VALUE) (VALUE)
+#define RT_CLONE_VALUE_string(ARENA, VALUE) rt_string_clone((ARENA), (VALUE))
+
 #define RT_DEFINE_COLLECTIONS(NAME, CTYPE) \
 typedef struct { \
     CTYPE* data; \
@@ -332,10 +346,24 @@ static RT_UNUSED rt_array_##NAME rt_array_##NAME##_from_values(rt_arena* arena, 
     } \
     return (rt_array_##NAME){data, len}; \
 } \
+static RT_UNUSED rt_array_##NAME rt_array_##NAME##_clone(rt_arena* arena, rt_array_##NAME value) { \
+    CTYPE* data = rt_arena_alloc_count(arena, value.len, sizeof(CTYPE), false); \
+    for (size_t i = 0; i < value.len; i++) { \
+        data[i] = RT_CLONE_VALUE_##NAME(arena, value.data[i]); \
+    } \
+    return (rt_array_##NAME){data, value.len}; \
+} \
 static RT_UNUSED rt_slice_##NAME rt_make_slice_##NAME(rt_arena* arena, int64_t count) { \
     size_t len = rt_checked_count(count, "slice length"); \
     CTYPE* data = rt_arena_alloc_count(arena, len, sizeof(CTYPE), true); \
     return (rt_slice_##NAME){data, len}; \
+} \
+static RT_UNUSED rt_slice_##NAME rt_slice_##NAME##_clone(rt_arena* arena, rt_slice_##NAME value) { \
+    CTYPE* data = rt_arena_alloc_count(arena, value.len, sizeof(CTYPE), false); \
+    for (size_t i = 0; i < value.len; i++) { \
+        data[i] = RT_CLONE_VALUE_##NAME(arena, value.data[i]); \
+    } \
+    return (rt_slice_##NAME){data, value.len}; \
 } \
 static RT_UNUSED CTYPE rt_array_##NAME##_get(rt_array_##NAME value, int64_t index) { \
     return value.data[rt_check_index(value.len, index)]; \
@@ -399,6 +427,14 @@ static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_from_values(rt_arena* arena, c
         memcpy(list->data, values, len * sizeof(CTYPE)); \
     } \
     list->len = len; \
+    return list; \
+} \
+static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_clone(rt_arena* arena, rt_list_##NAME* value) { \
+    rt_list_##NAME* list = rt_list_##NAME##_new(arena, value->len); \
+    for (size_t i = 0; i < value->len; i++) { \
+        list->data[i] = RT_CLONE_VALUE_##NAME(arena, value->data[i]); \
+    } \
+    list->len = value->len; \
     return list; \
 } \
 static RT_UNUSED void rt_list_##NAME##_append(rt_list_##NAME* list, CTYPE elem) { \

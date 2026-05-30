@@ -179,6 +179,10 @@ func TestRunFileCompilesAndExecutesV3Examples(t *testing.T) {
 			path: "../../examples/v3/lists.tx",
 			want: "2 2\n3 2 3\n8 2\n",
 		},
+		{
+			path: "../../examples/v3/ownership_clone.tx",
+			want: "99 2\n20 30\n1 42\n7 9\nab cd 2\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -192,6 +196,65 @@ func TestRunFileCompilesAndExecutesV3Examples(t *testing.T) {
 				t.Fatalf("output = %q, want %q", out.String(), tt.want)
 			}
 		})
+	}
+}
+
+func TestRunFileCompilesAndExecutesPhase2Ownership(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func middle() []int {
+    let xs [3]int = [3]int{1, 2, 3}
+    return xs[1:2]
+}
+
+func build() list[string] {
+    let xs list[string] = list[string]{}
+    append(xs, "a" + "b")
+    return xs
+}
+
+func mid(xs []int) []int {
+    return xs[1:2]
+}
+
+func midOwned(xs []int) []int {
+    return clone(xs[1:2])
+}
+
+func ownedLocal() []int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let ys []int = clone(xs[:])
+    return ys
+}
+
+func main() int {
+    let local []int = middle()
+    print(local[0])
+
+    let words list[string] = build()
+    print(words[0], " ", len(words))
+
+    let xs [3]int = [3]int{1, 2, 3}
+    let borrowed []int = mid(xs[:])
+    let owned []int = midOwned(xs[:])
+    xs[1] = 9
+    print(borrowed[0], " ", owned[0])
+
+    let durable []int = ownedLocal()
+    print(durable[0], " ", durable[2])
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "2\nab 1\n9 2\n1 3\n"
+	if out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
 	}
 }
 

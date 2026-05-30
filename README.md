@@ -35,6 +35,7 @@ The compiler currently supports:
 - string concatenation with `+`
 - fixed arrays `[N]T`, slices `[]T`, and mutable lists `list[T]` for scalar element types
 - array and list literals, `make([]T, n)`, `len(x)`, indexing, slicing, list `append`, and indexed assignment
+- explicit `clone(x)` for owned copies of strings, arrays, slices, and lists
 - typed IR
 - C code generation and execution through `cc` or `$CC`
 - `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
@@ -120,7 +121,7 @@ trux 1 false
 false
 ```
 
-More examples live in [examples/](examples/).
+More examples live in [examples/](examples/). For the Phase 2 ownership lifecycle and `clone`, start with [examples/v3/ownership_clone.tx](examples/v3/ownership_clone.tx).
 
 ## Commands
 

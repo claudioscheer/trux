@@ -8,6 +8,7 @@ import (
 	"github.com/claudioscheer/trux/internal/ast"
 	"github.com/claudioscheer/trux/internal/ir"
 	runtimec "github.com/claudioscheer/trux/internal/runtime/c"
+	semtypes "github.com/claudioscheer/trux/internal/types"
 )
 
 const (
@@ -60,10 +61,9 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func) error {
 		return err
 	}
 	fmt.Fprintln(out, " {")
-	stringLocalTargets := collectStringLocalTargets(fn)
 	fmt.Fprintln(out, "    rt_arena_mark trux_temp_mark = rt_arena_mark_current(trux_ctx->temp);")
 	for _, stmt := range fn.Body {
-		if err := emitStmt(out, stmt, 1, stringLocalTargets); err != nil {
+		if err := emitStmt(out, stmt, 1); err != nil {
 			return err
 		}
 	}
@@ -95,7 +95,7 @@ func emitSignature(out *bytes.Buffer, fn *ir.Func, prototype bool) error {
 	return nil
 }
 
-func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, stringLocalTargets map[string]string) error {
+func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 	indent := strings.Repeat("    ", level)
 	switch stmt := stmt.(type) {
 	case *ir.LetStmt:
@@ -104,10 +104,8 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, stringLocalTargets map
 			return err
 		}
 		targetArena := tempArena
-		if ast.TypeEqual(stmt.Type, ast.StringType) {
-			if target, ok := stringLocalTargets[stmt.Name]; ok {
-				targetArena = target
-			}
+		if _, ok := stmt.Value.(*ir.CloneExpr); ok {
+			targetArena = durableArena
 		}
 		value, err := emitExpr(stmt.Value, targetArena)
 		if err != nil {
@@ -116,12 +114,20 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, stringLocalTargets map
 		fmt.Fprintf(out, "%s%s %s = %s;\n", indent, typ, mangleIdent(stmt.Name), value)
 	case *ir.ReturnStmt:
 		targetArena := tempArena
-		if ast.TypeEqual(stmt.Value.Type(), ast.StringType) {
+		if _, ok := stmt.Value.(*ir.CloneExpr); ok {
+			targetArena = resultArena
+		} else if ast.TypeEqual(stmt.Value.Type(), ast.StringType) && !needsReturnCopyOut(stmt.Value) {
 			targetArena = resultArena
 		}
 		value, err := emitExpr(stmt.Value, targetArena)
 		if err != nil {
 			return err
+		}
+		if needsReturnCopyOut(stmt.Value) {
+			value, err = emitClone(stmt.Value.Type(), resultArena, value)
+			if err != nil {
+				return err
+			}
 		}
 		typ, err := emitType(stmt.Value.Type())
 		if err != nil {
@@ -134,10 +140,8 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, stringLocalTargets map
 		fmt.Fprintf(out, "%sreturn trux_return_value;\n", indent)
 	case *ir.AssignStmt:
 		targetArena := tempArena
-		if ast.TypeEqual(stmt.Value.Type(), ast.StringType) {
-			if target, ok := stringLocalTargets[stmt.Name]; ok {
-				targetArena = target
-			}
+		if _, ok := stmt.Value.(*ir.CloneExpr); ok {
+			targetArena = durableArena
 		}
 		value, err := emitExpr(stmt.Value, targetArena)
 		if err != nil {
@@ -153,7 +157,8 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, stringLocalTargets map
 		if err != nil {
 			return err
 		}
-		value, err := emitExpr(stmt.Value, durableArena)
+		valueArena := collectionValueArena(stmt.Target.Collection)
+		value, err := emitExpr(stmt.Value, valueArena)
 		if err != nil {
 			return err
 		}
@@ -168,7 +173,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, stringLocalTargets map
 			return err
 		}
 		fmt.Fprintf(out, "%sif (%s) {\n", indent, condition)
-		if err := emitStmts(out, stmt.Then, level+1, stringLocalTargets); err != nil {
+		if err := emitStmts(out, stmt.Then, level+1); err != nil {
 			return err
 		}
 		if len(stmt.Else) == 0 {
@@ -176,7 +181,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, stringLocalTargets map
 			break
 		}
 		fmt.Fprintf(out, "%s} else {\n", indent)
-		if err := emitStmts(out, stmt.Else, level+1, stringLocalTargets); err != nil {
+		if err := emitStmts(out, stmt.Else, level+1); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%s}\n", indent)
@@ -186,7 +191,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, stringLocalTargets map
 			return err
 		}
 		fmt.Fprintf(out, "%swhile (%s) {\n", indent, condition)
-		if err := emitStmts(out, stmt.Body, level+1, stringLocalTargets); err != nil {
+		if err := emitStmts(out, stmt.Body, level+1); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%s}\n", indent)
@@ -218,7 +223,8 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, stringLocalTargets map
 		if err != nil {
 			return err
 		}
-		value, err := emitExpr(stmt.Value, durableArena)
+		valueArena := collectionValueArena(stmt.List)
+		value, err := emitExpr(stmt.Value, valueArena)
 		if err != nil {
 			return err
 		}
@@ -240,9 +246,9 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, stringLocalTargets map
 	return nil
 }
 
-func emitStmts(out *bytes.Buffer, stmts []ir.Stmt, level int, stringLocalTargets map[string]string) error {
+func emitStmts(out *bytes.Buffer, stmts []ir.Stmt, level int) error {
 	for _, stmt := range stmts {
-		if err := emitStmt(out, stmt, level, stringLocalTargets); err != nil {
+		if err := emitStmt(out, stmt, level); err != nil {
 			return err
 		}
 	}
@@ -250,153 +256,23 @@ func emitStmts(out *bytes.Buffer, stmts []ir.Stmt, level int, stringLocalTargets
 	return nil
 }
 
-func collectStringLocalTargets(fn *ir.Func) map[string]string {
-	targets := map[string]string{}
-	changed := true
-	for changed {
-		changed = markStringLocalTargets(fn.Body, targets)
+func needsReturnCopyOut(expr ir.Expr) bool {
+	if !isDynamicType(expr.Type()) {
+		return false
 	}
-
-	return targets
-}
-
-func markStringLocalTargets(stmts []ir.Stmt, targets map[string]string) bool {
-	changed := false
-	for _, stmt := range stmts {
-		switch stmt := stmt.(type) {
-		case *ir.LetStmt:
-			changed = markDurableCollectionStringElements(stmt.Value, targets) || changed
-			if target, ok := targets[stmt.Name]; ok {
-				changed = markEscapingStringExpr(stmt.Value, targets, target) || changed
-			}
-		case *ir.AssignStmt:
-			changed = markDurableCollectionStringElements(stmt.Value, targets) || changed
-			if target, ok := targets[stmt.Name]; ok {
-				changed = markEscapingStringExpr(stmt.Value, targets, target) || changed
-			}
-		case *ir.ReturnStmt:
-			changed = markDurableCollectionStringElements(stmt.Value, targets) || changed
-			if ast.TypeEqual(stmt.Value.Type(), ast.StringType) {
-				changed = markEscapingStringExpr(stmt.Value, targets, resultArena) || changed
-			}
-		case *ir.IndexAssignStmt:
-			changed = markDurableCollectionStringElements(stmt.Target, targets) || changed
-			changed = markDurableCollectionStringElements(stmt.Value, targets) || changed
-			if ast.TypeEqual(stmt.Value.Type(), ast.StringType) {
-				changed = markEscapingStringExpr(stmt.Value, targets, durableArena) || changed
-			}
-		case *ir.IfStmt:
-			changed = markDurableCollectionStringElements(stmt.Condition, targets) || changed
-			changed = markStringLocalTargets(stmt.Then, targets) || changed
-			changed = markStringLocalTargets(stmt.Else, targets) || changed
-		case *ir.WhileStmt:
-			changed = markDurableCollectionStringElements(stmt.Condition, targets) || changed
-			changed = markStringLocalTargets(stmt.Body, targets) || changed
-		case *ir.AppendStmt:
-			changed = markDurableCollectionStringElements(stmt.List, targets) || changed
-			changed = markDurableCollectionStringElements(stmt.Value, targets) || changed
-			if ast.TypeEqual(stmt.Value.Type(), ast.StringType) {
-				changed = markEscapingStringExpr(stmt.Value, targets, durableArena) || changed
-			}
-		case *ir.PrintStmt:
-			for _, arg := range stmt.Args {
-				changed = markDurableCollectionStringElements(arg, targets) || changed
-			}
-		case *ir.ExprStmt:
-			changed = markDurableCollectionStringElements(stmt.Expr, targets) || changed
-		}
-	}
-
-	return changed
-}
-
-func markDurableCollectionStringElements(expr ir.Expr, targets map[string]string) bool {
-	switch expr := expr.(type) {
-	case *ir.ArrayLiteral:
-		return markDurableValueArrayStringElements(expr.Elements, targets)
-	case *ir.ListLiteral:
-		return markDurableValueArrayStringElements(expr.Elements, targets)
-	case *ir.MakeExpr:
-		return markDurableCollectionStringElements(expr.Len, targets)
-	case *ir.CallExpr:
-		changed := false
-		for _, arg := range expr.Args {
-			if isCollectionType(expr.Type()) && ast.TypeEqual(arg.Type(), ast.StringType) {
-				changed = markEscapingStringExpr(arg, targets, durableArena) || changed
-			}
-			changed = markDurableCollectionStringElements(arg, targets) || changed
-		}
-		return changed
-	case *ir.BinaryExpr:
-		changed := markDurableCollectionStringElements(expr.Left, targets)
-		return markDurableCollectionStringElements(expr.Right, targets) || changed
-	case *ir.LenExpr:
-		return markDurableCollectionStringElements(expr.Value, targets)
-	case *ir.IndexExpr:
-		changed := markDurableCollectionStringElements(expr.Collection, targets)
-		return markDurableCollectionStringElements(expr.Index, targets) || changed
-	case *ir.SliceExpr:
-		changed := markDurableCollectionStringElements(expr.Collection, targets)
-		if expr.Start != nil {
-			changed = markDurableCollectionStringElements(expr.Start, targets) || changed
-		}
-		if expr.End != nil {
-			changed = markDurableCollectionStringElements(expr.End, targets) || changed
-		}
-		return changed
+	switch expr.Ownership() {
+	case semtypes.OriginScratch, semtypes.OriginUnknown:
+		return true
 	default:
 		return false
 	}
 }
 
-func markDurableValueArrayStringElements(elements []ir.Expr, targets map[string]string) bool {
-	changed := false
-	for _, elem := range elements {
-		if ast.TypeEqual(elem.Type(), ast.StringType) {
-			changed = markEscapingStringExpr(elem, targets, durableArena) || changed
-		}
-		changed = markDurableCollectionStringElements(elem, targets) || changed
+func collectionValueArena(collection ir.Expr) string {
+	if collection.Ownership() == semtypes.OriginOwned {
+		return durableArena
 	}
-	return changed
-}
-
-func markEscapingStringExpr(expr ir.Expr, targets map[string]string, target string) bool {
-	if !ast.TypeEqual(expr.Type(), ast.StringType) {
-		return false
-	}
-
-	switch expr := expr.(type) {
-	case *ir.IdentExpr:
-		return setStringLocalTarget(targets, expr.Name, target)
-	case *ir.CallExpr:
-		changed := false
-		for _, arg := range expr.Args {
-			changed = markEscapingStringExpr(arg, targets, target) || changed
-		}
-		return changed
-	case *ir.IndexExpr:
-		return markEscapingStringExpr(expr.Collection, targets, target)
-	case *ir.SliceExpr:
-		return markEscapingStringExpr(expr.Collection, targets, target)
-	case *ir.BinaryExpr:
-		if expr.Operator == "+" && ast.TypeEqual(expr.Left.Type(), ast.StringType) {
-			return false
-		}
-	}
-
-	return false
-}
-
-func setStringLocalTarget(targets map[string]string, name string, target string) bool {
-	current, exists := targets[name]
-	if exists && current == durableArena {
-		return false
-	}
-	if exists && current == target {
-		return false
-	}
-	targets[name] = target
-	return true
+	return tempArena
 }
 
 func emitCondition(expr ir.Expr) (string, error) {
@@ -430,7 +306,7 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("array literal has non-array type %s", expr.Type())
 		}
-		values, err := emitValueArray(arrayType.Elem, expr.Elements, durableArena)
+		values, err := emitValueArray(arrayType.Elem, expr.Elements, targetArena)
 		if err != nil {
 			return "", err
 		}
@@ -438,13 +314,13 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s(%s, %s, %d)", ctor, durableArena, values, len(expr.Elements)), nil
+		return fmt.Sprintf("%s(%s, %s, %d)", ctor, targetArena, values, len(expr.Elements)), nil
 	case *ir.ListLiteral:
 		listType, ok := expr.Type().(*ast.ListType)
 		if !ok {
 			return "", fmt.Errorf("list literal has non-list type %s", expr.Type())
 		}
-		values, err := emitValueArray(listType.Elem, expr.Elements, durableArena)
+		values, err := emitValueArray(listType.Elem, expr.Elements, targetArena)
 		if err != nil {
 			return "", err
 		}
@@ -452,7 +328,7 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s(%s, %s, %d)", ctor, durableArena, values, len(expr.Elements)), nil
+		return fmt.Sprintf("%s(%s, %s, %d)", ctor, targetArena, values, len(expr.Elements)), nil
 	case *ir.MakeExpr:
 		length, err := emitExpr(expr.Len, tempArena)
 		if err != nil {
@@ -462,20 +338,24 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s(%s, %s)", makeFn, durableArena, length), nil
+		return fmt.Sprintf("%s(%s, %s)", makeFn, targetArena, length), nil
+	case *ir.CloneExpr:
+		value, err := emitExpr(expr.Value, tempArena)
+		if err != nil {
+			return "", err
+		}
+		return emitClone(expr.Value.Type(), targetArena, value)
 	case *ir.CallExpr:
 		args := make([]string, 0, len(expr.Args)+1)
 		callResultArena := durableArena
-		if ast.TypeEqual(expr.Type(), ast.StringType) {
+		if isDynamicType(expr.Type()) {
 			callResultArena = targetArena
 		}
 		args = append(args, "trux_ctx", callResultArena)
 		for _, arg := range expr.Args {
 			argArena := tempArena
-			if ast.TypeEqual(expr.Type(), ast.StringType) && ast.TypeEqual(arg.Type(), ast.StringType) {
+			if isDynamicType(expr.Type()) && ast.TypeEqual(arg.Type(), ast.StringType) {
 				argArena = callResultArena
-			} else if isCollectionType(expr.Type()) && ast.TypeEqual(arg.Type(), ast.StringType) {
-				argArena = durableArena
 			}
 			emitArg, err := emitExpr(arg, argArena)
 			if err != nil {
@@ -634,6 +514,14 @@ func emitValueArray(elemType ast.Type, elements []ir.Expr, targetArena string) (
 	return fmt.Sprintf("(%s[]){%s}", cType, strings.Join(values, ", ")), nil
 }
 
+func emitClone(typ ast.Type, targetArena string, value string) (string, error) {
+	cloneFn, err := cloneHelper(typ)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s(%s, %s)", cloneFn, targetArena, value), nil
+}
+
 func emitOptionalBound(expr ir.Expr) (string, string, error) {
 	if expr == nil {
 		return "false", "0", nil
@@ -648,6 +536,10 @@ func emitOptionalBound(expr ir.Expr) (string, string, error) {
 func isCollectionType(typ ast.Type) bool {
 	_, ok := ast.ElementType(typ)
 	return ok
+}
+
+func isDynamicType(typ ast.Type) bool {
+	return ast.TypeEqual(typ, ast.StringType) || isCollectionType(typ)
 }
 
 func collectionHelper(op string, typ ast.Type) (string, error) {
@@ -693,6 +585,16 @@ func sliceMakeHelper(typ ast.Type) (string, error) {
 		return "", err
 	}
 	return "rt_make_slice_" + name, nil
+}
+
+func cloneHelper(typ ast.Type) (string, error) {
+	if ast.TypeEqual(typ, ast.StringType) {
+		return "rt_string_clone", nil
+	}
+	if isCollectionType(typ) {
+		return collectionHelper("clone", typ)
+	}
+	return "", fmt.Errorf("clone does not support %s", typ)
 }
 
 func elemRuntimeName(typ ast.Type) (string, error) {

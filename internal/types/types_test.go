@@ -279,6 +279,74 @@ func main() int {
 	}
 }
 
+func TestCheckAllowsCloneForDynamicValues(t *testing.T) {
+	program := mustParse(t, `package main
+func id(xs []int) []int {
+    return xs
+}
+func main() int {
+    let name string = clone("trux")
+    let xs [3]int = [3]int{1, 2, 3}
+    let ys []int = clone(xs[:])
+    let zs []int = clone(id(xs[:]))
+    let items list[string] = clone(list[string]{name})
+    ys[0] = 9
+    zs[0] = 8
+    append(items, "x")
+    return ys[0]
+}`)
+
+	info, err := Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainFn := program.Functions[1]
+	nameClone := mainFn.Body.Statements[0].(*ast.LetStmt).Value.(*ast.CallExpr)
+	if !ast.TypeEqual(info.CloneCalls[nameClone].Type, ast.StringType) {
+		t.Fatalf("clone type = %s, want string", info.CloneCalls[nameClone].Type)
+	}
+	sliceClone := mainFn.Body.Statements[2].(*ast.LetStmt).Value.(*ast.CallExpr)
+	if !ast.TypeEqual(info.CloneCalls[sliceClone].Type, &ast.SliceType{Elem: ast.IntType}) {
+		t.Fatalf("slice clone type = %s, want []int", info.CloneCalls[sliceClone].Type)
+	}
+}
+
+func TestCheckRejectsUnsupportedClone(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    return clone(1)
+}`)
+
+	_, err := Check(program)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "clone does not support int") {
+		t.Fatalf("error = %q, want unsupported clone", err.Error())
+	}
+}
+
+func TestCheckRejectsUnknownOwnershipMutation(t *testing.T) {
+	program := mustParse(t, `package main
+func id(xs []int) []int {
+    return xs
+}
+func main() int {
+    let xs [2]int = [2]int{1, 2}
+    let ys []int = id(xs[:])
+    ys[0] = 9
+    return ys[0]
+}`)
+
+	_, err := Check(program)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot mutate collection with unknown ownership") {
+		t.Fatalf("error = %q, want unknown ownership mutation error", err.Error())
+	}
+}
+
 func TestCheckRejectsBlockLocalEscape(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

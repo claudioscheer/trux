@@ -95,78 +95,103 @@ func (*ExprStmt) stmtNode() {}
 
 type Expr interface {
 	Type() ast.Type
+	Ownership() types.Origin
 	exprNode()
 }
 
 type IdentExpr struct {
-	Name string
-	Typ  ast.Type
+	Name   string
+	Typ    ast.Type
+	Origin types.Origin
 }
 
 func (e *IdentExpr) Type() ast.Type { return e.Typ }
 
+func (e *IdentExpr) Ownership() types.Origin { return e.Origin }
+
 func (*IdentExpr) exprNode() {}
 
 type IntLiteral struct {
-	Value string
-	Typ   ast.Type
+	Value  string
+	Typ    ast.Type
+	Origin types.Origin
 }
 
 func (e *IntLiteral) Type() ast.Type { return e.Typ }
 
+func (e *IntLiteral) Ownership() types.Origin { return e.Origin }
+
 func (*IntLiteral) exprNode() {}
 
 type FloatLiteral struct {
-	Value string
-	Typ   ast.Type
+	Value  string
+	Typ    ast.Type
+	Origin types.Origin
 }
 
 func (e *FloatLiteral) Type() ast.Type { return e.Typ }
 
+func (e *FloatLiteral) Ownership() types.Origin { return e.Origin }
+
 func (*FloatLiteral) exprNode() {}
 
 type StringLiteral struct {
-	Value string
-	Typ   ast.Type
+	Value  string
+	Typ    ast.Type
+	Origin types.Origin
 }
 
 func (e *StringLiteral) Type() ast.Type { return e.Typ }
 
+func (e *StringLiteral) Ownership() types.Origin { return e.Origin }
+
 func (*StringLiteral) exprNode() {}
 
 type BoolLiteral struct {
-	Value bool
-	Typ   ast.Type
+	Value  bool
+	Typ    ast.Type
+	Origin types.Origin
 }
 
 func (e *BoolLiteral) Type() ast.Type { return e.Typ }
+
+func (e *BoolLiteral) Ownership() types.Origin { return e.Origin }
 
 func (*BoolLiteral) exprNode() {}
 
 type ArrayLiteral struct {
 	Elements []Expr
 	Typ      ast.Type
+	Origin   types.Origin
 }
 
 func (e *ArrayLiteral) Type() ast.Type { return e.Typ }
+
+func (e *ArrayLiteral) Ownership() types.Origin { return e.Origin }
 
 func (*ArrayLiteral) exprNode() {}
 
 type ListLiteral struct {
 	Elements []Expr
 	Typ      ast.Type
+	Origin   types.Origin
 }
 
 func (e *ListLiteral) Type() ast.Type { return e.Typ }
 
+func (e *ListLiteral) Ownership() types.Origin { return e.Origin }
+
 func (*ListLiteral) exprNode() {}
 
 type MakeExpr struct {
-	Len Expr
-	Typ ast.Type
+	Len    Expr
+	Typ    ast.Type
+	Origin types.Origin
 }
 
 func (e *MakeExpr) Type() ast.Type { return e.Typ }
+
+func (e *MakeExpr) Ownership() types.Origin { return e.Origin }
 
 func (*MakeExpr) exprNode() {}
 
@@ -174,29 +199,50 @@ type CallExpr struct {
 	Callee     string
 	ReturnType ast.Type
 	Args       []Expr
+	Origin     types.Origin
 }
 
 func (e *CallExpr) Type() ast.Type { return e.ReturnType }
 
+func (e *CallExpr) Ownership() types.Origin { return e.Origin }
+
 func (*CallExpr) exprNode() {}
+
+type CloneExpr struct {
+	Value  Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *CloneExpr) Type() ast.Type { return e.Typ }
+
+func (e *CloneExpr) Ownership() types.Origin { return e.Origin }
+
+func (*CloneExpr) exprNode() {}
 
 type BinaryExpr struct {
 	Left     Expr
 	Operator string
 	Right    Expr
 	Typ      ast.Type
+	Origin   types.Origin
 }
 
 func (e *BinaryExpr) Type() ast.Type { return e.Typ }
 
+func (e *BinaryExpr) Ownership() types.Origin { return e.Origin }
+
 func (*BinaryExpr) exprNode() {}
 
 type LenExpr struct {
-	Value Expr
-	Typ   ast.Type
+	Value  Expr
+	Typ    ast.Type
+	Origin types.Origin
 }
 
 func (e *LenExpr) Type() ast.Type { return e.Typ }
+
+func (e *LenExpr) Ownership() types.Origin { return e.Origin }
 
 func (*LenExpr) exprNode() {}
 
@@ -204,9 +250,12 @@ type IndexExpr struct {
 	Collection Expr
 	Index      Expr
 	Typ        ast.Type
+	Origin     types.Origin
 }
 
 func (e *IndexExpr) Type() ast.Type { return e.Typ }
+
+func (e *IndexExpr) Ownership() types.Origin { return e.Origin }
 
 func (*IndexExpr) exprNode() {}
 
@@ -215,9 +264,12 @@ type SliceExpr struct {
 	Start      Expr
 	End        Expr
 	Typ        ast.Type
+	Origin     types.Origin
 }
 
 func (e *SliceExpr) Type() ast.Type { return e.Typ }
+
+func (e *SliceExpr) Ownership() types.Origin { return e.Origin }
 
 func (*SliceExpr) exprNode() {}
 
@@ -352,43 +404,54 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 	if !ok {
 		return nil, fmt.Errorf("missing type for AST expression %T", expr)
 	}
+	origin, ok := b.info.ExprOrigins[expr]
+	if !ok {
+		origin = types.OriginUnknown
+	}
 
 	switch expr := expr.(type) {
 	case *ast.IntLiteral:
-		return &IntLiteral{Value: expr.Value, Typ: typ}, nil
+		return &IntLiteral{Value: expr.Value, Typ: typ, Origin: origin}, nil
 	case *ast.FloatLiteral:
-		return &FloatLiteral{Value: expr.Value, Typ: typ}, nil
+		return &FloatLiteral{Value: expr.Value, Typ: typ, Origin: origin}, nil
 	case *ast.StringLiteral:
-		return &StringLiteral{Value: expr.Value, Typ: typ}, nil
+		return &StringLiteral{Value: expr.Value, Typ: typ, Origin: origin}, nil
 	case *ast.BoolLiteral:
-		return &BoolLiteral{Value: expr.Value, Typ: typ}, nil
+		return &BoolLiteral{Value: expr.Value, Typ: typ, Origin: origin}, nil
 	case *ast.ArrayLiteral:
 		elements, err := b.buildExprs(expr.Elements)
 		if err != nil {
 			return nil, err
 		}
-		return &ArrayLiteral{Elements: elements, Typ: typ}, nil
+		return &ArrayLiteral{Elements: elements, Typ: typ, Origin: origin}, nil
 	case *ast.ListLiteral:
 		elements, err := b.buildExprs(expr.Elements)
 		if err != nil {
 			return nil, err
 		}
-		return &ListLiteral{Elements: elements, Typ: typ}, nil
+		return &ListLiteral{Elements: elements, Typ: typ, Origin: origin}, nil
 	case *ast.MakeExpr:
 		length, err := b.buildExpr(expr.Len)
 		if err != nil {
 			return nil, err
 		}
-		return &MakeExpr{Len: length, Typ: typ}, nil
+		return &MakeExpr{Len: length, Typ: typ, Origin: origin}, nil
 	case *ast.IdentExpr:
-		return &IdentExpr{Name: expr.Name, Typ: typ}, nil
+		return &IdentExpr{Name: expr.Name, Typ: typ, Origin: origin}, nil
 	case *ast.CallExpr:
+		if _, ok := b.info.CloneCalls[expr]; ok {
+			arg, err := b.buildExpr(expr.Args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &CloneExpr{Value: arg, Typ: typ, Origin: origin}, nil
+		}
 		if _, ok := b.info.LenCalls[expr]; ok {
 			arg, err := b.buildExpr(expr.Args[0])
 			if err != nil {
 				return nil, err
 			}
-			return &LenExpr{Value: arg, Typ: typ}, nil
+			return &LenExpr{Value: arg, Typ: typ, Origin: origin}, nil
 		}
 		sig, ok := b.info.ResolvedCalls[expr]
 		if !ok {
@@ -398,7 +461,7 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &CallExpr{Callee: sig.Name, ReturnType: sig.ReturnType, Args: args}, nil
+		return &CallExpr{Callee: sig.Name, ReturnType: sig.ReturnType, Args: args, Origin: origin}, nil
 	case *ast.BinaryExpr:
 		left, err := b.buildExpr(expr.Left)
 		if err != nil {
@@ -408,7 +471,7 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &BinaryExpr{Left: left, Operator: expr.Operator, Right: right, Typ: typ}, nil
+		return &BinaryExpr{Left: left, Operator: expr.Operator, Right: right, Typ: typ, Origin: origin}, nil
 	case *ast.IndexExpr:
 		collection, err := b.buildExpr(expr.Collection)
 		if err != nil {
@@ -418,7 +481,7 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &IndexExpr{Collection: collection, Index: index, Typ: typ}, nil
+		return &IndexExpr{Collection: collection, Index: index, Typ: typ, Origin: origin}, nil
 	case *ast.SliceExpr:
 		collection, err := b.buildExpr(expr.Collection)
 		if err != nil {
@@ -438,7 +501,7 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 				return nil, err
 			}
 		}
-		return &SliceExpr{Collection: collection, Start: start, End: end, Typ: typ}, nil
+		return &SliceExpr{Collection: collection, Start: start, End: end, Typ: typ, Origin: origin}, nil
 	default:
 		return nil, fmt.Errorf("unsupported AST expression %T", expr)
 	}

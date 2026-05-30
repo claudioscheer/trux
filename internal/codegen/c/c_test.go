@@ -222,7 +222,7 @@ func main() int {
 	wantParts := []string{
 		"static RT_UNUSED rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_string right)",
 		"rt_string trux_greet(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
-		"rt_string trux_return_value = rt_string_concat(trux_result_arena, (rt_string){(const uint8_t*)\"hello \", 6}, trux_v_4_name);",
+		"rt_string trux_return_value = rt_string_clone(trux_result_arena, rt_string_concat(trux_ctx->temp, (rt_string){(const uint8_t*)\"hello \", 6}, trux_v_4_name));",
 		"rt_string trux_v_4_name = trux_greet(trux_ctx, trux_ctx->temp, (rt_string){(const uint8_t*)\"trux\", 4});",
 		"rt_print_string(rt_string_concat(trux_ctx->temp, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1}));",
 	}
@@ -264,8 +264,8 @@ func main() int {
 
 	wantParts := []string{
 		"rt_string trux_bang(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
-		"rt_string trux_v_1_s = rt_string_concat(trux_result_arena, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
-		"rt_string trux_return_value = trux_v_1_s;",
+		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->temp, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_string trux_return_value = rt_string_clone(trux_result_arena, trux_v_1_s);",
 		"if (trux_result_arena != trux_ctx->temp) {",
 		"rt_print_string(trux_bang(trux_ctx, trux_ctx->temp, (rt_string){(const uint8_t*)\"a\", 1}));",
 		"rt_print_string(trux_bang(trux_ctx, trux_ctx->temp, (rt_string){(const uint8_t*)\"b\", 1}));",
@@ -274,9 +274,6 @@ func main() int {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
-	}
-	if strings.Contains(cSource, "rt_string_clone") {
-		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
 	}
 }
 
@@ -316,9 +313,6 @@ func main() int {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
 	}
-	if strings.Contains(cSource, "rt_string_clone") {
-		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
-	}
 }
 
 func TestGenerateAllocatesStringLocalUsedByReturnedCallInResultArena(t *testing.T) {
@@ -354,20 +348,17 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"rt_string trux_v_1_s = rt_string_concat(trux_result_arena, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
-		"rt_string trux_return_value = trux_id(trux_ctx, trux_result_arena, trux_v_1_s);",
+		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->temp, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_string trux_return_value = rt_string_clone(trux_result_arena, trux_id(trux_ctx, trux_ctx->temp, trux_v_1_s));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
 	}
-	if strings.Contains(cSource, "rt_string_clone") {
-		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
-	}
 }
 
-func TestGenerateAllocatesStringLocalStoredInCollectionInDurableArena(t *testing.T) {
+func TestGenerateAllocatesStringLocalStoredInScratchCollectionInTempArena(t *testing.T) {
 	program, err := parser.Parse(`package main
 func stash(name string) string {
     let items list[string] = list[string]{}
@@ -398,8 +389,8 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"rt_list_string* trux_v_5_items = rt_list_string_from_values(trux_ctx->arena, NULL, 0);",
-		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->arena, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_list_string* trux_v_5_items = rt_list_string_from_values(trux_ctx->temp, NULL, 0);",
+		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->temp, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
 		"rt_list_string_append(trux_v_5_items, trux_v_1_s);",
 		"rt_print_string(trux_stash(trux_ctx, trux_ctx->temp, (rt_string){(const uint8_t*)\"x\", 1}));",
 	}
@@ -408,12 +399,9 @@ func main() int {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
 	}
-	if strings.Contains(cSource, "rt_string_clone") {
-		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
-	}
 }
 
-func TestGenerateAllocatesStringLocalUsedInCollectionLiteralInDurableArena(t *testing.T) {
+func TestGenerateAllocatesStringLocalUsedInScratchCollectionLiteralInTempArena(t *testing.T) {
 	program, err := parser.Parse(`package main
 func main() int {
     let s string = "a" + "!"
@@ -439,20 +427,17 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->arena, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"!\", 1});",
-		"rt_list_string* trux_v_5_items = rt_list_string_from_values(trux_ctx->arena, (rt_string[]){trux_v_1_s}, 1);",
+		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->temp, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_list_string* trux_v_5_items = rt_list_string_from_values(trux_ctx->temp, (rt_string[]){trux_v_1_s}, 1);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
 	}
-	if strings.Contains(cSource, "rt_string_clone") {
-		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
-	}
 }
 
-func TestGenerateAllocatesStringLocalPassedToCollectionReturningCallInDurableArena(t *testing.T) {
+func TestGenerateAllocatesStringLocalPassedToCollectionReturningCallInTempArena(t *testing.T) {
 	program, err := parser.Parse(`package main
 func wrap(s string) list[string] {
     return list[string]{s}
@@ -482,16 +467,13 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->arena, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"!\", 1});",
-		"rt_list_string* trux_v_5_items = trux_wrap(trux_ctx, trux_ctx->arena, trux_v_1_s);",
+		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->temp, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_list_string* trux_v_5_items = trux_wrap(trux_ctx, trux_ctx->temp, trux_v_1_s);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
-	}
-	if strings.Contains(cSource, "rt_string_clone") {
-		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
 	}
 }
 
@@ -527,17 +509,152 @@ func main() int {
 
 	wantParts := []string{
 		"RT_DEFINE_COLLECTIONS(int, int64_t)",
-		"rt_array_int trux_v_2_xs = rt_array_int_from_values(trux_ctx->arena, (int64_t[]){1, 2, 3}, 3);",
+		"rt_array_int trux_v_2_xs = rt_array_int_from_values(trux_ctx->temp, (int64_t[]){1, 2, 3}, 3);",
 		"rt_slice_int trux_v_4_view = rt_array_int_slice(trux_v_2_xs, true, 1, false, 0);",
 		"rt_slice_int_set(trux_v_4_view, 0, 9);",
-		"rt_list_int* trux_v_5_items = rt_list_int_from_values(trux_ctx->arena, (int64_t[]){rt_array_int_get(trux_v_2_xs, 1)}, 1);",
+		"rt_list_int* trux_v_5_items = rt_list_int_from_values(trux_ctx->temp, (int64_t[]){rt_array_int_get(trux_v_2_xs, 1)}, 1);",
 		"rt_list_int_append(trux_v_5_items, 4);",
-		"rt_slice_int trux_v_4_made = rt_make_slice_int(trux_ctx->arena, ((int64_t)trux_v_5_items->len));",
+		"rt_slice_int trux_v_4_made = rt_make_slice_int(trux_ctx->temp, ((int64_t)trux_v_5_items->len));",
 		"rt_slice_int_set(trux_v_4_made, 0, rt_list_int_get(trux_v_5_items, 1));",
 		"rt_print_int(rt_array_int_get(trux_v_2_xs, 1));",
 		"rt_print_string((rt_string){(const uint8_t*)\" \", 1});",
 		"rt_print_string(rt_string_index((rt_string){(const uint8_t*)\"abc\", 3}, 1));",
 		"rt_print_string(rt_string_slice((rt_string){(const uint8_t*)\"abcd\", 4}, true, 1, true, 3));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
+func mustGenerateC(t *testing.T, src string) string {
+	t.Helper()
+
+	program, err := parser.Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cSource
+}
+
+func TestGenerateCopiesScratchSliceReturnToResultArena(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func build() []int {
+    let xs [3]int = [3]int{1, 2, 3}
+    return xs[:]
+}
+
+func main() int {
+    let xs []int = build()
+    print(xs[0], " ", xs[2])
+    return 0
+}`)
+
+	wantParts := []string{
+		"rt_array_int trux_v_2_xs = rt_array_int_from_values(trux_ctx->temp, (int64_t[]){1, 2, 3}, 3);",
+		"rt_slice_int trux_return_value = rt_slice_int_clone(trux_result_arena, rt_array_int_slice(trux_v_2_xs, false, 0, false, 0));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
+func TestGenerateKeepsParameterSliceReturnBorrowed(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func mid(xs []int) []int {
+    return xs[1:2]
+}
+
+func main() int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let ys []int = mid(xs[:])
+    print(ys[0])
+    return 0
+}`)
+
+	want := "rt_slice_int trux_return_value = rt_slice_int_slice(trux_v_2_xs, true, 1, true, 2);"
+	if !strings.Contains(cSource, want) {
+		t.Fatalf("generated C missing borrowed return %q:\n%s", want, cSource)
+	}
+}
+
+func TestGenerateClonesParameterSliceWhenRequested(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func midOwned(xs []int) []int {
+    return clone(xs[1:2])
+}
+
+func main() int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let ys []int = midOwned(xs[:])
+    print(ys[0])
+    return 0
+}`)
+
+	want := "rt_slice_int trux_return_value = rt_slice_int_clone(trux_result_arena, rt_slice_int_slice(trux_v_2_xs, true, 1, true, 2));"
+	if !strings.Contains(cSource, want) {
+		t.Fatalf("generated C missing owned return %q:\n%s", want, cSource)
+	}
+}
+
+func TestGenerateLocalCloneUsesDurableArena(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func ownedLocal() []int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let ys []int = clone(xs[:])
+    return ys
+}
+
+func main() int {
+    let ys []int = ownedLocal()
+    print(ys[0], " ", ys[2])
+    return 0
+}`)
+
+	wantParts := []string{
+		"rt_slice_int trux_v_2_ys = rt_slice_int_clone(trux_ctx->arena, rt_array_int_slice(trux_v_2_xs, false, 0, false, 0));",
+		"rt_slice_int trux_return_value = trux_v_2_ys;",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
+func TestGenerateCopiesScratchStringListReturnToResultArena(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func build() list[string] {
+    let xs list[string] = list[string]{}
+    append(xs, "a" + "b")
+    return xs
+}
+
+func main() int {
+    let xs list[string] = build()
+    print(xs[0])
+    return 0
+}`)
+
+	wantParts := []string{
+		"rt_list_string* trux_v_2_xs = rt_list_string_from_values(trux_ctx->temp, NULL, 0);",
+		"rt_list_string_append(trux_v_2_xs, rt_string_concat(trux_ctx->temp, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"b\", 1}));",
+		"rt_list_string* trux_return_value = rt_list_string_clone(trux_result_arena, trux_v_2_xs);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {

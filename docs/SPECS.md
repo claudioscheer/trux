@@ -54,6 +54,7 @@ function calls
 integer literals
 + - * /
 print
+line comments (// ...)
 ```
 
 ## Example
@@ -566,6 +567,45 @@ Assigning or passing a list copies the handle. Mutating through any alias observ
 let scratch []int = make([]int, 10)
 ```
 
+Local array literals, list literals, and `make([]T, n)` allocate in function scratch memory. If scratch-backed collection data is returned, the generated function copies it into the caller-provided result arena before rewinding scratch memory:
+
+```go
+func build() []int {
+    let xs [3]int = [3]int{1, 2, 3}
+    return xs[:]
+}
+```
+
+Function returns are either borrowed or owned. Returning a parameter or a parameter-backed slice is borrowed by default:
+
+```go
+func mid(xs []int) []int {
+    return xs[1:2]
+}
+```
+
+Use `clone(x)` when an owned copy is required:
+
+```go
+func midOwned(xs []int) []int {
+    return clone(xs[1:2])
+}
+```
+
+`clone(x)` supports `string`, arrays, slices, and lists. It allocates into the selected ownership target for the expression context. In return context that target is the result arena. In local owned context it is `trux_ctx->arena`:
+
+```go
+func ownedLocal() []int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let ys []int = clone(xs[:])
+    return ys
+}
+```
+
+For collections containing strings, `clone` deep-copies each string element.
+
+See [examples/v3/ownership_clone.tx](../examples/v3/ownership_clone.tx) for an executable walkthrough of borrowed views, owned clones, scratch copy-out, and safe mutation through cloned parameter data.
+
 `len(x)` returns an `int` for strings, arrays, slices, and lists.
 
 Indexing works for strings, arrays, slices, and lists:
@@ -633,6 +673,7 @@ append with a non-list first argument
 append values with the wrong element type
 mutation of parameter-owned collections or aliases/views of them
 make with a non-slice type or non-int length
+clone with the wrong arity or unsupported type
 ```
 
 ---
@@ -711,7 +752,7 @@ runtime bounds traps
 
 Dynamic allocation uses arenas for strings, arrays, and slice backing storage. Lists are heap-backed shared handles tracked by the runtime owner and freed at program exit, arena reset, or arena rewind.
 
-Generated code uses a durable arena plus a compiler-managed temp arena. String temporaries may use the temp arena, while string return expressions allocate into the caller-provided result arena when allocation is needed. The compiler does not insert implicit clones. If `clone(x)` is added later, it should be an explicit source-level operation.
+Generated code uses a durable arena plus a compiler-managed temp arena. Local dynamic values may use temp memory. Function outputs are the only escape path: scratch-backed returns are copied into the caller-provided result arena, parameter-backed slice returns remain borrowed, and explicit `clone(x)` creates owned data in the selected ownership target.
 
 See [ARENAS.md](ARENAS.md) for the full rationale, tradeoffs, staged evolution plan, and why GC was deferred.
 

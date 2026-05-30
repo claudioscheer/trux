@@ -159,6 +159,85 @@ int main(void) {
     rt_arena_deinit(&arena);
     return 0;
 }
+	`)
+}
+
+func TestCollectionCloneCopiesScalarData(t *testing.T) {
+	compileAndRunRuntimeC(t, Source+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    rt_array_int source = rt_array_int_from_values(&arena, (int64_t[]){1, 2, 3}, 3);
+    rt_array_int cloned = rt_array_int_clone(&arena, source);
+    source.data[0] = 9;
+    if (cloned.len != 3 || cloned.data[0] != 1) {
+        fprintf(stderr, "array clone did not copy scalar data\n");
+        return 1;
+    }
+
+    rt_slice_int slice = rt_array_int_slice(source, true, 1, false, 0);
+    rt_slice_int cloned_slice = rt_slice_int_clone(&arena, slice);
+    slice.data[0] = 8;
+    if (cloned_slice.len != 2 || cloned_slice.data[0] != 2) {
+        fprintf(stderr, "slice clone did not copy scalar data\n");
+        return 1;
+    }
+
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`)
+}
+
+func TestStringCollectionCloneDeepCopiesElements(t *testing.T) {
+	compileAndRunRuntimeC(t, Source+`
+int main(void) {
+    rt_arena source_arena;
+    rt_arena target_arena;
+    rt_arena_init(&source_arena);
+    rt_arena_init(&target_arena);
+
+    rt_string source_string = rt_string_clone(&source_arena, (rt_string){(const uint8_t*)"ab", 2});
+    rt_array_string source = rt_array_string_from_values(&source_arena, (rt_string[]){source_string}, 1);
+    rt_array_string cloned = rt_array_string_clone(&target_arena, source);
+    if (cloned.data[0].data == source.data[0].data) {
+        fprintf(stderr, "string collection clone reused element storage\n");
+        return 1;
+    }
+
+    rt_arena_reset(&source_arena);
+    if (!rt_string_equal(cloned.data[0], (rt_string){(const uint8_t*)"ab", 2})) {
+        fprintf(stderr, "string collection clone did not preserve contents\n");
+        return 1;
+    }
+
+    rt_arena_deinit(&target_arena);
+    rt_arena_deinit(&source_arena);
+    return 0;
+}
+`)
+}
+
+func TestListCloneRegistersWithTargetArena(t *testing.T) {
+	compileAndRunRuntimeC(t, Source+`
+int main(void) {
+    rt_arena source_arena;
+    rt_arena target_arena;
+    rt_arena_init(&source_arena);
+    rt_arena_init(&target_arena);
+
+    rt_list_int* source = rt_list_int_from_values(&source_arena, (int64_t[]){1, 2}, 2);
+    rt_list_int* cloned = rt_list_int_clone(&target_arena, source);
+    if (target_arena.lists == NULL || target_arena.lists->list != cloned) {
+        fprintf(stderr, "list clone was not registered with target arena\n");
+        return 1;
+    }
+
+    rt_arena_deinit(&target_arena);
+    rt_arena_deinit(&source_arena);
+    return 0;
+}
 `)
 }
 

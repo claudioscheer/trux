@@ -252,6 +252,35 @@ func main() int {
 	}
 }
 
+func TestBuildCreatesTypedIRForClone(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let xs [2]int = [2]int{1, 2}
+    let ys []int = clone(xs[:])
+    print(ys[0])
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := irProgram.Functions[0]
+	cloneLet := mainFn.Body[1].(*LetStmt)
+	cloneExpr, ok := cloneLet.Value.(*CloneExpr)
+	if !ok {
+		t.Fatalf("clone let value = %T, want CloneExpr", cloneLet.Value)
+	}
+	if !ast.TypeEqual(cloneExpr.Type(), &ast.SliceType{Elem: ast.IntType}) {
+		t.Fatalf("clone type = %s, want []int", cloneExpr.Type())
+	}
+}
+
 func sameTypes(got []ast.Type, want []ast.Type) bool {
 	if len(got) != len(want) {
 		return false

@@ -204,6 +204,26 @@ func TestLexesV3CollectionTokens(t *testing.T) {
 	})
 }
 
+func TestSkipsLineComments(t *testing.T) {
+	assertTokens(t, Lex(`// file comment
+let x int = 4 // trailing comment
+let y int = x / 2`), []expectedToken{
+		{token.Let, "let"},
+		{token.Ident, "x"},
+		{token.IntType, "int"},
+		{token.Assign, "="},
+		{token.Int, "4"},
+		{token.Let, "let"},
+		{token.Ident, "y"},
+		{token.IntType, "int"},
+		{token.Assign, "="},
+		{token.Ident, "x"},
+		{token.Slash, "/"},
+		{token.Int, "2"},
+		{token.EOF, ""},
+	})
+}
+
 func TestLexesStringEscapes(t *testing.T) {
 	assertTokens(t, Lex(`"quote: \" slash: \\ tab:\t"`), []expectedToken{
 		{token.String, "quote: \" slash: \\ tab:\t"},

@@ -741,7 +741,7 @@ func collectFunctionReferencesInExpr(uri string, expr ast.Expression, name strin
 		collectFunctionReferencesInExpr(uri, expr.Len, name, locations)
 	case *ast.CallExpr:
 		if expr.Callee == name {
-			*locations = append(*locations, locationFor(uri, expr.Start, expr.Callee))
+			*locations = append(*locations, locationFor(uri, callCalleePosition(expr), expr.Callee))
 		}
 		for _, arg := range expr.Args {
 			collectFunctionReferencesInExpr(uri, arg, name, locations)
@@ -761,6 +761,18 @@ func collectFunctionReferencesInExpr(uri string, expr ast.Expression, name strin
 			collectFunctionReferencesInExpr(uri, expr.EndIndex, name, locations)
 		}
 	}
+}
+
+func callCalleePosition(expr *ast.CallExpr) token.Position {
+	pos := expr.Start
+	if expr.Package == "" {
+		return pos
+	}
+
+	offset := len(expr.Package) + 1
+	pos.Offset += offset
+	pos.Column += offset
+	return pos
 }
 
 func collectLocalReferences(graph *sourceGraph, def symbolDefinition, includeDeclaration bool) []Location {

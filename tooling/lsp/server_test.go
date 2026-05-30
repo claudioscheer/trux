@@ -51,7 +51,7 @@ func TestDiagnosticsTypeChecksImportedPrograms(t *testing.T) {
 import "math.tx"
 
 func main() int {
-    return add(1, 2)
+    return math.add(1, 2)
 }
 `
 	libSrc := `package math
@@ -82,7 +82,7 @@ func TestDiagnosticsForMissingImportedFunctionArguments(t *testing.T) {
 import "math.tx"
 
 func main() int {
-    print(add())
+    print(math.add())
     return 0
 }
 `
@@ -104,10 +104,10 @@ pub func add(a int, b int) int {
 	if len(diagnostics) != 1 {
 		t.Fatalf("diagnostic count = %d, want 1: %#v", len(diagnostics), diagnostics)
 	}
-	if diagnostics[0].Message != "add expects 2 arguments, got 0" {
+	if diagnostics[0].Message != "math.add expects 2 arguments, got 0" {
 		t.Fatalf("message = %q, want missing argument error", diagnostics[0].Message)
 	}
-	if diagnostics[0].Range.Start != positionOf(t, mainSrc, "add()") {
+	if diagnostics[0].Range.Start != positionOf(t, mainSrc, "math.add()") {
 		t.Fatalf("range start = %#v, want add call", diagnostics[0].Range.Start)
 	}
 }
@@ -122,7 +122,7 @@ func TestPublishDiagnosticsClearsWithEmptyArray(t *testing.T) {
 import "math.tx"
 
 func main() int {
-    print(add(3, 4))
+    print(math.add(3, 4))
     return 0
 }
 `
@@ -243,7 +243,7 @@ import "math.tx"
 import "shadow.tx"
 
 func main() int {
-    return add(1, 2)
+    return math.add(1, 2)
 }
 `
 	libSrc := `package math
@@ -275,7 +275,7 @@ pub func use() int {
 
 	result, err := server.handleDefinition(mustJSON(t, map[string]any{
 		"textDocument": map[string]any{"uri": mainURI},
-		"position":     positionOfAfter(t, mainSrc, "return ", "add"),
+		"position":     positionOfAfter(t, mainSrc, "math.", "add"),
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -383,7 +383,7 @@ import "math.tx"
 import "shadow.tx"
 
 func main() int {
-    return add(1, 2)
+    return math.add(1, 2)
 }
 `
 	libSrc := `package math
@@ -415,7 +415,7 @@ pub func use() int {
 
 	result, err := server.handleReferences(mustJSON(t, map[string]any{
 		"textDocument": map[string]any{"uri": mainURI},
-		"position":     positionOfAfter(t, mainSrc, "return ", "add"),
+		"position":     positionOfAfter(t, mainSrc, "math.", "add"),
 		"context":      map[string]any{"includeDeclaration": true},
 	}))
 	if err != nil {
@@ -427,7 +427,7 @@ pub func use() int {
 		t.Fatalf("reference count = %d, want 2: %#v", len(locations), locations)
 	}
 	assertLocation(t, locations[0], libURI, positionOf(t, libSrc, "add(a"), "add")
-	assertLocation(t, locations[1], mainURI, positionOfAfter(t, mainSrc, "return ", "add"), "add")
+	assertLocation(t, locations[1], mainURI, positionOfAfter(t, mainSrc, "math.", "add"), "add")
 }
 
 func TestCompletionIncludesVisibleSymbols(t *testing.T) {
@@ -555,7 +555,7 @@ func TestHoverReturnsImportedFunctionSignature(t *testing.T) {
 import "math.tx"
 
 func main() int {
-    return add(1, 2)
+    return math.add(1, 2)
 }
 `
 	libSrc := `package math
@@ -574,7 +574,7 @@ pub func add(a int, b int) int {
 
 	result, err := server.handleHover(mustJSON(t, map[string]any{
 		"textDocument": map[string]any{"uri": mainURI},
-		"position":     positionOfAfter(t, mainSrc, "return ", "add"),
+		"position":     positionOfAfter(t, mainSrc, "math.", "add"),
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -584,7 +584,7 @@ pub func add(a int, b int) int {
 	if hover.Contents.Value != "`pub func add(a int, b int) int`" {
 		t.Fatalf("hover = %#v, want imported function signature", hover)
 	}
-	assertRange(t, hover.Range, positionOfAfter(t, mainSrc, "return ", "add"), "add")
+	assertRange(t, hover.Range, positionOfAfter(t, mainSrc, "math.", "add"), "add")
 }
 
 func TestHoverHighlightsFullImportPath(t *testing.T) {

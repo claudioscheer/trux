@@ -1,0 +1,123 @@
+{
+  "scopeName": "source.trux",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#operators"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.trux",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.trux",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.trux",
+              "match": "\\\\[\"\\\\nt]"
+            }
+          ]
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "meta.function.declaration.trux",
+          "match": "\\b(func)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.function.trux"
+            },
+            "2": {
+              "name": "entity.name.function.trux"
+            }
+          }
+        },
+        {
+          "name": "support.function.builtin.trux",
+          "match": "\\b(print|len|clone|append|make)(?=\\s*\\()"
+        },
+        {
+          "name": "entity.name.function.call.trux",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=\\s*\\()"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.trux",
+          "match": "\\b(if|else|while|return)\\b"
+        },
+        {
+          "name": "keyword.declaration.trux",
+          "match": "\\b(package|import|pub|let)\\b"
+        },
+        {
+          "name": "keyword.operator.word.trux",
+          "match": "\\bin\\b"
+        },
+        {
+          "name": "constant.language.boolean.trux",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.trux",
+          "match": "\\b(int|float|string|bool|list)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.trux",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.trux",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.trux",
+          "match": "==|!=|<=|>=|[+\\-*/=<>]"
+        }
+      ]
+    }
+  }
+}

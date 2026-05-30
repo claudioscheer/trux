@@ -20,6 +20,7 @@ _test/
 *~
 .idea/
 .vscode/
+node_modules/
 
 # Compiler development artifacts (emitted C from `trux emit-c`, temp binaries, etc.)
 *.tx.c

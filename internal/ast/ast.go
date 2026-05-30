@@ -19,6 +19,7 @@ type ImportDecl struct {
 
 type FuncDecl struct {
 	Pos        token.Position
+	NamePos    token.Position
 	Name       string
 	Public     bool
 	Params     []Param
@@ -27,6 +28,7 @@ type FuncDecl struct {
 }
 
 type Param struct {
+	Pos  token.Position
 	Name string
 	Type Type
 }
@@ -113,6 +115,8 @@ func ElementType(typ Type) (Type, bool) {
 }
 
 type Block struct {
+	Start      token.Position
+	End        token.Position
 	Statements []Statement
 }
 
@@ -122,10 +126,11 @@ type Statement interface {
 }
 
 type LetStmt struct {
-	Start token.Position
-	Name  string
-	Type  Type
-	Value Expression
+	Start   token.Position
+	NamePos token.Position
+	Name    string
+	Type    Type
+	Value   Expression
 }
 
 func (s *LetStmt) Pos() token.Position { return s.Start }

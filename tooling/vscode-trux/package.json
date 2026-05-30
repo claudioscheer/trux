@@ -1,0 +1,55 @@
+{
+  "name": "trux-language-support",
+  "displayName": "Trux Language Support",
+  "description": "Syntax highlighting and language server support for Trux.",
+  "version": "0.1.0",
+  "publisher": "trux",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:trux"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "check": "node -c extension.js"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "trux",
+        "aliases": [
+          "Trux",
+          "trux"
+        ],
+        "extensions": [
+          ".tx"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "trux",
+        "scopeName": "source.trux",
+        "path": "./syntaxes/trux.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Trux",
+      "properties": {
+        "trux.languageServer.path": {
+          "type": "string",
+          "default": "trux-lsp",
+          "description": "Path or command name for the Trux language server."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

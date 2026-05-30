@@ -62,20 +62,30 @@ type resolutionContext struct {
 }
 
 type loader struct {
-	loaded  map[string]*fileUnit
-	sources map[string]string
-	order   []*fileUnit
+	loaded   map[string]*fileUnit
+	sources  map[string]string
+	overlays map[string]string
+	order    []*fileUnit
 }
 
 func Load(entryPath string) (*Result, error) {
-	path, err := canonicalEntryPath(entryPath)
+	return load(entryPath, nil)
+}
+
+func LoadWithSources(entryPath string, sources map[string]string) (*Result, error) {
+	return load(entryPath, normalizeSources(sources))
+}
+
+func load(entryPath string, sources map[string]string) (*Result, error) {
+	path, err := canonicalEntryPath(entryPath, sources)
 	if err != nil {
 		return nil, err
 	}
 
 	l := &loader{
-		loaded:  map[string]*fileUnit{},
-		sources: map[string]string{},
+		loaded:   map[string]*fileUnit{},
+		sources:  map[string]string{},
+		overlays: sources,
 	}
 	entry, err := l.loadFile(path, token.Position{}, nil)
 	if err != nil {
@@ -98,12 +108,36 @@ func Load(entryPath string) (*Result, error) {
 	}, nil
 }
 
-func canonicalEntryPath(path string) (string, error) {
+func normalizeSources(sources map[string]string) map[string]string {
+	if len(sources) == 0 {
+		return nil
+	}
+
+	normalized := map[string]string{}
+	for path, source := range sources {
+		abs, err := filepath.Abs(path)
+		if err == nil {
+			path = abs
+		}
+		path = filepath.Clean(path)
+		if real, err := filepath.EvalSymlinks(path); err == nil {
+			path = filepath.Clean(real)
+		}
+		normalized[path] = source
+	}
+	return normalized
+}
+
+func canonicalEntryPath(path string, sources map[string]string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", fmt.Errorf("resolve %s: %w", path, err)
 	}
 	abs = filepath.Clean(abs)
+
+	if _, ok := sources[abs]; ok {
+		return abs, nil
+	}
 
 	info, err := os.Stat(abs)
 	if err != nil {
@@ -118,6 +152,10 @@ func canonicalEntryPath(path string) (string, error) {
 		return "", fmt.Errorf("resolve %s: %w", path, err)
 	}
 
+	if _, ok := sources[filepath.Clean(real)]; ok {
+		return filepath.Clean(real), nil
+	}
+
 	return filepath.Clean(real), nil
 }
 
@@ -129,11 +167,14 @@ func (l *loader) loadFile(path string, importPos token.Position, stack []string)
 		return unit, nil
 	}
 
-	sourceBytes, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+	source, ok := l.overlays[path]
+	if !ok {
+		sourceBytes, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+		source = string(sourceBytes)
 	}
-	source := string(sourceBytes)
 	l.sources[path] = source
 
 	program, err := parser.ParseFile(path, source)
@@ -178,6 +219,10 @@ func (l *loader) resolveImport(unit *fileUnit, importDecl *ast.ImportDecl) (stri
 	}
 
 	candidate := filepath.Clean(filepath.Join(filepath.Dir(unit.path), importDecl.Path))
+	if _, ok := l.overlays[candidate]; ok {
+		return candidate, nil
+	}
+
 	info, err := os.Stat(candidate)
 	if err != nil {
 		if os.IsNotExist(err) {

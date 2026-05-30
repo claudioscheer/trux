@@ -73,14 +73,23 @@ type importPathReference struct {
 	token token.Token
 }
 
+type LocationLink struct {
+	OriginSelectionRange *Range `json:"originSelectionRange,omitempty"`
+	TargetURI            string `json:"targetUri"`
+	TargetRange          Range  `json:"targetRange"`
+	TargetSelectionRange Range  `json:"targetSelectionRange"`
+}
+
 func (s *Server) handleDefinition(raw json.RawMessage) (any, error) {
 	var params definitionParams
 	if err := json.Unmarshal(raw, &params); err != nil {
 		return nil, err
 	}
 
-	if loc, ok, err := s.resolveImportPath(params.TextDocument.URI, params.Position); err != nil || ok {
-		return loc, err
+	if link, ok, err := s.resolveImportPath(params.TextDocument.URI, params.Position); err != nil {
+		return nil, err
+	} else if ok {
+		return []LocationLink{link}, nil
 	}
 
 	def, ok, err := s.resolveSymbol(params.TextDocument.URI, params.Position)
@@ -208,24 +217,27 @@ func (s *Server) hoverFunction(uri string, pos Position) (Hover, bool, error) {
 	}, true, nil
 }
 
-func (s *Server) resolveImportPath(uri string, pos Position) (Location, bool, error) {
+func (s *Server) resolveImportPath(uri string, pos Position) (LocationLink, bool, error) {
 	ref, ok, err := s.importPathAt(uri, pos)
 	if err != nil || !ok {
-		return Location{}, ok, err
+		return LocationLink{}, ok, err
 	}
 
 	importPath := normalizePath(filepath.Join(filepath.Dir(normalizePath(pathFromURI(uri))), ref.path))
 	info, err := os.Stat(importPath)
 	if err != nil || info.IsDir() {
-		return Location{}, false, nil
+		return LocationLink{}, false, nil
 	}
 
-	return Location{
-		URI: uriFromPath(importPath),
-		Range: Range{
-			Start: Position{Line: 0, Character: 0},
-			End:   Position{Line: 0, Character: 0},
-		},
+	targetRange := Range{
+		Start: Position{Line: 0, Character: 0},
+		End:   Position{Line: 0, Character: 0},
+	}
+	return LocationLink{
+		OriginSelectionRange: importPathRange(ref.token),
+		TargetURI:            uriFromPath(importPath),
+		TargetRange:          targetRange,
+		TargetSelectionRange: targetRange,
 	}, true, nil
 }
 

@@ -314,22 +314,30 @@ pub func add(a int, b int) int {
 
 	result, err := server.handleDefinition(mustJSON(t, map[string]any{
 		"textDocument": map[string]any{"uri": mainURI},
-		"position":     positionOf(t, mainSrc, "math.tx"),
+		"position":     positionOfAfter(t, mainSrc, "math.", "tx"),
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	location := result.(Location)
-	want := Location{
-		URI: libURI,
-		Range: Range{
-			Start: Position{Line: 0, Character: 0},
-			End:   Position{Line: 0, Character: 0},
-		},
+	links := result.([]LocationLink)
+	if len(links) != 1 {
+		t.Fatalf("link count = %d, want 1: %#v", len(links), links)
 	}
-	if location != want {
-		t.Fatalf("location = %#v, want %#v", location, want)
+	targetRange := Range{
+		Start: Position{Line: 0, Character: 0},
+		End:   Position{Line: 0, Character: 0},
+	}
+	link := links[0]
+	assertRange(t, link.OriginSelectionRange, positionOf(t, mainSrc, "math.tx"), "math.tx")
+	if link.TargetURI != libURI {
+		t.Fatalf("target URI = %q, want %q", link.TargetURI, libURI)
+	}
+	if link.TargetRange != targetRange {
+		t.Fatalf("target range = %#v, want %#v", link.TargetRange, targetRange)
+	}
+	if link.TargetSelectionRange != targetRange {
+		t.Fatalf("target selection range = %#v, want %#v", link.TargetSelectionRange, targetRange)
 	}
 }
 

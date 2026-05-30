@@ -15,6 +15,7 @@ import (
 
 	"github.com/claudioscheer/trux/internal/ast"
 	"github.com/claudioscheer/trux/internal/formatter"
+	"github.com/claudioscheer/trux/internal/language"
 	modules "github.com/claudioscheer/trux/internal/modules"
 	"github.com/claudioscheer/trux/internal/parser"
 	"github.com/claudioscheer/trux/internal/token"
@@ -241,7 +242,7 @@ func initializeResult() map[string]any {
 		},
 		"serverInfo": map[string]any{
 			"name":    "trux-lsp",
-			"version": "0.1.0",
+			"version": language.Version,
 		},
 	}
 }

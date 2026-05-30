@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/claudioscheer/trux/internal/language"
 )
 
 func TestDiagnosticsForParseError(t *testing.T) {
@@ -189,6 +191,10 @@ func TestInitializeAdvertisesDefinitionAndReferences(t *testing.T) {
 	triggerCharacters := completionProvider["triggerCharacters"].([]string)
 	if len(triggerCharacters) != 1 || triggerCharacters[0] != "." {
 		t.Fatalf("trigger characters = %#v, want dot trigger", triggerCharacters)
+	}
+	serverInfo := result["serverInfo"].(map[string]any)
+	if serverInfo["version"] != language.Version {
+		t.Fatalf("server version = %#v, want language version %q", serverInfo["version"], language.Version)
 	}
 }
 

@@ -40,21 +40,30 @@ func main() int {
 	wantParts := []string{
 		"#include <stdint.h>",
 		"typedef struct {",
-		"rt_arena_block* blocks;",
+		"rt_arena_chunk* chunks;",
 		"} rt_arena;",
 		"static RT_UNUSED void rt_arena_init(rt_arena* arena)",
+		"static RT_UNUSED void rt_arena_reset(rt_arena* arena)",
 		"static RT_UNUSED void rt_arena_deinit(rt_arena* arena)",
+		"static RT_UNUSED rt_arena_mark rt_arena_mark_current(rt_arena* arena)",
+		"static RT_UNUSED void rt_arena_rewind(rt_arena* arena, rt_arena_mark mark)",
 		"static RT_UNUSED void rt_print_int(int64_t value)",
-		"int64_t trux_add(rt_arena* trux_arena, int64_t trux_v_1_a, int64_t trux_v_1_b);",
-		"int64_t trux_main(rt_arena* trux_arena);",
-		"int64_t trux_add(rt_arena* trux_arena, int64_t trux_v_1_a, int64_t trux_v_1_b) {",
-		"return (trux_v_1_a + trux_v_1_b);",
-		"int64_t trux_v_1_x = trux_add(trux_arena, 1, 2);",
+		"int64_t trux_add(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_1_a, int64_t trux_v_1_b);",
+		"int64_t trux_main(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"int64_t trux_add(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_1_a, int64_t trux_v_1_b) {",
+		"rt_arena_mark trux_temp_mark = rt_arena_mark_current(trux_ctx->temp);",
+		"int64_t trux_return_value = (trux_v_1_a + trux_v_1_b);",
+		"rt_arena_rewind(trux_ctx->temp, trux_temp_mark);",
+		"return trux_return_value;",
+		"int64_t trux_v_1_x = trux_add(trux_ctx, trux_ctx->arena, 1, 2);",
 		"rt_print_int(trux_v_1_x);",
 		"rt_print_newline();",
 		"int main(void) {",
 		"rt_arena_init(&trux_arena);",
-		"int64_t trux_exit_code = trux_main(&trux_arena);",
+		"rt_arena_init(&trux_temp);",
+		"rt_context trux_ctx = {&trux_arena, &trux_temp};",
+		"int64_t trux_exit_code = trux_main(&trux_ctx, &trux_arena);",
+		"rt_arena_deinit(&trux_temp);",
 		"rt_arena_deinit(&trux_arena);",
 		"return (int)trux_exit_code;",
 	}
@@ -62,12 +71,6 @@ func main() int {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
-	}
-	if !strings.Contains(cSource, "int64_t trux_add(rt_arena* trux_arena, int64_t trux_v_1_a, int64_t trux_v_1_b) {\n    (void)trux_arena;") {
-		t.Fatalf("generated C should mark unused arena in trux_add:\n%s", cSource)
-	}
-	if strings.Contains(cSource, "int64_t trux_main(rt_arena* trux_arena) {\n    (void)trux_arena;") {
-		t.Fatalf("generated C should not mark used arena in trux_main:\n%s", cSource)
 	}
 }
 
@@ -114,11 +117,11 @@ func main() int {
 		"} rt_string;",
 		"static RT_UNUSED void rt_print_string(rt_string value)",
 		"static RT_UNUSED void rt_print_bool(bool value)",
-		"rt_string trux_label(rt_arena* trux_arena);",
-		"bool trux_ready(rt_arena* trux_arena);",
-		"return (rt_string){(const uint8_t*)\"trux\", 4};",
-		"return true;",
-		"rt_string trux_v_4_name = trux_label(trux_arena);",
+		"rt_string trux_label(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"bool trux_ready(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"rt_string trux_return_value = (rt_string){(const uint8_t*)\"trux\", 4};",
+		"bool trux_return_value = true;",
+		"rt_string trux_v_4_name = trux_label(trux_ctx, trux_ctx->temp);",
 		"bool trux_v_2_ok = false;",
 		"rt_print_string(trux_v_4_name);",
 		"rt_print_string((rt_string){(const uint8_t*)\" \", 1});",
@@ -131,9 +134,6 @@ func main() int {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
-	}
-	if strings.Contains(cSource, "int64_t trux_main(rt_arena* trux_arena) {\n    (void)trux_arena;") {
-		t.Fatalf("generated C should not mark used arena in trux_main:\n%s", cSource)
 	}
 }
 
@@ -221,15 +221,277 @@ func main() int {
 
 	wantParts := []string{
 		"static RT_UNUSED rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_string right)",
-		"rt_string trux_greet(rt_arena* trux_arena, rt_string trux_v_4_name);",
-		"return rt_string_concat(trux_arena, (rt_string){(const uint8_t*)\"hello \", 6}, trux_v_4_name);",
-		"rt_string trux_v_4_name = trux_greet(trux_arena, (rt_string){(const uint8_t*)\"trux\", 4});",
-		"rt_print_string(rt_string_concat(trux_arena, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1}));",
+		"rt_string trux_greet(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
+		"rt_string trux_return_value = rt_string_concat(trux_result_arena, (rt_string){(const uint8_t*)\"hello \", 6}, trux_v_4_name);",
+		"rt_string trux_v_4_name = trux_greet(trux_ctx, trux_ctx->temp, (rt_string){(const uint8_t*)\"trux\", 4});",
+		"rt_print_string(rt_string_concat(trux_ctx->temp, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1}));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
+	}
+}
+
+func TestGenerateAllocatesReturnedStringLocalInResultArena(t *testing.T) {
+	program, err := parser.Parse(`package main
+func bang(name string) string {
+    let s string = name + "!"
+    return s
+}
+
+func main() int {
+    print(bang("a"))
+    print(bang("b"))
+    return 0
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantParts := []string{
+		"rt_string trux_bang(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
+		"rt_string trux_v_1_s = rt_string_concat(trux_result_arena, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_string trux_return_value = trux_v_1_s;",
+		"if (trux_result_arena != trux_ctx->temp) {",
+		"rt_print_string(trux_bang(trux_ctx, trux_ctx->temp, (rt_string){(const uint8_t*)\"a\", 1}));",
+		"rt_print_string(trux_bang(trux_ctx, trux_ctx->temp, (rt_string){(const uint8_t*)\"b\", 1}));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	if strings.Contains(cSource, "rt_string_clone") {
+		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
+	}
+}
+
+func TestGenerateReturnsStringParameterAsIs(t *testing.T) {
+	program, err := parser.Parse(`package main
+func id(s string) string {
+    return s
+}
+
+func main() int {
+    print(id("x"))
+    return 0
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantParts := []string{
+		"rt_string trux_return_value = trux_v_1_s;",
+		"rt_print_string(trux_id(trux_ctx, trux_ctx->temp, (rt_string){(const uint8_t*)\"x\", 1}));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	if strings.Contains(cSource, "rt_string_clone") {
+		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
+	}
+}
+
+func TestGenerateAllocatesStringLocalUsedByReturnedCallInResultArena(t *testing.T) {
+	program, err := parser.Parse(`package main
+func id(s string) string {
+    return s
+}
+
+func wrap(name string) string {
+    let s string = name + "!"
+    return id(s)
+}
+
+func main() int {
+    print(wrap("x"))
+    return 0
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantParts := []string{
+		"rt_string trux_v_1_s = rt_string_concat(trux_result_arena, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_string trux_return_value = trux_id(trux_ctx, trux_result_arena, trux_v_1_s);",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	if strings.Contains(cSource, "rt_string_clone") {
+		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
+	}
+}
+
+func TestGenerateAllocatesStringLocalStoredInCollectionInDurableArena(t *testing.T) {
+	program, err := parser.Parse(`package main
+func stash(name string) string {
+    let items list[string] = list[string]{}
+    let s string = name + "!"
+    append(items, s)
+    return "ok"
+}
+
+func main() int {
+    print(stash("x"))
+    return 0
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantParts := []string{
+		"rt_list_string* trux_v_5_items = rt_list_string_from_values(trux_ctx->arena, NULL, 0);",
+		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->arena, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_list_string_append(trux_v_5_items, trux_v_1_s);",
+		"rt_print_string(trux_stash(trux_ctx, trux_ctx->temp, (rt_string){(const uint8_t*)\"x\", 1}));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	if strings.Contains(cSource, "rt_string_clone") {
+		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
+	}
+}
+
+func TestGenerateAllocatesStringLocalUsedInCollectionLiteralInDurableArena(t *testing.T) {
+	program, err := parser.Parse(`package main
+func main() int {
+    let s string = "a" + "!"
+    let items list[string] = list[string]{s}
+    print(len(items))
+    return 0
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantParts := []string{
+		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->arena, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_list_string* trux_v_5_items = rt_list_string_from_values(trux_ctx->arena, (rt_string[]){trux_v_1_s}, 1);",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	if strings.Contains(cSource, "rt_string_clone") {
+		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
+	}
+}
+
+func TestGenerateAllocatesStringLocalPassedToCollectionReturningCallInDurableArena(t *testing.T) {
+	program, err := parser.Parse(`package main
+func wrap(s string) list[string] {
+    return list[string]{s}
+}
+
+func main() int {
+    let s string = "a" + "!"
+    let items list[string] = wrap(s)
+    print(len(items))
+    return 0
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantParts := []string{
+		"rt_string trux_v_1_s = rt_string_concat(trux_ctx->arena, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_list_string* trux_v_5_items = trux_wrap(trux_ctx, trux_ctx->arena, trux_v_1_s);",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	if strings.Contains(cSource, "rt_string_clone") {
+		t.Fatalf("generated C should not implicitly clone strings:\n%s", cSource)
 	}
 }
 
@@ -265,12 +527,12 @@ func main() int {
 
 	wantParts := []string{
 		"RT_DEFINE_COLLECTIONS(int, int64_t)",
-		"rt_array_int trux_v_2_xs = rt_array_int_from_values(trux_arena, (int64_t[]){1, 2, 3}, 3);",
+		"rt_array_int trux_v_2_xs = rt_array_int_from_values(trux_ctx->arena, (int64_t[]){1, 2, 3}, 3);",
 		"rt_slice_int trux_v_4_view = rt_array_int_slice(trux_v_2_xs, true, 1, false, 0);",
 		"rt_slice_int_set(trux_v_4_view, 0, 9);",
-		"rt_list_int* trux_v_5_items = rt_list_int_from_values(trux_arena, (int64_t[]){rt_array_int_get(trux_v_2_xs, 1)}, 1);",
+		"rt_list_int* trux_v_5_items = rt_list_int_from_values(trux_ctx->arena, (int64_t[]){rt_array_int_get(trux_v_2_xs, 1)}, 1);",
 		"rt_list_int_append(trux_v_5_items, 4);",
-		"rt_slice_int trux_v_4_made = rt_make_slice_int(trux_arena, ((int64_t)trux_v_5_items->len));",
+		"rt_slice_int trux_v_4_made = rt_make_slice_int(trux_ctx->arena, ((int64_t)trux_v_5_items->len));",
 		"rt_slice_int_set(trux_v_4_made, 0, rt_list_int_get(trux_v_5_items, 1));",
 		"rt_print_int(rt_array_int_get(trux_v_2_xs, 1));",
 		"rt_print_string((rt_string){(const uint8_t*)\" \", 1});",

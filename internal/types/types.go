@@ -41,6 +41,44 @@ type checker struct {
 	info *Info
 }
 
+type localInfo struct {
+	typ      ast.Type
+	borrowed bool
+}
+
+type scope struct {
+	locals map[string]localInfo
+	parent *scope
+}
+
+func newScope(parent *scope) *scope {
+	return &scope{
+		locals: map[string]localInfo{},
+		parent: parent,
+	}
+}
+
+func (s *scope) lookup(name string) (localInfo, bool) {
+	for scope := s; scope != nil; scope = scope.parent {
+		if local, ok := scope.locals[name]; ok {
+			return local, true
+		}
+	}
+
+	return localInfo{}, false
+}
+
+func (s *scope) assign(name string, local localInfo) bool {
+	for scope := s; scope != nil; scope = scope.parent {
+		if _, ok := scope.locals[name]; ok {
+			scope.locals[name] = local
+			return true
+		}
+	}
+
+	return false
+}
+
 func Check(program *ast.Program) (*Info, error) {
 	c := &checker{
 		info: &Info{
@@ -113,14 +151,18 @@ func (c *checker) checkMain(program *ast.Program) error {
 }
 
 func (c *checker) checkFunc(fn *ast.FuncDecl) error {
-	locals := map[string]ast.Type{}
-	c.info.Locals[fn] = locals
+	c.info.Locals[fn] = map[string]ast.Type{}
+	locals := newScope(nil)
 
 	for _, param := range fn.Params {
-		if _, exists := locals[param.Name]; exists {
+		if _, exists := c.info.Locals[fn][param.Name]; exists {
 			return typeError(fn.Pos, "duplicate parameter %q", param.Name)
 		}
-		locals[param.Name] = param.Type
+		c.info.Locals[fn][param.Name] = param.Type
+		locals.locals[param.Name] = localInfo{
+			typ:      param.Type,
+			borrowed: isMutableCollection(param.Type),
+		}
 	}
 
 	for _, stmt := range fn.Body.Statements {
@@ -132,10 +174,10 @@ func (c *checker) checkFunc(fn *ast.FuncDecl) error {
 	return nil
 }
 
-func (c *checker) checkStmt(fn *ast.FuncDecl, locals map[string]ast.Type, stmt ast.Statement) error {
+func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement) error {
 	switch stmt := stmt.(type) {
 	case *ast.LetStmt:
-		if _, exists := locals[stmt.Name]; exists {
+		if _, exists := c.info.Locals[fn][stmt.Name]; exists {
 			return typeError(stmt.Start, "duplicate local variable %q", stmt.Name)
 		}
 		if err := validateType(stmt.Start, stmt.Type); err != nil {
@@ -150,10 +192,14 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals map[string]ast.Type, stmt a
 			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, stmt.Type)
 		}
 
-		locals[stmt.Name] = stmt.Type
+		c.info.Locals[fn][stmt.Name] = stmt.Type
+		locals.locals[stmt.Name] = localInfo{
+			typ:      stmt.Type,
+			borrowed: isMutableCollection(stmt.Type) && c.exprBorrows(locals, stmt.Value),
+		}
 		return nil
 	case *ast.AssignStmt:
-		varType, ok := locals[stmt.Name]
+		local, ok := locals.lookup(stmt.Name)
 		if !ok {
 			return typeError(stmt.Start, "undefined variable %q", stmt.Name)
 		}
@@ -161,9 +207,11 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals map[string]ast.Type, stmt a
 		if err != nil {
 			return err
 		}
-		if !ast.TypeEqual(valueType, varType) {
-			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, varType)
+		if !ast.TypeEqual(valueType, local.typ) {
+			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, local.typ)
 		}
+		local.borrowed = isMutableCollection(local.typ) && c.exprBorrows(locals, stmt.Value)
+		locals.assign(stmt.Name, local)
 		return nil
 	case *ast.IndexAssignStmt:
 		collectionType, err := c.checkExpr(locals, stmt.Target.Collection, false)
@@ -183,6 +231,9 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals map[string]ast.Type, stmt a
 		elemType, ok := ast.ElementType(collectionType)
 		if !ok {
 			return typeError(stmt.Target.Collection.Pos(), "cannot index %s", collectionType)
+		}
+		if c.exprBorrows(locals, stmt.Target.Collection) {
+			return typeError(stmt.Target.Collection.Pos(), "cannot mutate parameter-owned collection")
 		}
 		valueType, err := c.checkExpr(locals, stmt.Value, false)
 		if err != nil {
@@ -210,14 +261,16 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals map[string]ast.Type, stmt a
 		if !ast.TypeEqual(conditionType, ast.BoolType) {
 			return typeError(stmt.Condition.Pos(), "if condition must be bool, got %s", conditionType)
 		}
+		thenScope := newScope(locals)
 		for _, inner := range stmt.Then.Statements {
-			if err := c.checkStmt(fn, locals, inner); err != nil {
+			if err := c.checkStmt(fn, thenScope, inner); err != nil {
 				return err
 			}
 		}
 		if stmt.Else != nil {
+			elseScope := newScope(locals)
 			for _, inner := range stmt.Else.Statements {
-				if err := c.checkStmt(fn, locals, inner); err != nil {
+				if err := c.checkStmt(fn, elseScope, inner); err != nil {
 					return err
 				}
 			}
@@ -231,8 +284,9 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals map[string]ast.Type, stmt a
 		if !ast.TypeEqual(conditionType, ast.BoolType) {
 			return typeError(stmt.Condition.Pos(), "while condition must be bool, got %s", conditionType)
 		}
+		bodyScope := newScope(locals)
 		for _, inner := range stmt.Body.Statements {
-			if err := c.checkStmt(fn, locals, inner); err != nil {
+			if err := c.checkStmt(fn, bodyScope, inner); err != nil {
 				return err
 			}
 		}
@@ -245,7 +299,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals map[string]ast.Type, stmt a
 	}
 }
 
-func (c *checker) checkExpr(locals map[string]ast.Type, expr ast.Expression, allowPrint bool) (ast.Type, error) {
+func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool) (ast.Type, error) {
 	switch expr := expr.(type) {
 	case *ast.IntLiteral:
 		c.info.ExprTypes[expr] = ast.IntType
@@ -317,12 +371,12 @@ func (c *checker) checkExpr(locals map[string]ast.Type, expr ast.Expression, all
 		c.info.ExprTypes[expr] = expr.Type
 		return expr.Type, nil
 	case *ast.IdentExpr:
-		typ, ok := locals[expr.Name]
+		local, ok := locals.lookup(expr.Name)
 		if !ok {
 			return nil, typeError(expr.Start, "undefined variable %q", expr.Name)
 		}
-		c.info.ExprTypes[expr] = typ
-		return typ, nil
+		c.info.ExprTypes[expr] = local.typ
+		return local.typ, nil
 	case *ast.BinaryExpr:
 		leftType, err := c.checkExpr(locals, expr.Left, false)
 		if err != nil {
@@ -404,7 +458,7 @@ func (c *checker) checkExpr(locals map[string]ast.Type, expr ast.Expression, all
 	}
 }
 
-func (c *checker) checkCall(locals map[string]ast.Type, expr *ast.CallExpr, allowPrint bool) (ast.Type, error) {
+func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) (ast.Type, error) {
 	argTypes := make([]ast.Type, 0, len(expr.Args))
 	for _, arg := range expr.Args {
 		argType, err := c.checkExpr(locals, arg, false)
@@ -454,6 +508,9 @@ func (c *checker) checkCall(locals map[string]ast.Type, expr *ast.CallExpr, allo
 		}
 		if !ast.TypeEqual(argTypes[1], listType.Elem) {
 			return nil, typeError(expr.Args[1].Pos(), "append value has type %s, want %s", argTypes[1], listType.Elem)
+		}
+		if c.exprBorrows(locals, expr.Args[0]) {
+			return nil, typeError(expr.Args[0].Pos(), "cannot mutate parameter-owned collection")
 		}
 		c.info.AppendCalls[expr] = AppendSig{ListType: argTypes[0], ElemType: listType.Elem}
 		c.info.ExprTypes[expr] = argTypes[0]
@@ -537,6 +594,23 @@ func hasLength(typ ast.Type) bool {
 	}
 	_, ok := ast.ElementType(typ)
 	return ok
+}
+
+func isMutableCollection(typ ast.Type) bool {
+	_, ok := ast.ElementType(typ)
+	return ok
+}
+
+func (c *checker) exprBorrows(locals *scope, expr ast.Expression) bool {
+	switch expr := expr.(type) {
+	case *ast.IdentExpr:
+		local, ok := locals.lookup(expr.Name)
+		return ok && local.borrowed
+	case *ast.SliceExpr:
+		return c.exprBorrows(locals, expr.Collection)
+	default:
+		return false
+	}
 }
 
 func validateType(pos token.Position, typ ast.Type) error {

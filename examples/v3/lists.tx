@@ -1,11 +1,5 @@
 package main
 
-func add(xs list[int], value int) int {
-    append(xs, value)
-    xs[0] = xs[0] + 1
-    return len(xs)
-}
-
 func main() int {
     let xs list[int] = list[int]{1}
     let alias list[int] = xs
@@ -13,7 +7,9 @@ func main() int {
     append(xs, 2)
     print(len(alias), " ", alias[1])
 
-    let n int = add(alias, 3)
+    append(alias, 3)
+    xs[0] = xs[0] + 1
+    let n int = len(alias)
     print(n, " ", xs[0], " ", xs[2])
 
     let view []int = xs[1:]

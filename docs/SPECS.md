@@ -592,6 +592,15 @@ view[1] = 7
 items[0] = 9
 ```
 
+Inside a function, collection parameters are borrowed. The function may read them and return values derived from them, but it may not mutate the parameter-owned collection or an alias/view of it:
+
+```go
+func bad(xs list[int]) int {
+    append(xs, 1) // rejected
+    return len(xs)
+}
+```
+
 Runtime bounds checks trap invalid indexes and slices with a `trux runtime error`.
 
 ## v2 Compiler Checks
@@ -622,6 +631,7 @@ string index assignment
 append outside statement position
 append with a non-list first argument
 append values with the wrong element type
+mutation of parameter-owned collections or aliases/views of them
 make with a non-slice type or non-int length
 ```
 
@@ -699,7 +709,9 @@ runtime bounds traps
 
 # Memory Model
 
-Dynamic allocation uses arenas for strings, arrays, and slice backing storage. Lists are heap-backed shared handles tracked by the runtime owner and freed at program exit.
+Dynamic allocation uses arenas for strings, arrays, and slice backing storage. Lists are heap-backed shared handles tracked by the runtime owner and freed at program exit, arena reset, or arena rewind.
+
+Generated code uses a durable arena plus a compiler-managed temp arena. String temporaries may use the temp arena, while string return expressions allocate into the caller-provided result arena when allocation is needed. The compiler does not insert implicit clones. If `clone(x)` is added later, it should be an explicit source-level operation.
 
 See [ARENAS.md](ARENAS.md) for the full rationale, tradeoffs, staged evolution plan, and why GC was deferred.
 

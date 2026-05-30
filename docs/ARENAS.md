@@ -4,7 +4,7 @@
 
 **Trux uses arena-based (region-based) allocation as the primary strategy for dynamic memory.**
 
-Most dynamic data is allocated from arenas rather than through individual `malloc`/`free` or a garbage collector. Lists are the current exception: growable buffers use heap allocation and `realloc`, with list allocations tracked by the runtime owner and freed at program exit.
+Arena-backed dynamic data is carved from reusable runtime chunks rather than allocated and freed object by object. Lists are the current exception: growable buffers use heap allocation and `realloc`, with list allocations tracked by the runtime owner and freed at program exit or arena reset.
 
 ## Why Arenas
 
@@ -18,7 +18,7 @@ The project has these constraints and goals:
 
 Under these constraints, arenas are the best fit:
 
-- Allocation is extremely cheap (bump pointer).
+- Allocation is cheap after a chunk is available (bump pointer within the chunk).
 - There is no per-object deallocation overhead or complexity.
 - The runtime stays tiny.
 - Generated code stays simple (no write barriers, no refcount inc/dec, no safepoints).
@@ -30,17 +30,36 @@ As of the current early implementation:
 
 - v0 only supports `int`. No dynamic allocation exists.
 - v1 adds `string` literals and `print(string)`. These are backed by static storage (`const uint8_t*` pointing into read-only data).
-- v2 adds string concatenation. Concatenated strings are backed by an explicit program arena threaded through generated functions.
+- v2 adds string concatenation. Concatenated strings are backed by arenas threaded through generated functions.
 - v3 adds arrays, slices, and lists. Arrays and `make([]T, n)` storage are arena-backed. Slices are borrowed views. Lists are heap-backed shared handles so growth does not leave obsolete buffers in the arena.
+- The C runtime uses chunked bump allocation for arena-backed data. It calls `malloc` only when the current chunk cannot satisfy the next allocation, then releases or reuses memory in bulk.
 
 The first dynamic string operation is concatenation. Formatting and other operations that produce new string data should use the same arena-backed model unless the language adds a more specific lifetime mechanism.
 
-## Planned Runtime Shape
+## Runtime Shape
 
 Now that dynamic allocation has been introduced:
 
-- A single primary program arena backs dynamic values.
-- The same runtime owner also tracks heap-backed list handles for teardown at generated `main` exit.
+- Generated `main` creates a durable arena and a compiler-managed temporary arena.
+- Generated functions receive an `rt_context*` and a `trux_result_arena`:
+
+  ```c
+  typedef struct {
+      rt_arena* arena;
+      rt_arena* temp;
+  } rt_context;
+
+  rt_string trux_greet(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string name);
+  ```
+
+- `trux_ctx->arena` is the durable arena for values that must outlive temporary function work.
+- `trux_ctx->temp` is scratch storage for local string temporaries.
+- `trux_result_arena` is the arena requested by the caller for a string result. Direct string returns such as `return a + b` allocate the concatenation there.
+- A function takes a temp mark on entry. It rewinds that mark before returning only when `trux_result_arena != trux_ctx->temp`. If `trux_result_arena == trux_ctx->temp`, the caller owns cleanup for the returned scratch value.
+- The runtime owner also tracks heap-backed list handles for teardown at generated `main` exit, arena reset, or arena rewind.
+- `rt_arena_alloc` bumps through the current chunk and allocates a new chunk only when needed.
+- `rt_arena_reset` clears registered list handles and marks existing chunks reusable. Any arena-backed string, array, or slice data allocated before the reset becomes invalid.
+- `rt_arena_mark_current` and `rt_arena_rewind` provide scoped cleanup. The helper is named `rt_arena_mark_current` rather than `rt_arena_mark` because C typedef names and function names share a namespace.
 - `rt_string` remains a length-based immutable view:
 
   ```c
@@ -53,19 +72,31 @@ Now that dynamic allocation has been introduced:
   Its `data` pointer may refer either to static literal storage or to arena-allocated dynamic storage. Arena memory is writable during construction but exposed as immutable through `rt_string`.
 
 - String literals continue to use static storage for efficiency.
-- Dynamic strings are allocated by copying into the arena.
-- There is **no individual `free`** for strings, arrays, or slices. List buffers are the exception and are released by runtime teardown, not by user code.
+- Dynamic strings are allocated by copying into the chosen arena.
+- There is **no individual `free`** for strings, arrays, or slices. List buffers are the exception and are released by runtime teardown or reset, not by user code.
+- There is **no implicit clone** in generated C. If the language later gets `clone(x)`, it should be an explicit source-level operation, not a hidden compiler copy.
+- For the current strings-first model:
+  - Local string concatenation uses `trux_ctx->temp` unless the local is returned or stored into a durable container.
+  - String return expressions allocate directly into `trux_result_arena` when allocation is needed.
+  - Returning an existing string value returns it as-is.
+  - Arrays, slices, and lists remain durable/conservative. The compiler does not temp-allocate collections yet.
+  - Functions cannot mutate parameter-owned collections. This rejects direct mutation and aliases such as `let alias = xs; append(alias, value)` when `xs` is a parameter.
 
 A recommended separation is to keep `rt_string` strictly immutable and introduce a separate builder type for construction (e.g. `rt_string_builder` with capacity). This avoids giving the language-level string type surprising mutability behavior depending on provenance.
 
-Early generated code follows this shape:
+Generated string code follows this shape:
 
 ```c
-rt_string greet(rt_arena* arena, rt_string name) {
-    rt_string lit1 = rt_string_lit("Hello, ");
-    rt_string lit2 = rt_string_lit("!");
-    rt_string tmp = rt_string_concat(arena, lit1, name);
-    return rt_string_concat(arena, tmp, lit2);
+rt_string trux_greet(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string name) {
+    rt_arena_mark trux_temp_mark = rt_arena_mark_current(trux_ctx->temp);
+
+    rt_string trux_return_value =
+        rt_string_concat(trux_result_arena, (rt_string){(const uint8_t*)"Hello, ", 7}, name);
+
+    if (trux_result_arena != trux_ctx->temp) {
+        rt_arena_rewind(trux_ctx->temp, trux_temp_mark);
+    }
+    return trux_return_value;
 }
 ```
 
@@ -77,7 +108,7 @@ Two important details must be decided before heavy use of dynamic strings:
 ## Tradeoffs
 
 **Benefits**
-- Extremely fast allocation and bulk deallocation.
+- Fast allocation within existing chunks and bulk deallocation.
 - Very small runtime surface.
 - No hidden costs from a GC or pervasive reference counting.
 - Predictable performance (no pauses).
@@ -92,17 +123,26 @@ Two important details must be decided before heavy use of dynamic strings:
 - "Graveyard" waste can occur when growing containers (dynamic arrays, string builders) inside an arena.
 - Lists avoid arena graveyard waste by using heap buffers, but that costs a slightly larger runtime and means list handles have shared mutable state.
 
-The biggest risk is **under-specifying lifetimes in the language semantics**. If the language does not clearly state when a string returned from a function may become invalid, every C representation is just a temporary workaround. The hard problem is not the arena implementation — it is defining when allocated values become invalid.
+The biggest risk is **under-specifying lifetimes in the language semantics**. If the language does not clearly state when a string returned from a function may become invalid, every C representation is just a temporary workaround. The hard problem is not the arena implementation: it is defining when allocated values become invalid.
 
 ## Evolution Path
 
 We expect to evolve the arena strategy in stages rather than jumping to a complex model immediately.
 
 ### Stage 0 (initial dynamic allocation)
-A single explicit arena (ideally passed down from `main` rather than a true global). All dynamic data lives until the arena is reset. This is acceptable for very early experimentation and short-lived programs, but a true global arena should be phased out as soon as any generated function can perform allocation.
+A single explicit arena passed down from `main`. Early generated programs allocated every dynamic value into this arena and destroyed it at program exit. This was acceptable for experimentation and short-lived programs, but it let loop-local string concatenation grow memory until program exit.
 
-### Stage 1 (compiler-managed temporary arena)
-Introduce a distinguished `temp_arena` used for expression temporaries. The compiler inserts resets at safe boundaries (after statements, after loop iterations, after calls when results are not captured). This dramatically reduces memory growth in common cases while remaining invisible to the source language.
+### Stage 1 (strings-first function scratch)
+Introduce `rt_context` with a durable arena and a compiler-managed temp arena. Generated functions mark the temp arena on entry and rewind it on return unless the caller explicitly asked the function to place a string result in that temp arena.
+
+This stage is intentionally narrow:
+
+- It applies to string-producing expressions first.
+- It does not deep-clone returns.
+- It does not temp-allocate arrays, slices, or lists.
+- It rejects mutation of parameter-owned collections instead of trying to reason about mutable aliases.
+
+The cost is that some strings may still allocate in the durable arena when they flow through returned locals or durable container writes. That is acceptable for now because it keeps the rule safe without a full liveness and escape analysis pass.
 
 ### Stage 2 (user-visible control)
 Add minimal user-facing mechanisms so programmers can control when memory is reclaimed for larger batches:
@@ -159,7 +199,7 @@ This keeps the CPU-side arena decision intact while acknowledging the very diffe
 The C backend will be written to make arena usage explicit and controllable rather than hidden behind a global. Passing an arena (or a small context struct containing arenas) to functions that allocate is preferred over implicit globals as soon as multiple lifetime categories appear.
 
 ### For Language Semantics
-The most important work is not in the runtime — it is defining what the language guarantees:
+The most important work is not in the runtime. It is defining what the language guarantees:
 
 - When is a value returned from a function that performed allocation still valid?
 - What operations can invalidate previously valid strings/slices?
@@ -173,11 +213,11 @@ Using arenas forces the project to confront lifetime reasoning, escape analysis,
 
 ## References
 
-- [SPECS.md](SPECS.md) — current language scope and roadmap
+- [SPECS.md](SPECS.md): current language scope and roadmap
 - Odin, Jai, and C3 memory models (for examples of successful arena-centric designs)
 - Region-based memory management literature (Cyclone, ML Kit, Tofte-Talpin)
 - CUDA memory pools and async allocation patterns (for host-side GPU resource management)
-- [MODULES.md](MODULES.md) — impact of modules on generated C output strategy
+- [MODULES.md](MODULES.md): impact of modules on generated C output strategy
 
 ---
 

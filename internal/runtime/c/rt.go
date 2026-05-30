@@ -14,15 +14,19 @@ const Source = `#include <stdbool.h>
 #define RT_UNUSED
 #endif
 
+#define RT_ARENA_DEFAULT_CHUNK_SIZE ((size_t)4096)
+
 typedef struct {
     const uint8_t* data;
     size_t len;
 } rt_string;
 
-typedef struct rt_arena_block {
-    struct rt_arena_block* next;
+typedef struct rt_arena_chunk {
+    struct rt_arena_chunk* next;
+    size_t cap;
+    size_t used;
     max_align_t data[];
-} rt_arena_block;
+} rt_arena_chunk;
 
 typedef struct rt_list_allocation {
     void* list;
@@ -31,9 +35,20 @@ typedef struct rt_list_allocation {
 } rt_list_allocation;
 
 typedef struct {
-    rt_arena_block* blocks;
+    rt_arena_chunk* chunks;
     rt_list_allocation* lists;
 } rt_arena;
+
+typedef struct {
+    rt_arena_chunk* chunk;
+    size_t used;
+    rt_list_allocation* lists;
+} rt_arena_mark;
+
+typedef struct {
+    rt_arena* arena;
+    rt_arena* temp;
+} rt_context;
 
 typedef struct {
     size_t start;
@@ -45,28 +60,99 @@ static RT_UNUSED void rt_runtime_fail(const char* message) {
     exit(1);
 }
 
-static RT_UNUSED void rt_arena_init(rt_arena* arena) {
-    arena->blocks = NULL;
-    arena->lists = NULL;
+static RT_UNUSED size_t rt_arena_align_up(size_t size) {
+    size_t align = _Alignof(max_align_t);
+    size_t remainder = size % align;
+    if (remainder == 0) {
+        return size;
+    }
+    size_t padding = align - remainder;
+    if (size > SIZE_MAX - padding) {
+        rt_runtime_fail("allocation size overflow");
+    }
+    return size + padding;
 }
 
-static RT_UNUSED void rt_arena_deinit(rt_arena* arena) {
+static RT_UNUSED void rt_arena_free_lists_until(rt_arena* arena, rt_list_allocation* stop) {
     rt_list_allocation* list = arena->lists;
-    while (list != NULL) {
+    while (list != stop) {
         rt_list_allocation* next = list->next;
         list->free_list(list->list);
         free(list);
         list = next;
     }
-    arena->lists = NULL;
+    arena->lists = stop;
+}
 
-    rt_arena_block* block = arena->blocks;
-    while (block != NULL) {
-        rt_arena_block* next = block->next;
-        free(block);
-        block = next;
+static RT_UNUSED void rt_arena_free_lists(rt_arena* arena) {
+    rt_arena_free_lists_until(arena, NULL);
+}
+
+static RT_UNUSED rt_arena_chunk* rt_arena_new_chunk(size_t min_cap) {
+    size_t cap = RT_ARENA_DEFAULT_CHUNK_SIZE;
+    if (min_cap > cap) {
+        cap = min_cap;
     }
-    arena->blocks = NULL;
+    if (cap > SIZE_MAX - sizeof(rt_arena_chunk)) {
+        rt_runtime_fail("allocation size overflow");
+    }
+
+    rt_arena_chunk* chunk = malloc(sizeof(rt_arena_chunk) + cap);
+    if (chunk == NULL) {
+        rt_runtime_fail("allocation failed");
+    }
+    chunk->next = NULL;
+    chunk->cap = cap;
+    chunk->used = 0;
+    return chunk;
+}
+
+static RT_UNUSED void rt_arena_init(rt_arena* arena) {
+    arena->chunks = NULL;
+    arena->lists = NULL;
+}
+
+static RT_UNUSED void rt_arena_reset(rt_arena* arena) {
+    rt_arena_free_lists(arena);
+
+    rt_arena_chunk* chunk = arena->chunks;
+    while (chunk != NULL) {
+        chunk->used = 0;
+        chunk = chunk->next;
+    }
+}
+
+static RT_UNUSED void rt_arena_deinit(rt_arena* arena) {
+    rt_arena_free_lists(arena);
+
+    rt_arena_chunk* chunk = arena->chunks;
+    while (chunk != NULL) {
+        rt_arena_chunk* next = chunk->next;
+        free(chunk);
+        chunk = next;
+    }
+    arena->chunks = NULL;
+}
+
+static RT_UNUSED rt_arena_mark rt_arena_mark_current(rt_arena* arena) {
+    return (rt_arena_mark){
+        arena->chunks,
+        arena->chunks == NULL ? 0 : arena->chunks->used,
+        arena->lists,
+    };
+}
+
+static RT_UNUSED void rt_arena_rewind(rt_arena* arena, rt_arena_mark mark) {
+    rt_arena_free_lists_until(arena, mark.lists);
+
+    rt_arena_chunk* chunk = arena->chunks;
+    while (chunk != NULL && chunk != mark.chunk) {
+        chunk->used = 0;
+        chunk = chunk->next;
+    }
+    if (mark.chunk != NULL) {
+        mark.chunk->used = mark.used;
+    }
 }
 
 static RT_UNUSED void rt_arena_register_list(rt_arena* arena, void* list, void (*free_list)(void*)) {
@@ -84,18 +170,18 @@ static RT_UNUSED void* rt_arena_alloc(rt_arena* arena, size_t size) {
     if (size == 0) {
         return NULL;
     }
-    if (size > SIZE_MAX - sizeof(rt_arena_block)) {
-        rt_runtime_fail("allocation size overflow");
+    size_t aligned_size = rt_arena_align_up(size);
+
+    rt_arena_chunk* chunk = arena->chunks;
+    if (chunk == NULL || aligned_size > chunk->cap - chunk->used) {
+        chunk = rt_arena_new_chunk(aligned_size);
+        chunk->next = arena->chunks;
+        arena->chunks = chunk;
     }
 
-    rt_arena_block* block = malloc(sizeof(rt_arena_block) + size);
-    if (block == NULL) {
-        rt_runtime_fail("allocation failed");
-    }
-
-    block->next = arena->blocks;
-    arena->blocks = block;
-    return block->data;
+    void* data = (uint8_t*)chunk->data + chunk->used;
+    chunk->used += aligned_size;
+    return data;
 }
 
 static RT_UNUSED size_t rt_checked_count(int64_t count, const char* what) {

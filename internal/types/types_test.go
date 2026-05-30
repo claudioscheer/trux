@@ -157,11 +157,6 @@ func main() int {
 
 func TestCheckAllowsV3Collections(t *testing.T) {
 	program := mustParse(t, `package main
-func push(xs list[int], value int) list[int] {
-    append(xs, value)
-    return xs
-}
-
 func main() int {
     let xs [3]int = [3]int{1, 2, 3}
     let ys []int = xs[1:]
@@ -181,7 +176,7 @@ func main() int {
 		t.Fatal(err)
 	}
 
-	mainFn := program.Functions[1]
+	mainFn := program.Functions[0]
 	sliceLet := mainFn.Body.Statements[1].(*ast.LetStmt)
 	if !ast.TypeEqual(info.ExprTypes[sliceLet.Value], &ast.SliceType{Elem: ast.IntType}) {
 		t.Fatalf("slice expression type = %s, want []int", info.ExprTypes[sliceLet.Value])
@@ -197,6 +192,108 @@ func main() int {
 	chLet := mainFn.Body.Statements[7].(*ast.LetStmt)
 	if !ast.TypeEqual(info.ExprTypes[chLet.Value], ast.StringType) {
 		t.Fatalf("string index type = %s, want string", info.ExprTypes[chLet.Value])
+	}
+}
+
+func TestCheckRejectsParameterOwnedCollectionMutation(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "append list parameter",
+			src: `package main
+func push(xs list[int], value int) int {
+    append(xs, value)
+    return len(xs)
+}
+func main() int {
+    return 0
+}`,
+		},
+		{
+			name: "append list parameter alias",
+			src: `package main
+func push(xs list[int], value int) int {
+    let alias list[int] = xs
+    append(alias, value)
+    return len(alias)
+}
+func main() int {
+    return 0
+}`,
+		},
+		{
+			name: "assign through slice parameter",
+			src: `package main
+func write(xs []int) int {
+    xs[0] = 1
+    return xs[0]
+}
+func main() int {
+    return 0
+}`,
+		},
+		{
+			name: "assign through parameter slice view",
+			src: `package main
+func write(xs []int) int {
+    let view []int = xs[:]
+    view[0] = 1
+    return view[0]
+}
+func main() int {
+    return 0
+}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			program := mustParse(t, tt.src)
+			_, err := Check(program)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), "cannot mutate parameter-owned collection") {
+				t.Fatalf("error = %q, want parameter-owned collection mutation error", err.Error())
+			}
+		})
+	}
+}
+
+func TestCheckAllowsLocalCollectionMutationInFunction(t *testing.T) {
+	program := mustParse(t, `package main
+func build(value int) int {
+    let xs list[int] = list[int]{}
+    append(xs, value)
+    xs[0] = xs[0] + 1
+    return xs[0]
+}
+func main() int {
+    return build(1)
+}`)
+
+	if _, err := Check(program); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckRejectsBlockLocalEscape(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    if true {
+        let x int = 1
+    }
+    return x
+}`)
+
+	_, err := Check(program)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `undefined variable "x"`) {
+		t.Fatalf("error = %q, want undefined block local", err.Error())
 	}
 }
 

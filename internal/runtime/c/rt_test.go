@@ -1,0 +1,225 @@
+package c
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestArenaBumpAllocatesSmallValuesFromOneChunk(t *testing.T) {
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    void* first = rt_arena_alloc(&arena, 8);
+    void* second = rt_arena_alloc(&arena, 8);
+    if (first == NULL || second == NULL || first == second) {
+        fprintf(stderr, "expected distinct non-null allocations\n");
+        return 1;
+    }
+    if (rt_test_malloc_calls != 1) {
+        fprintf(stderr, "malloc calls = %zu, want 1\n", rt_test_malloc_calls);
+        return 1;
+    }
+
+    rt_arena_deinit(&arena);
+    if (rt_test_free_calls != 1) {
+        fprintf(stderr, "free calls = %zu, want 1\n", rt_test_free_calls);
+        return 1;
+    }
+    return 0;
+}
+`)
+}
+
+func TestArenaResetReusesChunks(t *testing.T) {
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    void* first = rt_arena_alloc(&arena, 8);
+    rt_arena_reset(&arena);
+    void* reused = rt_arena_alloc(&arena, 8);
+
+    if (reused != first) {
+        fprintf(stderr, "reset did not reuse chunk start\n");
+        return 1;
+    }
+    if (rt_test_malloc_calls != 1) {
+        fprintf(stderr, "malloc calls = %zu, want 1\n", rt_test_malloc_calls);
+        return 1;
+    }
+
+    rt_arena_deinit(&arena);
+    if (rt_test_free_calls != 1) {
+        fprintf(stderr, "free calls = %zu, want 1\n", rt_test_free_calls);
+        return 1;
+    }
+    return 0;
+}
+`)
+}
+
+func TestArenaRewindRestoresMarkedChunkOffset(t *testing.T) {
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    void* first = rt_arena_alloc(&arena, 8);
+    rt_arena_mark mark = rt_arena_mark_current(&arena);
+    void* temporary = rt_arena_alloc(&arena, 8);
+    rt_arena_rewind(&arena, mark);
+    void* reused = rt_arena_alloc(&arena, 8);
+
+    if (first == NULL || temporary == NULL || reused != temporary) {
+        fprintf(stderr, "rewind did not restore marked offset\n");
+        return 1;
+    }
+    if (rt_test_malloc_calls != 1) {
+        fprintf(stderr, "malloc calls = %zu, want 1\n", rt_test_malloc_calls);
+        return 1;
+    }
+
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`)
+}
+
+func TestArenaAllocatesLargeChunks(t *testing.T) {
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    void* data = rt_arena_alloc(&arena, RT_ARENA_DEFAULT_CHUNK_SIZE + 1);
+    if (data == NULL) {
+        fprintf(stderr, "large allocation returned NULL\n");
+        return 1;
+    }
+    if (arena.chunks == NULL || arena.chunks->cap < RT_ARENA_DEFAULT_CHUNK_SIZE + 1) {
+        fprintf(stderr, "large allocation chunk too small\n");
+        return 1;
+    }
+
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`)
+}
+
+func TestArenaRewindClearsListsRegisteredAfterMark(t *testing.T) {
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    rt_list_int* keep = rt_list_int_from_values(&arena, (int64_t[]){1}, 1);
+    rt_arena_mark mark = rt_arena_mark_current(&arena);
+    rt_list_int* drop = rt_list_int_from_values(&arena, (int64_t[]){2}, 1);
+    if (keep == NULL || drop == NULL || arena.lists == NULL || arena.lists->list != drop) {
+        fprintf(stderr, "list setup failed\n");
+        return 1;
+    }
+
+    rt_arena_rewind(&arena, mark);
+    if (arena.lists == NULL || arena.lists->list != keep || arena.lists->next != NULL) {
+        fprintf(stderr, "rewind did not restore list registration mark\n");
+        return 1;
+    }
+
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`)
+}
+
+func TestArenaResetClearsRegisteredLists(t *testing.T) {
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    rt_list_int* list = rt_list_int_from_values(&arena, (int64_t[]){1, 2}, 2);
+    if (list == NULL || list->len != 2) {
+        fprintf(stderr, "list setup failed\n");
+        return 1;
+    }
+    rt_arena_reset(&arena);
+    if (arena.lists != NULL) {
+        fprintf(stderr, "reset did not clear registered lists\n");
+        return 1;
+    }
+
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`)
+}
+
+func countingRuntimeSource() string {
+	const stdlibInclude = "#include <stdlib.h>\n"
+	const mallocHooks = `#include <stdlib.h>
+
+static size_t rt_test_malloc_calls = 0;
+static size_t rt_test_free_calls = 0;
+
+static void* rt_test_malloc(size_t size) {
+    rt_test_malloc_calls++;
+    return malloc(size);
+}
+
+static void rt_test_free(void* ptr) {
+    rt_test_free_calls++;
+    free(ptr);
+}
+
+static void* rt_test_realloc(void* ptr, size_t size) {
+    return realloc(ptr, size);
+}
+
+#define malloc rt_test_malloc
+#define free rt_test_free
+#define realloc rt_test_realloc
+`
+	return strings.Replace(Source, stdlibInclude, mallocHooks, 1)
+}
+
+func compileAndRunRuntimeC(t *testing.T, source string) {
+	t.Helper()
+
+	compiler := os.Getenv("CC")
+	if compiler == "" {
+		compiler = "cc"
+	}
+	if _, err := exec.LookPath(compiler); err != nil {
+		t.Skipf("C compiler %q not found", compiler)
+	}
+
+	dir := t.TempDir()
+	cPath := filepath.Join(dir, "main.c")
+	exePath := filepath.Join(dir, "main")
+	if err := os.WriteFile(cPath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	compile := exec.Command(compiler, "-std=c11", "-Wall", "-Wextra", "-pedantic", cPath, "-o", exePath)
+	output, err := compile.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compile runtime C: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != "" {
+		t.Fatalf("strict C compiler emitted warnings:\n%s", output)
+	}
+
+	run := exec.Command(exePath)
+	output, err = run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run runtime C: %v\n%s", err, output)
+	}
+}

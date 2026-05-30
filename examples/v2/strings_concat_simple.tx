@@ -1,0 +1,11 @@
+package main
+
+func main() int {
+    let language string = "trux"
+    let noun string = "compiler"
+    let name string = language + " " + noun
+
+    print(name)
+
+    return 0
+}

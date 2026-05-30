@@ -87,6 +87,32 @@ func main() int {
 	}
 }
 
+func TestRunFileKeepsTempStringReturnAliveForCaller(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func bang(name string) string {
+    let s string = name + "!"
+    return s
+}
+
+func main() int {
+    print(bang("a"))
+    print(bang("b"))
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if out.String() != "a!\nb!\n" {
+		t.Fatalf("output = %q, want a!\\nb!\\n", out.String())
+	}
+}
+
 func TestRunFileCompilesAndExecutesV2Examples(t *testing.T) {
 	requireCC(t)
 

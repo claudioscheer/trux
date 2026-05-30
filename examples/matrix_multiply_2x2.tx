@@ -1,0 +1,22 @@
+package main
+
+func multiply2x2(left [2][2]int, right [2][2]int) [2][2]int {
+    let result [2][2]int = [2][2]int{[2]int{0, 0}, [2]int{0, 0}}
+
+    result[0][0] = left[0][0] * right[0][0] + left[0][1] * right[1][0]
+    result[0][1] = left[0][0] * right[0][1] + left[0][1] * right[1][1]
+    result[1][0] = left[1][0] * right[0][0] + left[1][1] * right[1][0]
+    result[1][1] = left[1][0] * right[0][1] + left[1][1] * right[1][1]
+
+    return result
+}
+
+func main() int {
+    let a [2][2]int = [2][2]int{[2]int{1, 2}, [2]int{3, 4}}
+    let b [2][2]int = [2][2]int{[2]int{5, 6}, [2]int{7, 8}}
+    let product [2][2]int = multiply2x2(a, b)
+
+    print(product[0][0], " ", product[0][1])
+    print(product[1][0], " ", product[1][1])
+    return 0
+}

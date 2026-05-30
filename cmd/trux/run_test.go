@@ -167,6 +167,18 @@ func TestRunFileCompilesAndExecutesCollectionExamples(t *testing.T) {
 			path: "../../examples/ownership_clone.tx",
 			want: "99 2\n20 30\n1 42\n7 9\nab cd 2\n",
 		},
+		{
+			path: "../../examples/matrix_multiply_2x2.tx",
+			want: "19 22\n43 50\n",
+		},
+		{
+			path: "../../examples/jagged_lists.tx",
+			want: "3 3 1\n12 12 6\n",
+		},
+		{
+			path: "../../examples/nested_slices.tx",
+			want: "1 2 3\n2.5 9.5\n",
+		},
 	}
 
 	for _, tt := range tests {

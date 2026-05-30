@@ -15,6 +15,7 @@ import (
 
 	"github.com/claudioscheer/trux/internal/ast"
 	"github.com/claudioscheer/trux/internal/formatter"
+	modules "github.com/claudioscheer/trux/internal/modules"
 	"github.com/claudioscheer/trux/internal/parser"
 	"github.com/claudioscheer/trux/internal/token"
 	semtypes "github.com/claudioscheer/trux/internal/types"
@@ -139,7 +140,7 @@ func (s *Server) handleNotification(msg rpcMessage) error {
 
 func (s *Server) publishDiagnostics(uri string) error {
 	text := s.documents[uri]
-	diagnostics := diagnosticsFor(uri, text)
+	diagnostics := diagnosticsForDocuments(uri, text, s.documents)
 	return s.publishDiagnosticsFor(uri, diagnostics)
 }
 
@@ -192,7 +193,17 @@ func (s *Server) handleHover(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	text := s.documents[params.TextDocument.URI]
+	if hover, ok, err := s.hoverImportPath(params.TextDocument.URI, params.Position); err != nil || ok {
+		return hover, err
+	}
+	if hover, ok, err := s.hoverFunction(params.TextDocument.URI, params.Position); err != nil || ok {
+		return hover, err
+	}
+
+	text, err := s.documentText(params.TextDocument.URI)
+	if err != nil {
+		return nil, nil
+	}
 	word, ok := wordAt(text, params.Position)
 	if !ok {
 		return nil, nil
@@ -208,6 +219,7 @@ func (s *Server) handleHover(raw json.RawMessage) (any, error) {
 			Kind:  "markdown",
 			Value: value,
 		},
+		Range: rangeForWord(text, params.Position),
 	}, nil
 }
 
@@ -234,24 +246,60 @@ func initializeResult() map[string]any {
 }
 
 func diagnosticsFor(uri string, text string) []Diagnostic {
+	return diagnosticsForDocuments(uri, text, nil)
+}
+
+func diagnosticsForDocuments(uri string, text string, documents map[string]string) []Diagnostic {
 	path := pathFromURI(uri)
 	program, err := parser.ParseFile(path, text)
 	if err != nil {
 		return []Diagnostic{diagnosticFromError(text, err)}
 	}
 
-	if hasMain(program) && len(program.Imports) == 0 {
+	if !hasMain(program) {
+		return nil
+	}
+
+	if len(program.Imports) == 0 {
 		if _, err := semtypes.Check(program); err != nil {
 			return []Diagnostic{diagnosticFromError(text, err)}
 		}
+		return nil
+	}
+
+	sources := documentSources(documents)
+	sources[normalizePath(path)] = text
+	result, err := modules.LoadWithSources(path, sources)
+	if err != nil {
+		return []Diagnostic{diagnosticFromError(text, err)}
+	}
+	if _, err := semtypes.Check(result.Program); err != nil {
+		return []Diagnostic{diagnosticFromError(text, err)}
 	}
 
 	return nil
 }
 
+func documentSources(documents map[string]string) map[string]string {
+	sources := map[string]string{}
+	for uri, text := range documents {
+		sources[normalizePath(pathFromURI(uri))] = text
+	}
+	return sources
+}
+
 func diagnosticFromError(text string, err error) Diagnostic {
 	pos := token.Position{Line: 1, Column: 1}
 	message := err.Error()
+
+	var moduleErr *modules.Error
+	if errors.As(err, &moduleErr) {
+		pos = moduleErr.Pos
+		message = moduleErr.Msg
+		if moduleErr.Source != "" {
+			text = moduleErr.Source
+		}
+	}
 
 	var parseErr *parser.ParseError
 	if errors.As(err, &parseErr) {
@@ -611,6 +659,7 @@ type MarkupContent struct {
 
 type Hover struct {
 	Contents MarkupContent `json:"contents"`
+	Range    *Range        `json:"range,omitempty"`
 }
 
 var hoverText = map[string]string{
@@ -629,9 +678,17 @@ var hoverText = map[string]string{
 	"string":  "`string` is an immutable byte string.",
 	"bool":    "`bool` is either `true` or `false`.",
 	"list":    "`list[T]` is a mutable growable list for scalar element types.",
-	"print":   "`print(...)` writes one or more scalar values followed by a newline.",
-	"len":     "`len(x)` returns the length of a string, array, slice, or list.",
-	"clone":   "`clone(x)` creates an owned copy of a string, array, slice, or list.",
+	"print":   "`print(value, ...)` writes one or more scalar values followed by a newline.",
+	"len":     "`len(value) int` returns the length of a string, array, slice, or list.",
+	"clone":   "`clone(value) T` creates an owned copy of a string, array, slice, or list.",
 	"append":  "`append(list, value)` mutates a list by adding one value.",
-	"make":    "`make([]T, n)` creates zero-filled slice storage.",
+	"make":    "`make([]T, n) []T` creates zero-filled slice storage.",
+}
+
+var builtinFunctionHoverText = map[string]string{
+	"print":  "`print(value, ...)`",
+	"len":    "`len(value) int`",
+	"clone":  "`clone(value) T`",
+	"append": "`append(list, value)`",
+	"make":   "`make([]T, n) []T`",
 }

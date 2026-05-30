@@ -43,24 +43,82 @@ func main() int {
 	}
 }
 
-func TestDiagnosticsSkipTypeCheckForImportedPrograms(t *testing.T) {
-	diagnostics := diagnosticsFor("file:///tmp/main.tx", `package main
+func TestDiagnosticsTypeChecksImportedPrograms(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	libPath := filepath.Join(dir, "math.tx")
+	mainSrc := `package main
 import "math.tx"
 
 func main() int {
     return add(1, 2)
-}`)
+}
+`
+	libSrc := `package math
+pub func add(a int, b int) int {
+    return a + b
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(libPath, []byte(libSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+
+	diagnostics := diagnosticsForDocuments(mainURI, mainSrc, map[string]string{mainURI: mainSrc})
 
 	if len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v, want none", diagnostics)
 	}
 }
 
+func TestDiagnosticsForMissingImportedFunctionArguments(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	libPath := filepath.Join(dir, "math.tx")
+	mainSrc := `package main
+import "math.tx"
+
+func main() int {
+    print(add())
+    return 0
+}
+`
+	libSrc := `package math
+pub func add(a int, b int) int {
+    return a + b
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(libPath, []byte(libSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+
+	diagnostics := diagnosticsForDocuments(mainURI, mainSrc, map[string]string{mainURI: mainSrc})
+
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostic count = %d, want 1: %#v", len(diagnostics), diagnostics)
+	}
+	if diagnostics[0].Message != "add expects 2 arguments, got 0" {
+		t.Fatalf("message = %q, want missing argument error", diagnostics[0].Message)
+	}
+	if diagnostics[0].Range.Start != positionOf(t, mainSrc, "add()") {
+		t.Fatalf("range start = %#v, want add call", diagnostics[0].Range.Start)
+	}
+}
+
 func TestPublishDiagnosticsClearsWithEmptyArray(t *testing.T) {
 	var out bytes.Buffer
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &out)
-	uri := "file:///tmp/main.tx"
-	server.documents[uri] = `package main
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	libPath := filepath.Join(dir, "math.tx")
+	mainSrc := `package main
 import "math.tx"
 
 func main() int {
@@ -68,6 +126,19 @@ func main() int {
     return 0
 }
 `
+	libSrc := `package math
+pub func add(a int, b int) int {
+    return a + b
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(libPath, []byte(libSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	uri := uriFromPath(normalizePath(mainPath))
+	server.documents[uri] = mainSrc
 
 	if err := server.publishDiagnostics(uri); err != nil {
 		t.Fatal(err)
@@ -467,6 +538,74 @@ func TestHoverReturnsKnownSymbolDocumentation(t *testing.T) {
 	}
 }
 
+func TestHoverReturnsImportedFunctionSignature(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	libPath := filepath.Join(dir, "math.tx")
+	mainSrc := `package main
+import "math.tx"
+
+func main() int {
+    return add(1, 2)
+}
+`
+	libSrc := `package math
+pub func add(a int, b int) int {
+    return a + b
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(libPath, []byte(libSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = mainSrc
+
+	result, err := server.handleHover(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, mainSrc, "return ", "add"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hover := result.(Hover)
+	if hover.Contents.Value != "`pub func add(a int, b int) int`" {
+		t.Fatalf("hover = %#v, want imported function signature", hover)
+	}
+	assertRange(t, hover.Range, positionOfAfter(t, mainSrc, "return ", "add"), "add")
+}
+
+func TestHoverHighlightsFullImportPath(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/src/main.tx"
+	src := `package main
+import "../math.tx"
+
+func main() int {
+    return 0
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleHover(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOf(t, src, "math.tx"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hover := result.(Hover)
+	if hover.Contents.Value != "`import \"../math.tx\"`" {
+		t.Fatalf("hover = %#v, want import path hover", hover)
+	}
+	assertRange(t, hover.Range, positionOf(t, src, "../math.tx"), "../math.tx")
+}
+
 func TestReadAndWriteMessage(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
 	wire := "Content-Length: " + strconv.Itoa(len(input)) + "\r\n\r\n" + input
@@ -554,6 +693,24 @@ func assertLocation(t *testing.T, got Location, uri string, start Position, name
 	}
 	if got != want {
 		t.Fatalf("location = %#v, want %#v", got, want)
+	}
+}
+
+func assertRange(t *testing.T, got *Range, start Position, text string) {
+	t.Helper()
+
+	if got == nil {
+		t.Fatalf("range = nil, want range for %q", text)
+	}
+	want := Range{
+		Start: start,
+		End: Position{
+			Line:      start.Line,
+			Character: start.Character + len([]rune(text)),
+		},
+	}
+	if *got != want {
+		t.Fatalf("range = %#v, want %#v", *got, want)
 	}
 }
 

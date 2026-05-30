@@ -68,6 +68,11 @@ type sourceFile struct {
 	program *ast.Program
 }
 
+type importPathReference struct {
+	path  string
+	token token.Token
+}
+
 func (s *Server) handleDefinition(raw json.RawMessage) (any, error) {
 	var params definitionParams
 	if err := json.Unmarshal(raw, &params); err != nil {
@@ -148,14 +153,86 @@ func (s *Server) handleCompletion(raw json.RawMessage) (any, error) {
 	return completionListFromItems(items), nil
 }
 
-func (s *Server) resolveImportPath(uri string, pos Position) (Location, bool, error) {
-	text, ok := s.documents[uri]
+func (s *Server) hoverImportPath(uri string, pos Position) (Hover, bool, error) {
+	ref, ok, err := s.importPathAt(uri, pos)
+	if err != nil || !ok {
+		return Hover{}, ok, err
+	}
+
+	return Hover{
+		Contents: MarkupContent{
+			Kind:  "markdown",
+			Value: "`import \"" + ref.path + "\"`",
+		},
+		Range: importPathRange(ref.token),
+	}, true, nil
+}
+
+func (s *Server) hoverFunction(uri string, pos Position) (Hover, bool, error) {
+	text, err := s.documentText(uri)
+	if err != nil {
+		return Hover{}, false, err
+	}
+
+	word, ok := wordAt(text, pos)
 	if !ok {
-		var err error
-		text, err = readURI(uri)
-		if err != nil {
-			return Location{}, false, err
-		}
+		return Hover{}, false, nil
+	}
+
+	if value, ok := builtinFunctionHoverText[word]; ok {
+		return Hover{
+			Contents: MarkupContent{
+				Kind:  "markdown",
+				Value: value,
+			},
+			Range: rangeForWord(text, pos),
+		}, true, nil
+	}
+
+	def, graph, ok, err := s.resolveSymbolWithGraph(uri, pos)
+	if err != nil || !ok || def.Kind != functionSymbol {
+		return Hover{}, ok && def.Kind == functionSymbol, err
+	}
+
+	fn, ok := findFunctionDecl(graph, def)
+	if !ok {
+		return Hover{}, false, nil
+	}
+
+	return Hover{
+		Contents: MarkupContent{
+			Kind:  "markdown",
+			Value: "`" + functionSignature(fn) + "`",
+		},
+		Range: rangeForWord(text, pos),
+	}, true, nil
+}
+
+func (s *Server) resolveImportPath(uri string, pos Position) (Location, bool, error) {
+	ref, ok, err := s.importPathAt(uri, pos)
+	if err != nil || !ok {
+		return Location{}, ok, err
+	}
+
+	importPath := normalizePath(filepath.Join(filepath.Dir(normalizePath(pathFromURI(uri))), ref.path))
+	info, err := os.Stat(importPath)
+	if err != nil || info.IsDir() {
+		return Location{}, false, nil
+	}
+
+	return Location{
+		URI: uriFromPath(importPath),
+		Range: Range{
+			Start: Position{Line: 0, Character: 0},
+			End:   Position{Line: 0, Character: 0},
+		},
+	}, true, nil
+}
+
+func (s *Server) importPathAt(uri string, pos Position) (importPathReference, bool, error) {
+	text, err := s.documentText(uri)
+	if err != nil {
+		return importPathReference{}, false, err
 	}
 
 	path := normalizePath(pathFromURI(uri))
@@ -165,30 +242,27 @@ func (s *Server) resolveImportPath(uri string, pos Position) (Location, bool, er
 		if tokens[i].Type != token.Import || tokens[i+1].Type != token.String {
 			continue
 		}
+
 		importToken := tokens[i+1]
 		if !containsStringToken(cursor, importToken) {
 			continue
 		}
 		if filepath.IsAbs(importToken.Lexeme) || filepath.Ext(importToken.Lexeme) != ".tx" {
-			return Location{}, false, nil
+			return importPathReference{}, false, nil
 		}
 
-		importPath := normalizePath(filepath.Join(filepath.Dir(path), importToken.Lexeme))
-		info, err := os.Stat(importPath)
-		if err != nil || info.IsDir() {
-			return Location{}, false, nil
-		}
-
-		return Location{
-			URI: uriFromPath(importPath),
-			Range: Range{
-				Start: Position{Line: 0, Character: 0},
-				End:   Position{Line: 0, Character: 0},
-			},
-		}, true, nil
+		return importPathReference{path: importToken.Lexeme, token: importToken}, true, nil
 	}
 
-	return Location{}, false, nil
+	return importPathReference{}, false, nil
+}
+
+func (s *Server) documentText(uri string) (string, error) {
+	text, ok := s.documents[uri]
+	if ok {
+		return text, nil
+	}
+	return readURI(uri)
 }
 
 func (s *Server) resolveSymbol(uri string, pos Position) (symbolDefinition, bool, error) {
@@ -554,6 +628,32 @@ func findFunctionInFile(file *sourceFile, word string, includePrivate bool) (sym
 	return symbolDefinition{}, false
 }
 
+func findFunctionDecl(graph *sourceGraph, def symbolDefinition) (*ast.FuncDecl, bool) {
+	file := graph.files[def.Path]
+	if file == nil {
+		return nil, false
+	}
+	for _, fn := range file.program.Functions {
+		if fn.Name == def.Name && samePosition(fn.NamePos, def.Pos) {
+			return fn, true
+		}
+	}
+	return nil, false
+}
+
+func functionSignature(fn *ast.FuncDecl) string {
+	prefix := "func"
+	if fn.Public {
+		prefix = "pub func"
+	}
+
+	params := make([]string, 0, len(fn.Params))
+	for _, param := range fn.Params {
+		params = append(params, param.Name+" "+param.Type.String())
+	}
+	return prefix + " " + fn.Name + "(" + strings.Join(params, ", ") + ") " + fn.ReturnType.String()
+}
+
 func collectFunctionReferences(graph *sourceGraph, def symbolDefinition, includeDeclaration bool) []Location {
 	locations := []Location{}
 	if includeDeclaration {
@@ -790,6 +890,26 @@ func wordBoundsAt(text string, pos Position) (int, int, bool) {
 	}
 
 	return start, end, start < end
+}
+
+func rangeForWord(text string, pos Position) *Range {
+	start, end, ok := wordBoundsAt(text, pos)
+	if !ok {
+		return nil
+	}
+
+	return &Range{
+		Start: Position{Line: pos.Line, Character: start},
+		End:   Position{Line: pos.Line, Character: end},
+	}
+}
+
+func importPathRange(tok token.Token) *Range {
+	start := positionFromToken(tok.Pos)
+	start.Character++
+	end := start
+	end.Character += len([]rune(tok.Lexeme))
+	return &Range{Start: start, End: end}
 }
 
 func locationFor(uri string, pos token.Position, name string) Location {

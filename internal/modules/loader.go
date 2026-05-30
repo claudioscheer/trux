@@ -58,9 +58,13 @@ type functionInfo struct {
 
 type resolutionContext struct {
 	funcs         map[*fileUnit]map[string]*functionInfo
-	directImports map[*fileUnit]map[string]importRef
+	directImports map[*fileUnit]map[string]importSet
 	privateDecls  map[string][]*functionInfo
 	publicDecls   map[string][]*functionInfo
+}
+
+type importSet struct {
+	refs []importRef
 }
 
 type loader struct {
@@ -256,7 +260,7 @@ func (l *loader) validateAndMerge(entry *fileUnit) error {
 	needsHygiene := len(l.order) > 1
 	ctx := resolutionContext{
 		funcs:         map[*fileUnit]map[string]*functionInfo{},
-		directImports: map[*fileUnit]map[string]importRef{},
+		directImports: map[*fileUnit]map[string]importSet{},
 		privateDecls:  map[string][]*functionInfo{},
 		publicDecls:   map[string][]*functionInfo{},
 	}
@@ -308,16 +312,25 @@ func (l *loader) validateAndMerge(entry *fileUnit) error {
 	}
 
 	for _, unit := range l.order {
-		direct := map[string]importRef{}
+		direct := map[string]importSet{}
 		for _, ref := range unit.imports {
 			packageName := ref.packageName()
-			if existing, ok := direct[packageName]; ok {
-				if existing.sameTarget(ref) {
+			set := direct[packageName]
+			if len(set.refs) > 0 {
+				if set.hasTarget(ref) {
 					continue
 				}
-				return l.errorInUnit(unit, ref.decl.Pos, "package %q imported from both %s and %s", packageName, existing.describe(), ref.describe())
+				if set.isStdlib() || ref.isStdlib() {
+					return l.errorInUnit(unit, ref.decl.Pos, "package %q imported from both %s and %s", packageName, set.describe(), ref.describe())
+				}
 			}
-			direct[packageName] = ref
+			set.refs = append(set.refs, ref)
+			direct[packageName] = set
+		}
+		for packageName, set := range direct {
+			if err := l.validateDirectImportSet(unit, packageName, set, ctx); err != nil {
+				return err
+			}
 		}
 		ctx.directImports[unit] = direct
 	}
@@ -330,6 +343,28 @@ func (l *loader) validateAndMerge(entry *fileUnit) error {
 			if info := ctx.funcs[unit][fn.Name]; info != nil && info.internalName != fn.Name {
 				fn.Name = info.internalName
 			}
+		}
+	}
+
+	return nil
+}
+
+func (l *loader) validateDirectImportSet(unit *fileUnit, packageName string, set importSet, ctx resolutionContext) error {
+	if set.isStdlib() {
+		return nil
+	}
+
+	seen := map[string]*functionInfo{}
+	for _, ref := range set.refs {
+		for _, fn := range ref.unit.program.Functions {
+			info := ctx.funcs[ref.unit][fn.Name]
+			if !info.public {
+				continue
+			}
+			if previous := seen[fn.Name]; previous != nil {
+				return l.errorInUnit(unit, ref.decl.Pos, "package %q exports function %q from both %s and %s", packageName, fn.Name, previous.decl.Pos.File, info.decl.Pos.File)
+			}
+			seen[fn.Name] = info
 		}
 	}
 
@@ -451,12 +486,12 @@ func (l *loader) rewriteExprList(unit *fileUnit, exprs []ast.Expression, ctx res
 }
 
 func (l *loader) resolveQualifiedCall(unit *fileUnit, expr *ast.CallExpr, ctx resolutionContext) error {
-	ref, ok := ctx.directImports[unit][expr.Package]
+	set, ok := ctx.directImports[unit][expr.Package]
 	if !ok {
 		return l.errorInUnit(unit, expr.Start, "package %q is not imported by %s", expr.Package, unit.path)
 	}
 
-	if ref.isStdlib() {
+	if set.isStdlib() {
 		if _, ok := stdlib.LookupMember(expr.Package, expr.Callee); !ok {
 			return l.errorInUnit(unit, expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
 		}
@@ -464,16 +499,25 @@ func (l *loader) resolveQualifiedCall(unit *fileUnit, expr *ast.CallExpr, ctx re
 		return nil
 	}
 
-	info := ctx.funcs[ref.unit][expr.Callee]
-	if info == nil {
-		return l.errorInUnit(unit, expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
+	var private *functionInfo
+	for _, ref := range set.refs {
+		info := ctx.funcs[ref.unit][expr.Callee]
+		if info == nil {
+			continue
+		}
+		if !info.public {
+			if private == nil {
+				private = info
+			}
+			continue
+		}
+		expr.ResolvedCallee = info.internalName
+		return nil
 	}
-	if !info.public {
-		return l.errorInUnit(unit, expr.Start, "cannot call private function %q from %s; it is declared in %s", expr.SourceName(), unit.path, info.decl.Pos.File)
+	if private != nil {
+		return l.errorInUnit(unit, expr.Start, "cannot call private function %q from %s; it is declared in %s", expr.SourceName(), unit.path, private.decl.Pos.File)
 	}
-
-	expr.ResolvedCallee = info.internalName
-	return nil
+	return l.errorInUnit(unit, expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
 }
 
 func (l *loader) directExportingPackage(unit *fileUnit, name string, ctx resolutionContext) (string, bool) {
@@ -484,16 +528,18 @@ func (l *loader) directExportingPackage(unit *fileUnit, name string, ctx resolut
 	sort.Strings(packages)
 
 	for _, packageName := range packages {
-		ref := ctx.directImports[unit][packageName]
-		if ref.isStdlib() {
+		set := ctx.directImports[unit][packageName]
+		if set.isStdlib() {
 			if _, ok := stdlib.LookupMember(packageName, name); ok {
 				return packageName, true
 			}
 			continue
 		}
-		info := ctx.funcs[ref.unit][name]
-		if info != nil && info.public {
-			return packageName, true
+		for _, ref := range set.refs {
+			info := ctx.funcs[ref.unit][name]
+			if info != nil && info.public {
+				return packageName, true
+			}
 		}
 	}
 
@@ -507,6 +553,27 @@ func isBuiltin(name string) bool {
 	default:
 		return false
 	}
+}
+
+func (set importSet) isStdlib() bool {
+	return len(set.refs) > 0 && set.refs[0].isStdlib()
+}
+
+func (set importSet) hasTarget(other importRef) bool {
+	for _, ref := range set.refs {
+		if ref.sameTarget(other) {
+			return true
+		}
+	}
+	return false
+}
+
+func (set importSet) describe() string {
+	descriptions := make([]string, 0, len(set.refs))
+	for _, ref := range set.refs {
+		descriptions = append(descriptions, ref.describe())
+	}
+	return strings.Join(descriptions, ", ")
 }
 
 func (ref importRef) isStdlib() bool {

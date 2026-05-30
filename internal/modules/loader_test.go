@@ -327,14 +327,14 @@ pub func value() int {
 	}
 }
 
-func TestLoadRejectsDuplicateDirectPackageNames(t *testing.T) {
+func TestLoadAllowsSamePackageDirectImports(t *testing.T) {
 	dir := t.TempDir()
 	writeSource(t, dir, "main.tx", `package main
 import "a.tx"
 import "b.tx"
 
 func main() int {
-    return 0
+    return util.a() + util.b()
 }`)
 	writeSource(t, dir, "a.tx", `package util
 pub func a() int {
@@ -345,11 +345,38 @@ pub func b() int {
     return 2
 }`)
 
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := semtypes.Check(result.Program); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadRejectsDuplicatePublicFunctionsInSamePackageDirectImports(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "a.tx"
+import "b.tx"
+
+func main() int {
+    return util.value()
+}`)
+	writeSource(t, dir, "a.tx", `package util
+pub func value() int {
+    return 1
+}`)
+	writeSource(t, dir, "b.tx", `package util
+pub func value() int {
+    return 2
+}`)
+
 	_, err := Load(filepath.Join(dir, "main.tx"))
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	assertErrorContains(t, err, `package "util" imported from both`)
+	assertErrorContains(t, err, `package "util" exports function "value" from both`)
 }
 
 func TestLoadRejectsReservedFunctionPrefixAndImportedMain(t *testing.T) {

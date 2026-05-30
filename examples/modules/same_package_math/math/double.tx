@@ -1,0 +1,9 @@
+package math
+
+pub func double(n int) int {
+  return n + n
+}
+
+pub func square(n int) int {
+  return n * n
+}

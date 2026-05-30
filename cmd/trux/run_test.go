@@ -215,6 +215,10 @@ func TestRunFileCompilesAndExecutesModuleExamples(t *testing.T) {
 			path: "../../examples/modules/private_names/main.tx",
 			want: "11 22\n",
 		},
+		{
+			path: "../../examples/modules/same_package_math/main.tx",
+			want: "7 25 12\n",
+		},
 	}
 
 	for _, tt := range tests {

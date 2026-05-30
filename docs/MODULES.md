@@ -4,7 +4,7 @@
 
 Trux now has initial module support. Programs can load multiple `.tx` source files through relative imports, while the backend still compiles the loaded program into a single generated `.c` file.
 
-The implemented stage supports `import "relative/path.tx"`, standard package imports such as `import "io"` and `import "csv"`, `pub func`, package-qualified calls such as `math.add(...)`, private file-local functions, private-name hygiene, import de-duplication, different package names per loaded file, and cycle detection. Directory-based packages, reusable package artifacts, and separate C compilation are still deferred.
+The implemented stage supports `import "relative/path.tx"`, standard package imports such as `import "io"` and `import "csv"`, `pub func`, package-qualified calls such as `math.add(...)`, private file-local functions, private-name hygiene, import de-duplication, different package names per loaded file, multiple direct imports that share one package name, and cycle detection. Directory-based packages, reusable package artifacts, and separate C compilation are still deferred.
 
 ## Generated C Code and Modules
 
@@ -49,7 +49,7 @@ The first cut of module support uses the following concrete design:
 - **Name rules**:
   - No two functions in the same file may share the same source name.
   - Public function names may overlap across packages because imported calls are package-qualified.
-  - A file may not directly import two different files that declare the same package name.
+  - A file may directly import multiple files that declare the same package name when their public function names are unique. The shared package qualifier resolves across those direct imports.
   - Private functions may have the same name in different files (they are file-local).
 - **Implementation technique**: A loader parses the entry file and all transitive imports, detects cycles, and performs a small hygiene/merge pass. Private functions receive compiler-unique internal names only for the duration of type checking and code generation. The result is a single flat `Program` fed to the existing type checker, IR builder, and code generator. This keeps changes to the existing type checker and codegen small.
 - **Output**: Still one concatenated `.c` file containing the runtime plus all functions from all modules.
@@ -85,7 +85,7 @@ Concrete loader rules:
 - A source file is loaded at most once, even if reached through multiple import paths such as `foo.tx` and `./foo.tx`.
 - Import cycles are reported with the import chain, including file paths.
 - Missing source imports, directories, and non-`.tx` source paths are compile errors.
-- Public functions from directly imported files are visible only through `package.function(...)`.
+- Public functions from directly imported files are visible only through `package.function(...)`. When multiple direct imports declare the same package name, that package qualifier resolves across all uniquely named public functions in those direct imports.
 - Transitive imports are loaded for dependencies, but they do not introduce callable package qualifiers into the importing file.
 
 This still treats imports closer to controlled source inclusion than to reusable package artifacts. The tradeoff is intentional: it avoids separate module compilation while still giving source code a real package-qualified call surface.
@@ -144,7 +144,8 @@ Before treating module support as complete, add focused tests for:
 - Rejecting missing imports, absolute imports, and non-`.tx` imports.
 - Allowing same-named private functions in different files.
 - Allowing duplicate public function names across different packages.
-- Rejecting duplicate direct import package names.
+- Allowing multiple direct imports with the same package name when public export names are unique.
+- Rejecting duplicate public function names across same-package direct imports.
 - Rejecting user function names that use the reserved compiler-internal prefix.
 - Rewriting same-file private calls to internal names.
 - Rejecting calls to another file's private function.

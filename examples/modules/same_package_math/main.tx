@@ -1,0 +1,8 @@
+package main
+import "math/add.tx"
+import "math/mul.tx"
+
+func main() int {
+  print(math.add(3, 4), " ", math.squareSum(3, 4), " ", math.mul(3, 4))
+  return 0
+}

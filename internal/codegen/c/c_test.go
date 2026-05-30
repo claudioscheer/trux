@@ -584,14 +584,14 @@ func main() int {
 func TestGenerateCreatesCForIO(t *testing.T) {
 	cSource := mustGenerateC(t, `package main
 func main() int {
-    let line string = read_line()
-    let count int = read_int()
-    let ratio float = read_float()
-    let ready bool = read_bool()
-    let text string = read_file("input.txt")
-    write_file("out.txt", text + line)
-    let cells list[string] = read_csv("in.csv", 2)
-    write_csv("out.csv", cells, 2)
+    let line string = readLine()
+    let count int = readInt()
+    let ratio float = readFloat()
+    let ready bool = readBool()
+    let text string = readFile("input.txt")
+    writeFile("out.txt", text + line)
+    let cells list[string] = readCsv("in.csv", 2)
+    writeCsv("out.csv", cells, 2)
     print(line, " ", count, " ", ratio, " ", ready, " ", len(cells))
     return 0
 }`)

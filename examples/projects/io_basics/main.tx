@@ -1,16 +1,16 @@
 package main
 
 func main() int {
-  let name string = read_line()
-  let bonus int = read_int()
+  let name string = readLine()
+  let bonus int = readInt()
 
-  let note string = read_file("examples/projects/io_basics/input.txt")
-  write_file("examples/projects/io_basics/copy.txt", note + "\n" + name)
+  let note string = readFile("examples/projects/io_basics/input.txt")
+  writeFile("examples/projects/io_basics/copy.txt", note + "\n" + name)
 
-  let cells list[string] = read_csv("examples/projects/io_basics/input.csv", 2)
+  let cells list[string] = readCsv("examples/projects/io_basics/input.csv", 2)
   append(cells, name)
   append(cells, "interactive")
-  write_csv("examples/projects/io_basics/output.csv", cells, 2)
+  writeCsv("examples/projects/io_basics/output.csv", cells, 2)
 
   print("hello ", name)
   print(bonus + 1)

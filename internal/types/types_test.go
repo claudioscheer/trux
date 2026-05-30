@@ -370,14 +370,14 @@ func main() int {
 func TestCheckAllowsIOBuiltins(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {
-    let line string = read_line()
-    let count int = read_int()
-    let ratio float = read_float()
-    let ready bool = read_bool()
-    let text string = read_file("input.txt")
-    write_file("out.txt", text + line)
-    let cells list[string] = read_csv("in.csv", 2)
-    write_csv("out.csv", cells, 2)
+    let line string = readLine()
+    let count int = readInt()
+    let ratio float = readFloat()
+    let ready bool = readBool()
+    let text string = readFile("input.txt")
+    writeFile("out.txt", text + line)
+    let cells list[string] = readCsv("in.csv", 2)
+    writeCsv("out.csv", cells, 2)
     print(line, " ", count, " ", ratio, " ", ready, " ", len(cells))
     return 0
 }`)
@@ -407,12 +407,12 @@ func main() int {
 	}
 
 	mainFn := program.Functions[0]
-	readCSVLet := mainFn.Body.Statements[6].(*ast.LetStmt)
-	if !ast.TypeEqual(info.ExprTypes[readCSVLet.Value], &ast.ListType{Elem: ast.StringType}) {
-		t.Fatalf("read_csv type = %s, want list[string]", info.ExprTypes[readCSVLet.Value])
+	readCsvLet := mainFn.Body.Statements[6].(*ast.LetStmt)
+	if !ast.TypeEqual(info.ExprTypes[readCsvLet.Value], &ast.ListType{Elem: ast.StringType}) {
+		t.Fatalf("readCsv type = %s, want list[string]", info.ExprTypes[readCsvLet.Value])
 	}
-	if info.ExprOrigins[readCSVLet.Value] != OriginFrameOwned {
-		t.Fatalf("read_csv origin = %s, want %s", info.ExprOrigins[readCSVLet.Value], OriginFrameOwned)
+	if info.ExprOrigins[readCsvLet.Value] != OriginFrameOwned {
+		t.Fatalf("readCsv origin = %s, want %s", info.ExprOrigins[readCsvLet.Value], OriginFrameOwned)
 	}
 }
 
@@ -759,49 +759,49 @@ func main() int {
 			want: `make expects slice type, got int`,
 		},
 		{
-			name: "read_line arity",
+			name: "readLine arity",
 			src: `package main
 func main() int {
-    let line string = read_line("prompt")
+    let line string = readLine("prompt")
     return 0
 }`,
-			want: `read_line expects 0 arguments, got 1`,
+			want: `readLine expects 0 arguments, got 1`,
 		},
 		{
-			name: "read_file path type",
+			name: "readFile path type",
 			src: `package main
 func main() int {
-    let text string = read_file(1)
+    let text string = readFile(1)
     return 0
 }`,
-			want: `read_file path has type int, want string`,
+			want: `readFile path has type int, want string`,
 		},
 		{
-			name: "write_file expression",
+			name: "writeFile expression",
 			src: `package main
 func main() int {
-    return write_file("out.txt", "contents")
+    return writeFile("out.txt", "contents")
 }`,
-			want: `write_file can only be used as a statement`,
+			want: `writeFile can only be used as a statement`,
 		},
 		{
-			name: "read_csv columns type",
+			name: "readCsv columns type",
 			src: `package main
 func main() int {
-    let cells list[string] = read_csv("in.csv", "2")
+    let cells list[string] = readCsv("in.csv", "2")
     return 0
 }`,
-			want: `read_csv columns has type string, want int`,
+			want: `readCsv columns has type string, want int`,
 		},
 		{
-			name: "write_csv cells type",
+			name: "writeCsv cells type",
 			src: `package main
 func main() int {
     let cells list[int] = list[int]{1}
-    write_csv("out.csv", cells, 1)
+    writeCsv("out.csv", cells, 1)
     return 0
 }`,
-			want: `write_csv cells has type list[int], want list[string]`,
+			want: `writeCsv cells has type list[int], want list[string]`,
 		},
 	}
 

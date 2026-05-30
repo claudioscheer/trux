@@ -47,14 +47,14 @@ type CloneSig struct {
 type IOCallKind string
 
 const (
-	IOCallReadLine  IOCallKind = "read_line"
-	IOCallReadInt   IOCallKind = "read_int"
-	IOCallReadFloat IOCallKind = "read_float"
-	IOCallReadBool  IOCallKind = "read_bool"
-	IOCallReadFile  IOCallKind = "read_file"
-	IOCallWriteFile IOCallKind = "write_file"
-	IOCallReadCSV   IOCallKind = "read_csv"
-	IOCallWriteCSV  IOCallKind = "write_csv"
+	IOCallReadLine  IOCallKind = "readLine"
+	IOCallReadInt   IOCallKind = "readInt"
+	IOCallReadFloat IOCallKind = "readFloat"
+	IOCallReadBool  IOCallKind = "readBool"
+	IOCallReadFile  IOCallKind = "readFile"
+	IOCallWriteFile IOCallKind = "writeFile"
+	IOCallReadCSV   IOCallKind = "readCsv"
+	IOCallWriteCSV  IOCallKind = "writeCsv"
 )
 
 type IOCallSig struct {
@@ -603,79 +603,79 @@ func (c *checker) checkIOCall(expr *ast.CallExpr, argTypes []ast.Type, allowStat
 	switch IOCallKind(expr.Callee) {
 	case IOCallReadLine:
 		if len(argTypes) != 0 {
-			return nil, "", true, typeError(expr.Start, "read_line expects 0 arguments, got %d", len(argTypes))
+			return nil, "", true, typeError(expr.Start, "readLine expects 0 arguments, got %d", len(argTypes))
 		}
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadLine}
 		return ast.StringType, OriginFrameOwned, true, nil
 	case IOCallReadInt:
 		if len(argTypes) != 0 {
-			return nil, "", true, typeError(expr.Start, "read_int expects 0 arguments, got %d", len(argTypes))
+			return nil, "", true, typeError(expr.Start, "readInt expects 0 arguments, got %d", len(argTypes))
 		}
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadInt}
 		return ast.IntType, OriginOwned, true, nil
 	case IOCallReadFloat:
 		if len(argTypes) != 0 {
-			return nil, "", true, typeError(expr.Start, "read_float expects 0 arguments, got %d", len(argTypes))
+			return nil, "", true, typeError(expr.Start, "readFloat expects 0 arguments, got %d", len(argTypes))
 		}
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadFloat}
 		return ast.FloatType, OriginOwned, true, nil
 	case IOCallReadBool:
 		if len(argTypes) != 0 {
-			return nil, "", true, typeError(expr.Start, "read_bool expects 0 arguments, got %d", len(argTypes))
+			return nil, "", true, typeError(expr.Start, "readBool expects 0 arguments, got %d", len(argTypes))
 		}
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadBool}
 		return ast.BoolType, OriginOwned, true, nil
 	case IOCallReadFile:
 		if len(argTypes) != 1 {
-			return nil, "", true, typeError(expr.Start, "read_file expects 1 argument, got %d", len(argTypes))
+			return nil, "", true, typeError(expr.Start, "readFile expects 1 argument, got %d", len(argTypes))
 		}
 		if !ast.TypeEqual(argTypes[0], ast.StringType) {
-			return nil, "", true, typeError(expr.Args[0].Pos(), "read_file path has type %s, want string", argTypes[0])
+			return nil, "", true, typeError(expr.Args[0].Pos(), "readFile path has type %s, want string", argTypes[0])
 		}
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadFile}
 		return ast.StringType, OriginFrameOwned, true, nil
 	case IOCallWriteFile:
 		if !allowStatementOnly {
-			return nil, "", true, typeError(expr.Start, "write_file can only be used as a statement")
+			return nil, "", true, typeError(expr.Start, "writeFile can only be used as a statement")
 		}
 		if len(argTypes) != 2 {
-			return nil, "", true, typeError(expr.Start, "write_file expects 2 arguments, got %d", len(argTypes))
+			return nil, "", true, typeError(expr.Start, "writeFile expects 2 arguments, got %d", len(argTypes))
 		}
 		if !ast.TypeEqual(argTypes[0], ast.StringType) {
-			return nil, "", true, typeError(expr.Args[0].Pos(), "write_file path has type %s, want string", argTypes[0])
+			return nil, "", true, typeError(expr.Args[0].Pos(), "writeFile path has type %s, want string", argTypes[0])
 		}
 		if !ast.TypeEqual(argTypes[1], ast.StringType) {
-			return nil, "", true, typeError(expr.Args[1].Pos(), "write_file contents has type %s, want string", argTypes[1])
+			return nil, "", true, typeError(expr.Args[1].Pos(), "writeFile contents has type %s, want string", argTypes[1])
 		}
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallWriteFile}
 		return ast.StringType, OriginUnknown, true, nil
 	case IOCallReadCSV:
 		if len(argTypes) != 2 {
-			return nil, "", true, typeError(expr.Start, "read_csv expects 2 arguments, got %d", len(argTypes))
+			return nil, "", true, typeError(expr.Start, "readCsv expects 2 arguments, got %d", len(argTypes))
 		}
 		if !ast.TypeEqual(argTypes[0], ast.StringType) {
-			return nil, "", true, typeError(expr.Args[0].Pos(), "read_csv path has type %s, want string", argTypes[0])
+			return nil, "", true, typeError(expr.Args[0].Pos(), "readCsv path has type %s, want string", argTypes[0])
 		}
 		if !ast.TypeEqual(argTypes[1], ast.IntType) {
-			return nil, "", true, typeError(expr.Args[1].Pos(), "read_csv columns has type %s, want int", argTypes[1])
+			return nil, "", true, typeError(expr.Args[1].Pos(), "readCsv columns has type %s, want int", argTypes[1])
 		}
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallReadCSV}
 		return &ast.ListType{Elem: ast.StringType}, OriginFrameOwned, true, nil
 	case IOCallWriteCSV:
 		if !allowStatementOnly {
-			return nil, "", true, typeError(expr.Start, "write_csv can only be used as a statement")
+			return nil, "", true, typeError(expr.Start, "writeCsv can only be used as a statement")
 		}
 		if len(argTypes) != 3 {
-			return nil, "", true, typeError(expr.Start, "write_csv expects 3 arguments, got %d", len(argTypes))
+			return nil, "", true, typeError(expr.Start, "writeCsv expects 3 arguments, got %d", len(argTypes))
 		}
 		if !ast.TypeEqual(argTypes[0], ast.StringType) {
-			return nil, "", true, typeError(expr.Args[0].Pos(), "write_csv path has type %s, want string", argTypes[0])
+			return nil, "", true, typeError(expr.Args[0].Pos(), "writeCsv path has type %s, want string", argTypes[0])
 		}
 		if !ast.TypeEqual(argTypes[1], &ast.ListType{Elem: ast.StringType}) {
-			return nil, "", true, typeError(expr.Args[1].Pos(), "write_csv cells has type %s, want list[string]", argTypes[1])
+			return nil, "", true, typeError(expr.Args[1].Pos(), "writeCsv cells has type %s, want list[string]", argTypes[1])
 		}
 		if !ast.TypeEqual(argTypes[2], ast.IntType) {
-			return nil, "", true, typeError(expr.Args[2].Pos(), "write_csv columns has type %s, want int", argTypes[2])
+			return nil, "", true, typeError(expr.Args[2].Pos(), "writeCsv columns has type %s, want int", argTypes[2])
 		}
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallWriteCSV}
 		return ast.StringType, OriginUnknown, true, nil

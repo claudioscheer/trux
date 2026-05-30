@@ -137,7 +137,7 @@
         },
         {
           "name": "support.function.builtin.trux",
-          "match": "\\b(print|len|clone|append|make|read_line|read_int|read_float|read_bool|read_file|write_file|read_csv|write_csv)(?=\\s*\\()"
+          "match": "\\b(print|len|clone|append|make|readLine|readInt|readFloat|readBool|readFile|writeFile|readCsv|writeCsv)(?=\\s*\\()"
         },
         {
           "name": "meta.function-call.qualified.trux",

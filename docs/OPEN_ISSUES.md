@@ -22,7 +22,7 @@ Tradeoff: this would make generated C smaller and avoid unnecessary arena init/d
 
 Status: open
 
-I/O now works, but it is exposed as compiler-recognized global builtins (`read_line`, `read_int`, `read_file`, `write_file`, `read_csv`, and `write_csv`). That keeps examples small, but it makes I/O part of the always-available global language surface.
+I/O now works, but it is exposed as compiler-recognized global builtins (`readLine`, `readInt`, `readFile`, `writeFile`, `readCsv`, and `writeCsv`). That keeps examples small, but it makes I/O part of the always-available global language surface.
 
 Current shape:
 
@@ -30,9 +30,9 @@ Current shape:
 package main
 
 func main() int {
-  let name string = read_line()
-  let note string = read_file("input.txt")
-  write_file("copy.txt", note + "\n" + name)
+  let name string = readLine()
+  let note string = readFile("input.txt")
+  writeFile("copy.txt", note + "\n" + name)
   return 0
 }
 ```
@@ -45,9 +45,9 @@ package main
 import "io"
 
 func main() int {
-  let name string = io.read_line()
-  let note string = io.read_file("input.txt")
-  io.write_file("copy.txt", note + "\n" + name)
+  let name string = io.readLine()
+  let note string = io.readFile("input.txt")
+  io.writeFile("copy.txt", note + "\n" + name)
   return 0
 }
 ```

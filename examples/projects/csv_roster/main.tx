@@ -1,13 +1,13 @@
 package main
 
 func main() int {
-  let name string = read_line()
-  let team string = read_line()
-  let cells list[string] = read_csv("examples/projects/csv_roster/roster.csv", 2)
+  let name string = readLine()
+  let team string = readLine()
+  let cells list[string] = readCsv("examples/projects/csv_roster/roster.csv", 2)
 
   append(cells, name)
   append(cells, team)
-  write_csv("examples/projects/csv_roster/out.csv", cells, 2)
+  writeCsv("examples/projects/csv_roster/out.csv", cells, 2)
 
   print(len(cells), " cells")
   print(cells[0], " ", cells[1])

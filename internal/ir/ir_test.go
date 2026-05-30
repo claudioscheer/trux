@@ -284,12 +284,12 @@ func main() int {
 func TestBuildCreatesTypedIRForIO(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {
-    let line string = read_line()
-    let count int = read_int()
-    let text string = read_file("input.txt")
-    write_file("out.txt", text + line)
-    let cells list[string] = read_csv("in.csv", 2)
-    write_csv("out.csv", cells, 2)
+    let line string = readLine()
+    let count int = readInt()
+    let text string = readFile("input.txt")
+    writeFile("out.txt", text + line)
+    let cells list[string] = readCsv("in.csv", 2)
+    writeCsv("out.csv", cells, 2)
     print(line, " ", count, " ", len(cells))
     return 0
 }`)
@@ -316,12 +316,12 @@ func main() int {
 	if _, ok := mainFn.Body[3].(*WriteFileStmt); !ok {
 		t.Fatalf("fourth statement = %T, want WriteFileStmt", mainFn.Body[3])
 	}
-	readCSV := mainFn.Body[4].(*LetStmt).Value
-	if !ast.TypeEqual(readCSV.Type(), &ast.ListType{Elem: ast.StringType}) {
-		t.Fatalf("read_csv type = %s, want list[string]", readCSV.Type())
+	readCsv := mainFn.Body[4].(*LetStmt).Value
+	if !ast.TypeEqual(readCsv.Type(), &ast.ListType{Elem: ast.StringType}) {
+		t.Fatalf("readCsv type = %s, want list[string]", readCsv.Type())
 	}
-	if _, ok := readCSV.(*ReadCSVExpr); !ok {
-		t.Fatalf("cells let value = %T, want ReadCSVExpr", readCSV)
+	if _, ok := readCsv.(*ReadCSVExpr); !ok {
+		t.Fatalf("cells let value = %T, want ReadCSVExpr", readCsv)
 	}
 	if _, ok := mainFn.Body[5].(*WriteCSVStmt); !ok {
 		t.Fatalf("sixth statement = %T, want WriteCSVStmt", mainFn.Body[5])

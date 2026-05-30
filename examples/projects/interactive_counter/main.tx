@@ -1,8 +1,8 @@
 package main
 
 func main() int {
-  let name string = read_line()
-  let start int = read_int()
+  let name string = readLine()
+  let start int = readInt()
   let i int = 0
 
   print("counter for ", name)

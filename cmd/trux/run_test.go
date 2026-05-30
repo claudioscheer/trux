@@ -369,10 +369,10 @@ func TestRunFileCompilesAndExecutesInputProgram(t *testing.T) {
 
 	path := writeTempSource(t, `package main
 func main() int {
-    let name string = read_line()
-    let count int = read_int()
-    let ratio float = read_float()
-    let ready bool = read_bool()
+    let name string = readLine()
+    let count int = readInt()
+    let ratio float = readFloat()
+    let ready bool = readBool()
     print(name, " ", count + 1, " ", ratio, " ", ready)
     return 0
 }`)
@@ -405,13 +405,13 @@ func TestRunFileCompilesAndExecutesFileAndCSVIO(t *testing.T) {
 
 	path := writeTempSource(t, `package main
 func main() int {
-    let text string = read_file(`+truxString(inputPath)+`)
-    write_file(`+truxString(copyPath)+`, text + "!")
+    let text string = readFile(`+truxString(inputPath)+`)
+    writeFile(`+truxString(copyPath)+`, text + "!")
 
-    let cells list[string] = read_csv(`+truxString(csvPath)+`, 2)
+    let cells list[string] = readCsv(`+truxString(csvPath)+`, 2)
     append(cells, "Cara")
     append(cells, "3")
-    write_csv(`+truxString(outCSVPath)+`, cells, 2)
+    writeCsv(`+truxString(outCSVPath)+`, cells, 2)
 
     print(text)
     print(len(cells), " ", cells[2])

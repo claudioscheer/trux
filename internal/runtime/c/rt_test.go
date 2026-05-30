@@ -474,7 +474,7 @@ int main(void) {
     rt_write_file(text_path, (rt_string){(const uint8_t*)"alpha\nbeta", 10});
     rt_string text = rt_read_file(&arena, text_path);
     if (!rt_string_equal(text, (rt_string){(const uint8_t*)"alpha\nbeta", 10})) {
-        fprintf(stderr, "read_file returned unexpected contents\n");
+        fprintf(stderr, "rt_read_file returned unexpected contents\n");
         return 1;
     }
 
@@ -483,7 +483,7 @@ int main(void) {
     if (cells->len != 4 ||
         !rt_string_equal(cells->data[0], (rt_string){(const uint8_t*)"name", 4}) ||
         !rt_string_equal(cells->data[2], (rt_string){(const uint8_t*)"A, B", 4})) {
-        fprintf(stderr, "read_csv returned unexpected cells\n");
+        fprintf(stderr, "rt_read_csv returned unexpected cells\n");
         return 1;
     }
 

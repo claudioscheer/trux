@@ -132,9 +132,9 @@ printf 'Ada\n41\n' | make run FILE=examples/projects/io_basics/main.tx
 More complete IO examples live under [examples/projects/](examples/projects/):
 
 - `io_basics`: stdin, file IO, and CSV IO in one small program
-- `interactive_counter`: stdin with `read_line` and `read_int`
-- `file_notes`: `read_file` and `write_file`
-- `csv_roster`: `read_csv`, list mutation, and `write_csv`
+- `interactive_counter`: stdin with `readLine` and `readInt`
+- `file_notes`: `readFile` and `writeFile`
+- `csv_roster`: `readCsv`, list mutation, and `writeCsv`
 
 ## Commands
 
@@ -149,5 +149,5 @@ make lsp
 
 ## Documentation
 
-See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including arenas, IO, modules, and future GPU ideas.
+See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including naming, arenas, IO, modules, and future GPU ideas.
 Editor tooling lives in [tooling/](tooling/), including the Go language server and VS Code extension.

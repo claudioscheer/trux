@@ -27,6 +27,7 @@ return x
 	}
 
 	want := `package main
+
 import "math.tx"
 
 pub func add(a int, b int) int {
@@ -61,6 +62,7 @@ return 0
 	}
 
 	want := `package main
+
 import "math.tx"
 
 func main() int {
@@ -91,6 +93,7 @@ return 0
 	}
 
 	want := `package main
+
 func mid(xs []int) []int {
   return xs[1:2]
 }
@@ -120,6 +123,7 @@ return result [0][0]+items [0]
 	}
 
 	want := `package main
+
 func main() int {
   let result [2][2]int = [2][2]int{[2]int{0, 0}, [2]int{0, 0}}
   let items list[int] = list[int]{1, 2}
@@ -145,12 +149,78 @@ return 0
 	}
 
 	want := `package main
+
 // file comment
 func main() int {
   print("https://trux.test", "line\nquote: \"") // trailing comment
   return 0
 }
 `
+	if got != want {
+		t.Fatalf("formatted source:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestFormatNormalizesPackageAndImportSpacing(t *testing.T) {
+	src := `package   math
+import   "double.tx"
+pub   func add(a int,b int)int{
+return a+b
+}`
+
+	got, err := Format("math.tx", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := `package math
+
+import "double.tx"
+
+pub func add(a int, b int) int {
+  return a + b
+}
+`
+	if got != want {
+		t.Fatalf("formatted source:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestFormatGroupsImports(t *testing.T) {
+	src := `package main
+import "io"
+
+import "csv"
+func main() int{
+return 0
+}`
+
+	got, err := Format("main.tx", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := `package main
+
+import "io"
+import "csv"
+
+func main() int {
+  return 0
+}
+`
+	if got != want {
+		t.Fatalf("formatted source:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestFormatDoesNotAddPackageGapAtEOF(t *testing.T) {
+	got, err := Format("main.tx", "package main\n\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "package main\n"
 	if got != want {
 		t.Fatalf("formatted source:\n%s\nwant:\n%s", got, want)
 	}

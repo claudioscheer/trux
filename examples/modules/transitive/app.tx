@@ -1,4 +1,5 @@
 package app
+
 import "text.tx"
 
 pub func message() string {

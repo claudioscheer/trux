@@ -1,4 +1,5 @@
 package math
+
 import "double.tx"
 
 pub func add(a int, b int) int {

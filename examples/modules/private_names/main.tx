@@ -1,4 +1,5 @@
 package main
+
 import "alpha.tx"
 import "beta.tx"
 

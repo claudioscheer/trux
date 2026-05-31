@@ -81,7 +81,57 @@ func formatSource(path string, src string) (string, error) {
 		}
 	}
 
+	out = normalizePackageImportSpacing(out)
 	return strings.Join(out, "\n") + "\n", nil
+}
+
+func normalizePackageImportSpacing(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		out = append(out, line)
+
+		switch {
+		case isPackageLine(line):
+			next := nextNonBlankLine(lines, i+1)
+			if next < 0 {
+				i = len(lines)
+				continue
+			}
+			out = append(out, "")
+			i = next - 1
+		case isImportLine(line):
+			next := nextNonBlankLine(lines, i+1)
+			if next < 0 {
+				i = len(lines)
+				continue
+			}
+			if isImportLine(lines[next]) {
+				i = next - 1
+				continue
+			}
+			out = append(out, "")
+			i = next - 1
+		}
+	}
+	return out
+}
+
+func nextNonBlankLine(lines []string, start int) int {
+	for i := start; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) != "" {
+			return i
+		}
+	}
+	return -1
+}
+
+func isPackageLine(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(line), "package ")
+}
+
+func isImportLine(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(line), "import ")
 }
 
 func splitLineComment(line string) (string, string) {

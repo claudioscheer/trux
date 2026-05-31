@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/claudioscheer/trux/internal/ast"
+	"github.com/claudioscheer/trux/internal/lexer"
 	"github.com/claudioscheer/trux/internal/parser"
 	"github.com/claudioscheer/trux/internal/stdlib"
 	"github.com/claudioscheer/trux/internal/token"
@@ -56,8 +57,14 @@ type functionInfo struct {
 	public       bool
 }
 
+type packageKey struct {
+	dir  string
+	name string
+}
+
 type resolutionContext struct {
 	funcs         map[*fileUnit]map[string]*functionInfo
+	packageFuncs  map[packageKey]map[string]*functionInfo
 	directImports map[*fileUnit]map[string]importSet
 	privateDecls  map[string][]*functionInfo
 	publicDecls   map[string][]*functionInfo
@@ -93,7 +100,7 @@ func load(entryPath string, sources map[string]string) (*Result, error) {
 		sources:  map[string]string{},
 		overlays: sources,
 	}
-	entry, err := l.loadFile(path, token.Position{}, nil)
+	entry, err := l.loadFile(path, token.Position{}, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +172,7 @@ func canonicalEntryPath(path string, sources map[string]string) (string, error) 
 	return filepath.Clean(real), nil
 }
 
-func (l *loader) loadFile(path string, importPos token.Position, stack []string) (*fileUnit, error) {
+func (l *loader) loadFile(path string, importPos token.Position, stack []string, includeSiblings bool) (*fileUnit, error) {
 	if cycleStart := indexPath(stack, path); cycleStart >= 0 {
 		return nil, l.errorAt(importPos, "import cycle detected: %s", strings.Join(append(stack[cycleStart:], path), " -> "))
 	}
@@ -173,13 +180,9 @@ func (l *loader) loadFile(path string, importPos token.Position, stack []string)
 		return unit, nil
 	}
 
-	source, ok := l.overlays[path]
-	if !ok {
-		sourceBytes, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", path, err)
-		}
-		source = string(sourceBytes)
+	source, err := l.readSource(path)
+	if err != nil {
+		return nil, err
 	}
 	l.sources[path] = source
 
@@ -211,14 +214,93 @@ func (l *loader) loadFile(path string, importPos token.Position, stack []string)
 		if err != nil {
 			return nil, err
 		}
-		imported, err := l.loadFile(importPath, importDecl.Pos, stack)
+		imported, err := l.loadFile(importPath, importDecl.Pos, stack, true)
 		if err != nil {
 			return nil, err
 		}
 		unit.imports = append(unit.imports, importRef{decl: importDecl, unit: imported})
 	}
 
+	if includeSiblings {
+		if err := l.loadSamePackageSiblings(unit, stack); err != nil {
+			return nil, err
+		}
+	}
+
 	return unit, nil
+}
+
+func (l *loader) readSource(path string) (string, error) {
+	if source, ok := l.overlays[path]; ok {
+		return source, nil
+	}
+
+	sourceBytes, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	return string(sourceBytes), nil
+}
+
+func (l *loader) loadSamePackageSiblings(unit *fileUnit, stack []string) error {
+	for _, path := range l.samePackageSiblingPaths(unit) {
+		if _, err := l.loadFile(path, token.Position{}, stack, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *loader) samePackageSiblingPaths(unit *fileUnit) []string {
+	dir := filepath.Dir(unit.path)
+	candidates := map[string]struct{}{}
+
+	entries, err := os.ReadDir(dir)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".tx" {
+				continue
+			}
+			path := filepath.Clean(filepath.Join(dir, entry.Name()))
+			if real, err := filepath.EvalSymlinks(path); err == nil {
+				path = filepath.Clean(real)
+			}
+			candidates[path] = struct{}{}
+		}
+	}
+
+	for path := range l.overlays {
+		if filepath.Dir(path) == dir && filepath.Ext(path) == ".tx" {
+			candidates[path] = struct{}{}
+		}
+	}
+
+	delete(candidates, unit.path)
+
+	paths := make([]string, 0, len(candidates))
+	for path := range candidates {
+		if _, loaded := l.loaded[path]; loaded {
+			continue
+		}
+		source, err := l.readSource(path)
+		if err != nil {
+			continue
+		}
+		if packageNameFromSource(path, source) != unit.program.PackageName {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func packageNameFromSource(path string, source string) string {
+	tokens := lexer.LexFile(path, source)
+	if len(tokens) < 2 || tokens[0].Type != token.Package || tokens[1].Type != token.Ident {
+		return ""
+	}
+	return tokens[1].Lexeme
 }
 
 func (l *loader) resolveImport(unit *fileUnit, importDecl *ast.ImportDecl) (string, error) {
@@ -260,6 +342,7 @@ func (l *loader) validateAndMerge(entry *fileUnit) error {
 	needsHygiene := len(l.order) > 1
 	ctx := resolutionContext{
 		funcs:         map[*fileUnit]map[string]*functionInfo{},
+		packageFuncs:  map[packageKey]map[string]*functionInfo{},
 		directImports: map[*fileUnit]map[string]importSet{},
 		privateDecls:  map[string][]*functionInfo{},
 		publicDecls:   map[string][]*functionInfo{},
@@ -268,6 +351,10 @@ func (l *loader) validateAndMerge(entry *fileUnit) error {
 	for _, unit := range l.order {
 		seenInFile := map[string]*ast.FuncDecl{}
 		ctx.funcs[unit] = map[string]*functionInfo{}
+		key := unit.packageKey()
+		if ctx.packageFuncs[key] == nil {
+			ctx.packageFuncs[key] = map[string]*functionInfo{}
+		}
 
 		for _, fn := range unit.program.Functions {
 			if strings.HasPrefix(fn.Name, internalPrefix) {
@@ -298,6 +385,10 @@ func (l *loader) validateAndMerge(entry *fileUnit) error {
 				public:       fn.Public,
 			}
 			ctx.funcs[unit][fn.Name] = info
+			if previous := ctx.packageFuncs[key][fn.Name]; previous != nil {
+				return l.errorInUnit(unit, fn.Pos, "package %q defines function %q in both %s and %s", key.name, fn.Name, previous.decl.Pos.File, info.decl.Pos.File)
+			}
+			ctx.packageFuncs[key][fn.Name] = info
 
 			if fn.Name == "main" {
 				continue
@@ -355,16 +446,21 @@ func (l *loader) validateDirectImportSet(unit *fileUnit, packageName string, set
 	}
 
 	seen := map[string]*functionInfo{}
+	seenPackages := map[packageKey]struct{}{}
 	for _, ref := range set.refs {
-		for _, fn := range ref.unit.program.Functions {
-			info := ctx.funcs[ref.unit][fn.Name]
+		key := ref.unit.packageKey()
+		if _, seenPackage := seenPackages[key]; seenPackage {
+			continue
+		}
+		seenPackages[key] = struct{}{}
+		for name, info := range ctx.packageFuncs[key] {
 			if !info.public {
 				continue
 			}
-			if previous := seen[fn.Name]; previous != nil {
-				return l.errorInUnit(unit, ref.decl.Pos, "package %q exports function %q from both %s and %s", packageName, fn.Name, previous.decl.Pos.File, info.decl.Pos.File)
+			if previous := seen[name]; previous != nil {
+				return l.errorInUnit(unit, ref.decl.Pos, "package %q exports function %q from both %s and %s", packageName, name, previous.decl.Pos.File, info.decl.Pos.File)
 			}
-			seen[fn.Name] = info
+			seen[name] = info
 		}
 	}
 
@@ -439,6 +535,10 @@ func (l *loader) rewriteExprCalls(unit *fileUnit, expr ast.Expression, ctx resol
 			expr.ResolvedCallee = info.internalName
 			return nil
 		}
+		if info := ctx.packageFuncs[unit.packageKey()][expr.Callee]; info != nil {
+			expr.ResolvedCallee = info.internalName
+			return nil
+		}
 		if packageName, ok := l.directExportingPackage(unit, expr.Callee, ctx); ok {
 			return l.errorInUnit(unit, expr.Start, "imported function %q must be called as %q", expr.Callee, packageName+"."+expr.Callee)
 		}
@@ -500,8 +600,14 @@ func (l *loader) resolveQualifiedCall(unit *fileUnit, expr *ast.CallExpr, ctx re
 	}
 
 	var private *functionInfo
+	seenPackages := map[packageKey]struct{}{}
 	for _, ref := range set.refs {
-		info := ctx.funcs[ref.unit][expr.Callee]
+		key := ref.unit.packageKey()
+		if _, seenPackage := seenPackages[key]; seenPackage {
+			continue
+		}
+		seenPackages[key] = struct{}{}
+		info := ctx.packageFuncs[key][expr.Callee]
 		if info == nil {
 			continue
 		}
@@ -535,8 +641,14 @@ func (l *loader) directExportingPackage(unit *fileUnit, name string, ctx resolut
 			}
 			continue
 		}
+		seenPackages := map[packageKey]struct{}{}
 		for _, ref := range set.refs {
-			info := ctx.funcs[ref.unit][name]
+			key := ref.unit.packageKey()
+			if _, seenPackage := seenPackages[key]; seenPackage {
+				continue
+			}
+			seenPackages[key] = struct{}{}
+			info := ctx.packageFuncs[key][name]
 			if info != nil && info.public {
 				return packageName, true
 			}
@@ -599,6 +711,13 @@ func (ref importRef) describe() string {
 		return fmt.Sprintf("standard package %q", ref.stdName)
 	}
 	return ref.unit.path
+}
+
+func (unit *fileUnit) packageKey() packageKey {
+	return packageKey{
+		dir:  filepath.Dir(unit.path),
+		name: unit.program.PackageName,
+	}
 }
 
 func isBareImport(path string) bool {

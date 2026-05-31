@@ -5,5 +5,5 @@ func value() int {
 }
 
 pub func beta() int {
-  return value() + 2
+  return value() + 2 + value2()
 }

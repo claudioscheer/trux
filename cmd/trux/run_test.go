@@ -213,7 +213,7 @@ func TestRunFileCompilesAndExecutesModuleExamples(t *testing.T) {
 		},
 		{
 			path: "../../examples/modules/private_names/main.tx",
-			want: "11 22\n",
+			want: "11 42\n",
 		},
 		{
 			path: "../../examples/modules/same_package_math/main.tx",

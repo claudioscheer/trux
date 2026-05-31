@@ -71,6 +71,11 @@ type sourceFile struct {
 	program *ast.Program
 }
 
+type packageKey struct {
+	dir  string
+	name string
+}
+
 type importedPackage struct {
 	name   string
 	files  []*sourceFile
@@ -209,6 +214,9 @@ func (s *Server) handleCompletion(raw json.RawMessage) (any, error) {
 			items = appendCompletionItem(items, seen, item)
 		}
 		for _, item := range sameFileFunctionCompletionItems(file) {
+			items = appendCompletionItem(items, seen, item)
+		}
+		for _, item := range samePackageFunctionCompletionItems(graph, file) {
 			items = appendCompletionItem(items, seen, item)
 		}
 	}
@@ -891,20 +899,16 @@ func loadSourceGraph(activePath string, activeText string, documents map[string]
 	openDocuments[activePath] = activeText
 
 	graph := &sourceGraph{files: map[string]*sourceFile{}}
-	var load func(path string)
-	load = func(path string) {
+	var load func(path string, includeSiblings bool)
+	load = func(path string, includeSiblings bool) {
 		path = normalizePath(path)
 		if _, exists := graph.files[path]; exists {
 			return
 		}
 
-		text, ok := openDocuments[path]
+		text, ok := sourceTextForPath(path, openDocuments)
 		if !ok {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return
-			}
-			text = string(data)
+			return
 		}
 
 		program, err := parser.ParseFile(path, text)
@@ -925,11 +929,17 @@ func loadSourceGraph(activePath string, activeText string, documents map[string]
 			if filepath.IsAbs(importDecl.Path) || filepath.Ext(importDecl.Path) != ".tx" {
 				continue
 			}
-			load(filepath.Join(normalizePath(filepath.Dir(path)), importDecl.Path))
+			load(filepath.Join(normalizePath(filepath.Dir(path)), importDecl.Path), true)
+		}
+
+		if includeSiblings || !hasMain(program) {
+			for _, siblingPath := range samePackageSiblingPaths(file, openDocuments, graph.files) {
+				load(siblingPath, true)
+			}
 		}
 	}
 
-	load(activePath)
+	load(activePath, false)
 	return graph
 }
 
@@ -959,43 +969,146 @@ func directImportedPackages(activePath string, activeText string, documents map[
 		if _, ok := seenPaths[path]; ok {
 			continue
 		}
-		seenPaths[path] = struct{}{}
 
-		text, ok := openDocuments[path]
-		if !ok {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-			text = string(data)
-		}
-
-		program, err := parser.ParseFile(path, text)
-		if err != nil {
+		files := importedPackageFiles(path, openDocuments)
+		if len(files) == 0 {
 			continue
 		}
-
-		file := &sourceFile{
-			path:    path,
-			uri:     uriFromPath(path),
-			text:    text,
-			program: program,
+		for _, file := range files {
+			seenPaths[file.path] = struct{}{}
 		}
-		if index, ok := packageIndex[program.PackageName]; ok {
-			imports[index].files = append(imports[index].files, file)
+
+		packageName := files[0].program.PackageName
+		if index, ok := packageIndex[packageName]; ok {
+			imports[index].files = append(imports[index].files, files...)
 			continue
 		}
-		packageIndex[program.PackageName] = len(imports)
-		imports = append(imports, importedPackage{name: program.PackageName, files: []*sourceFile{file}})
+		packageIndex[packageName] = len(imports)
+		imports = append(imports, importedPackage{name: packageName, files: files})
 	}
 
 	return imports
+}
+
+func sourceTextForPath(path string, openDocuments map[string]string) (string, bool) {
+	path = normalizePath(path)
+	if text, ok := openDocuments[path]; ok {
+		return text, true
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
+}
+
+func importedPackageFiles(path string, openDocuments map[string]string) []*sourceFile {
+	path = normalizePath(path)
+	text, ok := sourceTextForPath(path, openDocuments)
+	if !ok {
+		return nil
+	}
+	program, err := parser.ParseFile(path, text)
+	if err != nil {
+		return nil
+	}
+
+	file := &sourceFile{
+		path:    path,
+		uri:     uriFromPath(path),
+		text:    text,
+		program: program,
+	}
+	files := []*sourceFile{file}
+	loaded := map[string]*sourceFile{path: file}
+	for _, siblingPath := range samePackageSiblingPaths(file, openDocuments, loaded) {
+		siblingText, ok := sourceTextForPath(siblingPath, openDocuments)
+		if !ok {
+			continue
+		}
+		siblingProgram, err := parser.ParseFile(siblingPath, siblingText)
+		if err != nil {
+			continue
+		}
+		sibling := &sourceFile{
+			path:    siblingPath,
+			uri:     uriFromPath(siblingPath),
+			text:    siblingText,
+			program: siblingProgram,
+		}
+		loaded[siblingPath] = sibling
+		files = append(files, sibling)
+	}
+	return files
+}
+
+func samePackageSiblingPaths(file *sourceFile, openDocuments map[string]string, loaded map[string]*sourceFile) []string {
+	dir := filepath.Dir(file.path)
+	candidates := map[string]struct{}{}
+
+	entries, err := os.ReadDir(dir)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".tx" {
+				continue
+			}
+			path := normalizePath(filepath.Join(dir, entry.Name()))
+			candidates[path] = struct{}{}
+		}
+	}
+
+	for path := range openDocuments {
+		if filepath.Dir(path) == dir && filepath.Ext(path) == ".tx" {
+			candidates[path] = struct{}{}
+		}
+	}
+
+	delete(candidates, file.path)
+
+	paths := make([]string, 0, len(candidates))
+	for path := range candidates {
+		if _, exists := loaded[path]; exists {
+			continue
+		}
+		text, ok := sourceTextForPath(path, openDocuments)
+		if !ok {
+			continue
+		}
+		if packageNameFromText(path, text) != file.program.PackageName {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func packageNameFromText(path string, text string) string {
+	tokens := lexer.LexFile(path, text)
+	if len(tokens) < 2 || tokens[0].Type != token.Package || tokens[1].Type != token.Ident {
+		return ""
+	}
+	return tokens[1].Lexeme
 }
 
 func sameFileFunctionCompletionItems(file *sourceFile) []CompletionItem {
 	items := []CompletionItem{}
 	for _, fn := range file.program.Functions {
 		items = append(items, CompletionItem{Label: fn.Name, Kind: completionKindFunction, Detail: "function"})
+	}
+	return items
+}
+
+func samePackageFunctionCompletionItems(graph *sourceGraph, file *sourceFile) []CompletionItem {
+	items := []CompletionItem{}
+	for _, packageFile := range samePackageFiles(graph, file) {
+		if packageFile.path == file.path {
+			continue
+		}
+		for _, fn := range packageFile.program.Functions {
+			items = append(items, CompletionItem{Label: fn.Name, Kind: completionKindFunction, Detail: "function from package " + file.program.PackageName})
+		}
 	}
 	return items
 }
@@ -1625,14 +1738,26 @@ func cloneLocalScope(scope map[string]localDefinition) map[string]localDefinitio
 }
 
 func findFunctionDefinition(graph *sourceGraph, activePath string, word string) (symbolDefinition, bool) {
-	if file := graph.files[activePath]; file != nil {
-		if def, ok := findFunctionInFile(file, word, true); ok {
+	activeFile := graph.files[activePath]
+	if activeFile != nil {
+		if def, ok := findFunctionInFile(activeFile, word, true); ok {
 			return def, true
+		}
+		for _, file := range samePackageFiles(graph, activeFile) {
+			if file.path == activePath {
+				continue
+			}
+			if def, ok := findFunctionInFile(file, word, true); ok {
+				return def, true
+			}
 		}
 	}
 
 	for _, file := range graph.order {
 		if file.path == activePath {
+			continue
+		}
+		if activeFile != nil && samePackage(file, activeFile) {
 			continue
 		}
 		if def, ok := findFunctionInFile(file, word, false); ok {
@@ -1695,8 +1820,9 @@ func collectFunctionReferences(graph *sourceGraph, def symbolDefinition, include
 		locations = append(locations, locationFor(def.URI, def.Pos, def.Name))
 	}
 
+	defFile := graph.files[def.Path]
 	for _, file := range graph.order {
-		if !def.Public && file.path != def.Path {
+		if !def.Public && (defFile == nil || !samePackage(file, defFile)) {
 			continue
 		}
 		if def.Public && file.path != def.Path && hasPrivateFunction(file, def.Name) {
@@ -1708,6 +1834,27 @@ func collectFunctionReferences(graph *sourceGraph, def symbolDefinition, include
 	}
 
 	return locations
+}
+
+func samePackageFiles(graph *sourceGraph, file *sourceFile) []*sourceFile {
+	files := []*sourceFile{}
+	for _, candidate := range graph.order {
+		if samePackage(candidate, file) {
+			files = append(files, candidate)
+		}
+	}
+	return files
+}
+
+func samePackage(left *sourceFile, right *sourceFile) bool {
+	return sourcePackageKey(left) == sourcePackageKey(right)
+}
+
+func sourcePackageKey(file *sourceFile) packageKey {
+	return packageKey{
+		dir:  filepath.Dir(file.path),
+		name: file.program.PackageName,
+	}
 }
 
 func hasPrivateFunction(file *sourceFile, name string) bool {

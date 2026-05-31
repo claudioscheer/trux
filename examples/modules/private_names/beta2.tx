@@ -1,0 +1,5 @@
+package beta
+
+func value2() int {
+  return 20
+}

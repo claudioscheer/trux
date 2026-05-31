@@ -44,6 +44,8 @@ func main() int
 
 The generated C program contains a real `main` function that creates the runtime context, calls the Trux `main`, and returns its integer exit code.
 
+Importing a source file also loads same-directory sibling `.tx` files that declare the same package. The entry file does not auto-load siblings. Functions without `pub` are package-private inside that same-directory package group and are called unqualified. `pub func` is required for external package-qualified calls.
+
 ## Types
 
 Supported scalar types:
@@ -137,7 +139,7 @@ io.readFile(path)
 csv.read(path, columns)
 ```
 
-Imported public functions must be called through the package declared by the imported file. Multiple direct imports may declare the same package name, and the shared package qualifier resolves across all uniquely named public functions in those files:
+Imported public functions must be called through the package declared by the imported file. Multiple direct imports may declare the same package name, and the shared package qualifier resolves across all uniquely named public functions in those package groups:
 
 ```trux
 import "math/add.tx"
@@ -378,6 +380,7 @@ syntax errors
 undefined variables
 undefined functions
 duplicate function names in the same file
+duplicate function names in the same-directory package group
 duplicate local variables
 wrong number of function arguments
 missing main function
@@ -405,6 +408,7 @@ append values with the wrong element type
 mutation of parameter-owned collections or aliases/views of them
 make with a non-slice type or non-int length
 clone with the wrong arity or unsupported type
+qualified calls to private package functions
 standard `io` and `csv` package calls with the wrong arity or argument types
 io.writeFile and csv.write outside statement position
 ```
@@ -428,7 +432,7 @@ trux emit-c main.tx
 
 These ideas are not implemented and should not drive current language usage:
 
-- directory-based packages
+- recursive directory-based packages
 - multi-file C output
 - GPU kernels
 

@@ -76,6 +76,52 @@ pub func add(a int, b int) int {
 	}
 }
 
+func TestDiagnosticsTypeChecksSamePackageSiblings(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	betaPath := filepath.Join(dir, "beta.tx")
+	beta2Path := filepath.Join(dir, "beta2.tx")
+	mainSrc := `package main
+import "beta.tx"
+
+func main() int {
+    return beta.beta()
+}
+`
+	betaSrc := `package beta
+pub func beta() int {
+    return value2()
+}
+`
+	beta2Src := `package beta
+func value2() int {
+    return 2
+}
+`
+	for path, src := range map[string]string{
+		mainPath:  mainSrc,
+		betaPath:  betaSrc,
+		beta2Path: beta2Src,
+	} {
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+	betaURI := uriFromPath(normalizePath(betaPath))
+	beta2URI := uriFromPath(normalizePath(beta2Path))
+
+	diagnostics := diagnosticsForDocuments(mainURI, mainSrc, map[string]string{
+		mainURI:  mainSrc,
+		betaURI:  betaSrc,
+		beta2URI: beta2Src,
+	})
+
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v, want none", diagnostics)
+	}
+}
+
 func TestDiagnosticsTypeChecksStandardLibraryImports(t *testing.T) {
 	uri := "file:///tmp/main.tx"
 	src := `package main
@@ -317,6 +363,44 @@ pub func use() int {
 
 	location := result.(Location)
 	assertLocation(t, location, libURI, positionOf(t, libSrc, "add(a"), "add")
+}
+
+func TestDefinitionForSamePackageSiblingPrivateFunction(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	betaPath := filepath.Join(dir, "beta.tx")
+	beta2Path := filepath.Join(dir, "beta2.tx")
+	betaSrc := `package beta
+pub func beta() int {
+    return value2()
+}
+`
+	beta2Src := `package beta
+func value2() int {
+    return 2
+}
+`
+	if err := os.WriteFile(betaPath, []byte(betaSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(beta2Path, []byte(beta2Src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	betaURI := uriFromPath(normalizePath(betaPath))
+	beta2URI := uriFromPath(normalizePath(beta2Path))
+	server.documents[betaURI] = betaSrc
+	server.documents[beta2URI] = beta2Src
+
+	result, err := server.handleDefinition(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": betaURI},
+		"position":     positionOfAfter(t, betaSrc, "return ", "value2"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	location := result.(Location)
+	assertLocation(t, location, beta2URI, positionOf(t, beta2Src, "value2()"), "value2")
 }
 
 func TestDefinitionForImportPath(t *testing.T) {
@@ -601,6 +685,49 @@ pub func use() int {
 	assertLocation(t, locations[1], mainURI, positionOfAfter(t, mainSrc, "math.", "add"), "add")
 }
 
+func TestReferencesForSamePackageSiblingPrivateFunction(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	betaPath := filepath.Join(dir, "beta.tx")
+	beta2Path := filepath.Join(dir, "beta2.tx")
+	betaSrc := `package beta
+pub func beta() int {
+    return value2()
+}
+`
+	beta2Src := `package beta
+func value2() int {
+    return 2
+}
+`
+	if err := os.WriteFile(betaPath, []byte(betaSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(beta2Path, []byte(beta2Src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	betaURI := uriFromPath(normalizePath(betaPath))
+	beta2URI := uriFromPath(normalizePath(beta2Path))
+	server.documents[betaURI] = betaSrc
+	server.documents[beta2URI] = beta2Src
+
+	result, err := server.handleReferences(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": beta2URI},
+		"position":     positionOf(t, beta2Src, "value2()"),
+		"context":      map[string]any{"includeDeclaration": true},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	locations := result.([]Location)
+	if len(locations) != 2 {
+		t.Fatalf("reference count = %d, want 2: %#v", len(locations), locations)
+	}
+	assertLocation(t, locations[0], beta2URI, positionOf(t, beta2Src, "value2()"), "value2")
+	assertLocation(t, locations[1], betaURI, positionOfAfter(t, betaSrc, "return ", "value2"), "value2")
+}
+
 func TestCompletionIncludesVisibleSymbols(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	dir := t.TempDir()
@@ -669,6 +796,47 @@ pub func add(a int, b int) int {
 		}
 	}
 	assertMissingCompletion(t, items, "add")
+}
+
+func TestCompletionIncludesSamePackagePrivateFunctions(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	betaPath := filepath.Join(dir, "beta.tx")
+	beta2Path := filepath.Join(dir, "beta2.tx")
+	betaSrc := `package beta
+pub func beta() int {
+    return val
+}
+`
+	beta2Src := `package beta
+func value2() int {
+    return 2
+}
+`
+	if err := os.WriteFile(betaPath, []byte(betaSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(beta2Path, []byte(beta2Src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	betaURI := uriFromPath(normalizePath(betaPath))
+	server.documents[betaURI] = betaSrc
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": betaURI},
+		"position":     positionOfAfter(t, betaSrc, "return ", "val"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	if item, ok := findCompletionItem(items, "value2"); !ok {
+		t.Fatalf("missing same-package private completion value2 in %#v", items)
+	} else if item.Detail != "function from package beta" {
+		t.Fatalf("value2 detail = %q, want same-package detail", item.Detail)
+	}
+	assertMissingCompletion(t, items, "beta.value2")
 }
 
 func TestCompletionIncludesQualifiedImportedFunctionsWithIncompleteBuffer(t *testing.T) {
@@ -1070,6 +1238,56 @@ pub func trim(value string) string {
 	assertMissingCompletion(t, items, "strings")
 }
 
+func TestCompletionOmitsPrivateSamePackageMembersAfterDot(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	betaPath := filepath.Join(dir, "beta.tx")
+	beta2Path := filepath.Join(dir, "beta2.tx")
+	mainSrc := `package main
+import "beta.tx"
+
+func main() int {
+    return beta.
+}
+`
+	betaSrc := `package beta
+pub func beta() int {
+    return value2()
+}
+`
+	beta2Src := `package beta
+func value2() int {
+    return 2
+}
+`
+	for path, src := range map[string]string{
+		mainPath:  mainSrc,
+		betaPath:  betaSrc,
+		beta2Path: beta2Src,
+	} {
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = mainSrc
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, mainSrc, "return beta.", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := result.(CompletionList).Items
+	if _, ok := findCompletionItem(items, "beta"); !ok {
+		t.Fatalf("missing public package member beta in %#v", items)
+	}
+	assertMissingCompletion(t, items, "value2")
+}
+
 func TestCompletionFiltersStandardLibraryMembersAfterDot(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	uri := "file:///tmp/main.tx"
@@ -1314,7 +1532,7 @@ pub func add(a int, b int) int {
 	assertMissingCompletion(t, items, "print")
 }
 
-func TestCompletionAllowsSamePackageAutoImportForUniqueExports(t *testing.T) {
+func TestCompletionIncludesSamePackageSiblingExports(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	dir := t.TempDir()
 	mathDir := filepath.Join(dir, "math")
@@ -1324,7 +1542,6 @@ func TestCompletionAllowsSamePackageAutoImportForUniqueExports(t *testing.T) {
 	mainPath := filepath.Join(dir, "main.tx")
 	addPath := filepath.Join(mathDir, "add.tx")
 	doublePath := filepath.Join(mathDir, "double.tx")
-	duplicatePath := filepath.Join(mathDir, "duplicate_add.tx")
 	mainSrc := `package main
 import "math/add.tx"
 
@@ -1342,15 +1559,9 @@ pub func double(n int) int {
     return n + n
 }
 `
-	duplicateSrc := `package math
-pub func add(a int, b int) int {
-    return a - b
-}
-`
 	for path, src := range map[string]string{
-		addPath:       addSrc,
-		doublePath:    doubleSrc,
-		duplicatePath: duplicateSrc,
+		addPath:    addSrc,
+		doublePath: doubleSrc,
 	} {
 		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 			t.Fatal(err)
@@ -1372,7 +1583,9 @@ pub func add(a int, b int) int {
 	if !ok {
 		t.Fatalf("missing same-package auto-import completion math.double in %#v", items)
 	}
-	assertCompletionImportEdit(t, doubleItem, 2, `import "math/double.tx"`+"\n")
+	if len(doubleItem.AdditionalTextEdits) != 0 {
+		t.Fatalf("math.double additional edits = %#v, want none", doubleItem.AdditionalTextEdits)
+	}
 
 	addItem, ok := findCompletionItem(items, "math.add")
 	if !ok {
@@ -1511,6 +1724,45 @@ pub func add(a int, b int) int {
 		t.Fatalf("hover = %#v, want imported function signature", hover)
 	}
 	assertRange(t, hover.Range, positionOfAfter(t, mainSrc, "math.", "add"), "add")
+}
+
+func TestHoverReturnsSamePackagePrivateFunctionSignature(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	betaPath := filepath.Join(dir, "beta.tx")
+	beta2Path := filepath.Join(dir, "beta2.tx")
+	betaSrc := `package beta
+pub func beta() int {
+    return value2()
+}
+`
+	beta2Src := `package beta
+func value2() int {
+    return 2
+}
+`
+	if err := os.WriteFile(betaPath, []byte(betaSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(beta2Path, []byte(beta2Src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	betaURI := uriFromPath(normalizePath(betaPath))
+	server.documents[betaURI] = betaSrc
+
+	result, err := server.handleHover(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": betaURI},
+		"position":     positionOfAfter(t, betaSrc, "return ", "value2"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hover := result.(Hover)
+	if hover.Contents.Value != "`func value2() int`" {
+		t.Fatalf("hover = %#v, want same-package private function signature", hover)
+	}
+	assertRange(t, hover.Range, positionOfAfter(t, betaSrc, "return ", "value2"), "value2")
 }
 
 func TestHoverReturnsStandardLibraryFunctionSignature(t *testing.T) {

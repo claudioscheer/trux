@@ -354,6 +354,68 @@ pub func b() int {
 	}
 }
 
+func TestLoadAutoLoadsSameDirectoryPackageSiblings(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "beta.tx"
+
+func main() int {
+    return beta.beta() + beta.extra()
+}`)
+	writeSource(t, dir, "beta.tx", `package beta
+func value() int {
+    return 20
+}
+
+pub func beta() int {
+    return value() + value2()
+}`)
+	writeSource(t, dir, "beta2.tx", `package beta
+func value2() int {
+    return 2
+}
+
+pub func extra() int {
+    return value2()
+}`)
+
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sources) != 3 {
+		t.Fatalf("source count = %d, want main plus two beta files", len(result.Sources))
+	}
+	if _, err := semtypes.Check(result.Program); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadDoesNotAutoLoadEntryFileSiblings(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+func main() int {
+    return helper()
+}`)
+	writeSource(t, dir, "helper.tx", `package main
+func helper() int {
+    return 1
+}`)
+
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sources) != 1 {
+		t.Fatalf("source count = %d, want only entry file", len(result.Sources))
+	}
+	_, err = semtypes.Check(result.Program)
+	if err == nil {
+		t.Fatal("expected undefined helper")
+	}
+	assertErrorContains(t, err, `undefined function "helper"`)
+}
+
 func TestLoadRejectsDuplicatePublicFunctionsInSamePackageDirectImports(t *testing.T) {
 	dir := t.TempDir()
 	writeSource(t, dir, "main.tx", `package main
@@ -376,7 +438,61 @@ pub func value() int {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	assertErrorContains(t, err, `package "util" exports function "value" from both`)
+	assertErrorContains(t, err, `package "util" defines function "value" in both`)
+}
+
+func TestLoadRejectsDuplicatePrivateFunctionsInSamePackageSiblings(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "a.tx"
+
+func main() int {
+    return util.a()
+}`)
+	writeSource(t, dir, "a.tx", `package util
+func value() int {
+    return 1
+}
+
+pub func a() int {
+    return value()
+}`)
+	writeSource(t, dir, "b.tx", `package util
+func value() int {
+    return 2
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, `package "util" defines function "value" in both`)
+}
+
+func TestLoadRejectsQualifiedPrivateCallInSamePackage(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "beta.tx"
+
+func main() int {
+    return beta.beta()
+}`)
+	writeSource(t, dir, "beta.tx", `package beta
+import "beta2.tx"
+
+pub func beta() int {
+    return beta.value2()
+}`)
+	writeSource(t, dir, "beta2.tx", `package beta
+func value2() int {
+    return 2
+}`)
+
+	_, err := Load(filepath.Join(dir, "main.tx"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	assertErrorContains(t, err, `cannot call private function "beta.value2"`)
 }
 
 func TestLoadRejectsReservedFunctionPrefixAndImportedMain(t *testing.T) {

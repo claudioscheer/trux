@@ -364,6 +364,46 @@ func main() int {
 	}
 }
 
+func TestBuildCreatesTypedIRForImage(t *testing.T) {
+	program := mustLoadProgram(t, `package main
+import "image"
+
+func main() int {
+    let width int = image.width("in.ppm")
+    let height int = image.height("in.ppm")
+    let pixels []int = image.readPpm("in.ppm")
+    image.writePpm("out.ppm", pixels, width, height)
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := irProgram.Functions[0]
+	if _, ok := mainFn.Body[0].(*LetStmt).Value.(*ImageDimensionExpr); !ok {
+		t.Fatalf("width let value = %T, want ImageDimensionExpr", mainFn.Body[0].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[1].(*LetStmt).Value.(*ImageDimensionExpr); !ok {
+		t.Fatalf("height let value = %T, want ImageDimensionExpr", mainFn.Body[1].(*LetStmt).Value)
+	}
+	readPPM := mainFn.Body[2].(*LetStmt).Value
+	if !ast.TypeEqual(readPPM.Type(), &ast.SliceType{Elem: ast.IntType}) {
+		t.Fatalf("readPpm type = %s, want []int", readPPM.Type())
+	}
+	if _, ok := readPPM.(*ReadPPMExpr); !ok {
+		t.Fatalf("pixels let value = %T, want ReadPPMExpr", readPPM)
+	}
+	if _, ok := mainFn.Body[3].(*WritePPMStmt); !ok {
+		t.Fatalf("fourth statement = %T, want WritePPMStmt", mainFn.Body[3])
+	}
+}
+
 func sameTypes(got []ast.Type, want []ast.Type) bool {
 	if len(got) != len(want) {
 		return false

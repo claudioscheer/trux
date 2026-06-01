@@ -15,7 +15,8 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "check": "node -c extension.js"
+    "check": "node -c extension.js",
+    "compile": "npm run check && vsce package --allow-missing-repository"
   },
   "contributes": {
     "languages": [
@@ -65,5 +66,8 @@
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.6"
   }
 }

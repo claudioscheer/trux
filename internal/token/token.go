@@ -14,6 +14,7 @@ const (
 	Package    Type = "PACKAGE"
 	Import     Type = "IMPORT"
 	Pub        Type = "PUB"
+	Kernel     Type = "KERNEL"
 	Func       Type = "FUNC"
 	Return     Type = "RETURN"
 	Let        Type = "LET"
@@ -71,6 +72,7 @@ var keywords = map[string]Type{
 	"package": Package,
 	"import":  Import,
 	"pub":     Pub,
+	"kernel":  Kernel,
 	"func":    Func,
 	"return":  Return,
 	"let":     Let,

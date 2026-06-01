@@ -8,7 +8,7 @@ import (
 
 var emitCCmd = &cobra.Command{
 	Use:          "emit-c <file.tx>",
-	Short:        "Compile a trux program to C",
+	Short:        "Emit generated C or CUDA source for a trux program",
 	Args:         cobra.ExactArgs(1),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {

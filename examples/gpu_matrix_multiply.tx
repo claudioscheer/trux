@@ -1,0 +1,182 @@
+package main
+
+import "gpu"
+import "time"
+
+// matmulKernel runs on the GPU.
+//
+// The matrices are stored as flat row-major buffers:
+//
+//   element(row, col) = buffer[row * n + col]
+//
+// Each GPU thread computes one output cell. The launch in main uses a 2D grid,
+// so globalY is the output row and globalX is the output column.
+kernel func matmulKernel(a gpu.Buffer [int], b gpu.Buffer [int], out gpu.Buffer [int], n int) {
+  let row int = gpu.globalY()
+  let col int = gpu.globalX()
+
+  // The launch rounds up to cover n x n cells with 16x16 blocks, which means
+  // some threads may land outside the matrix. Those threads must do no work.
+  if row < n {
+    if col < n {
+      let sum int = 0
+
+      // Standard matrix multiplication:
+      //
+      //   out[row][col] = sum(a[row][k] * b[k][col])
+      //
+      // The source uses flat indexing because Trux GPU buffers are 1D device
+      // memory handles.
+      for let k int = 0; k < n; k = k + 1 {
+        sum = sum + a[row * n + k] * b[k * n + col]
+      }
+
+      out[row * n + col] = sum
+    }
+  }
+}
+
+// checksum gives a compact deterministic way to compare large result buffers
+// without printing every matrix cell.
+func checksum(values []int) int {
+  let total int = 0
+
+  for let i int = 0; i < len(values); i = i + 1 {
+    total = total + values[i]
+  }
+
+  return total
+}
+
+// printSeconds converts a nanosecond duration into a readable seconds value.
+//
+// Trux does not have int-to-float casts yet, so this prints:
+//
+//   label seconds.milliseconds s
+//
+// The millisecond part is padded to three digits.
+func printSeconds(label string, nanos int) int {
+  let seconds int = nanos / 1000000000
+  let remainder int = nanos - seconds * 1000000000
+  let millis int = remainder / 1000000
+
+  if millis < 10 {
+    print(label, seconds, ".00", millis, " s")
+  } else if millis < 100 {
+    print(label, seconds, ".0", millis, " s")
+  } else {
+    print(label, seconds, ".", millis, " s")
+  }
+
+  return 0
+}
+
+func main() int {
+  // Change this one value to try a different square matrix size. The GPU launch
+  // geometry below is computed from n, so it still covers the full output
+  // matrix. Very large values can still run out of GPU memory or take a long
+  // time on the CPU baseline.
+  let n int = 500
+  let total int = n * n
+
+  // Host-side matrices and outputs. These are ordinary CPU slices.
+  let a []int = make([]int, total)
+  let b []int = make([]int, total)
+  let cpuOut []int = make([]int, total)
+  let gpuOut []int = make([]int, total)
+
+  // Fill both input matrices with deterministic non-zero values. This makes the
+  // checksum meaningful: an untouched output cell or a broken multiply will
+  // almost certainly change the CPU/GPU checksum comparison or mismatch count.
+  for let row int = 0; row < n; row = row + 1 {
+    for let col int = 0; col < n; col = col + 1 {
+      a[row * n + col] = row + col + 1
+      b[row * n + col] = row * 2 + col + 3
+    }
+  }
+
+  // CPU baseline. This uses the same row-major layout and formula as the GPU
+  // kernel, so any mismatch below points at GPU lowering, memory movement, or
+  // launch behavior rather than a different algorithm.
+  let cpuStart int = time.monotonicNanos()
+  for let row int = 0; row < n; row = row + 1 {
+    for let col int = 0; col < n; col = col + 1 {
+      let sum int = 0
+
+      for let k int = 0; k < n; k = k + 1 {
+        sum = sum + a[row * n + k] * b[k * n + col]
+      }
+
+      cpuOut[row * n + col] = sum
+    }
+  }
+  let cpuEnd int = time.monotonicNanos()
+
+  // GPU path. Device memory is explicit: allocate buffers, copy host input to
+  // the device, launch the kernel, synchronize, and copy the result back.
+  let gpuStart int = time.monotonicNanos()
+  let dA gpu.Buffer[int] = gpu.alloc(total)
+  let dB gpu.Buffer[int] = gpu.alloc(total)
+  let dOut gpu.Buffer[int] = gpu.alloc(total)
+
+  gpu.copyToDevice(a, dA)
+  gpu.copyToDevice(b, dB)
+
+  // Launch geometry:
+  //
+  //   grid  = gridSize x gridSize x 1 blocks
+  //   block = blockSize x blockSize x 1 threads
+  //
+  // CUDA launches work as grid dimensions multiplied by block dimensions. The
+  // matrix is n x n, but the launch does not have to be exactly n x n.
+  //
+  // A 16x16 block has 256 threads. That is a common, practical default for 2D
+  // problems because it gives each block enough work while staying well below
+  // CUDA's usual 1024-thread block limit.
+  //
+  // gridSize uses integer ceiling division:
+  //
+  //   ceil(n / blockSize) = (n + blockSize - 1) / blockSize
+  //
+  // If n is not an exact multiple of blockSize, this creates a small padded
+  // edge beyond the real matrix. The kernel's row/col bounds checks skip those
+  // extra edge threads.
+  //
+  // 16x16 is not magic. Serious CUDA code benchmarks block shapes such as 8x8,
+  // 16x16, 32x8, or 32x16 because the best choice depends on the GPU and the
+  // kernel's memory/register behavior.
+  let blockSize int = 16
+  let gridSize int = (n + blockSize - 1) / blockSize
+  gpu.launch(matmulKernel, gridSize, gridSize, 1, blockSize, blockSize, 1, dA, dB, dOut, n)
+
+  // The explicit sync makes the timing include kernel execution before the copy
+  // back starts. copyToHost is also synchronous for the copied data.
+  gpu.sync()
+  gpu.copyToHost(dOut, gpuOut)
+  let gpuEnd int = time.monotonicNanos()
+
+  // Full correctness check. Checksums catch many mistakes, but this loop proves
+  // every output cell matches the CPU baseline.
+  let mismatches int = 0
+  for let i int = 0; i < total; i = i + 1 {
+    if cpuOut[i] != gpuOut[i] {
+      mismatches = mismatches + 1
+    }
+  }
+
+  // The exact timing numbers depend on the machine and current GPU load. The
+  // checksums should match, and the mismatch count should be 0. The mismatch
+  // loop is stronger than checksum alone because it compares every output cell.
+  print("cpu checksum ", checksum(cpuOut))
+  print("gpu checksum ", checksum(gpuOut))
+  print("mismatches ", mismatches)
+  printSeconds("cpu seconds ", cpuEnd - cpuStart)
+  printSeconds("gpu seconds ", gpuEnd - gpuStart)
+
+  // Device buffers are explicit resources in this first GPU model.
+  gpu.free(dA)
+  gpu.free(dB)
+  gpu.free(dOut)
+
+  return 0
+}

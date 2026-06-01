@@ -10,10 +10,12 @@ import (
 type Program struct {
 	PackageName string
 	Functions   []*Func
+	Kernels     []*Func
 }
 
 type Func struct {
 	Name       string
+	Kernel     bool
 	Params     []Param
 	ReturnType ast.Type
 	Body       []Stmt
@@ -103,6 +105,47 @@ type WriteCSVStmt struct {
 }
 
 func (*WriteCSVStmt) stmtNode() {}
+
+type WritePPMStmt struct {
+	Path   Expr
+	Pixels Expr
+	Width  Expr
+	Height Expr
+}
+
+func (*WritePPMStmt) stmtNode() {}
+
+type GPUCopyStmt struct {
+	Kind   types.GPUCallKind
+	First  Expr
+	Second Expr
+}
+
+func (*GPUCopyStmt) stmtNode() {}
+
+type GPUFreeStmt struct {
+	Buffer Expr
+}
+
+func (*GPUFreeStmt) stmtNode() {}
+
+type GPUSyncStmt struct{}
+
+func (*GPUSyncStmt) stmtNode() {}
+
+type GPULaunchStmt struct {
+	KernelName string
+	Dims       []Expr
+	Args       []Expr
+}
+
+func (*GPULaunchStmt) stmtNode() {}
+
+type TimeSleepStmt struct {
+	Millis Expr
+}
+
+func (*TimeSleepStmt) stmtNode() {}
 
 type ExprStmt struct {
 	Expr Expr
@@ -306,6 +349,67 @@ func (e *ReadCSVExpr) Ownership() types.Origin { return e.Origin }
 
 func (*ReadCSVExpr) exprNode() {}
 
+type ImageDimensionExpr struct {
+	Kind   types.IOCallKind
+	Path   Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *ImageDimensionExpr) Type() ast.Type { return e.Typ }
+
+func (e *ImageDimensionExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ImageDimensionExpr) exprNode() {}
+
+type ReadPPMExpr struct {
+	Path   Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *ReadPPMExpr) Type() ast.Type { return e.Typ }
+
+func (e *ReadPPMExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ReadPPMExpr) exprNode() {}
+
+type GPUAllocExpr struct {
+	Len    Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *GPUAllocExpr) Type() ast.Type { return e.Typ }
+
+func (e *GPUAllocExpr) Ownership() types.Origin { return e.Origin }
+
+func (*GPUAllocExpr) exprNode() {}
+
+type GPUCoordExpr struct {
+	Kind   types.GPUCallKind
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *GPUCoordExpr) Type() ast.Type { return e.Typ }
+
+func (e *GPUCoordExpr) Ownership() types.Origin { return e.Origin }
+
+func (*GPUCoordExpr) exprNode() {}
+
+type TimeNowExpr struct {
+	Kind   types.IOCallKind
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *TimeNowExpr) Type() ast.Type { return e.Typ }
+
+func (e *TimeNowExpr) Ownership() types.Origin { return e.Origin }
+
+func (*TimeNowExpr) exprNode() {}
+
 type BinaryExpr struct {
 	Left     Expr
 	Operator string
@@ -375,7 +479,11 @@ func (b builder) buildProgram(program *ast.Program) (*Program, error) {
 		if err != nil {
 			return nil, err
 		}
-		out.Functions = append(out.Functions, irFn)
+		if fn.Kernel {
+			out.Kernels = append(out.Kernels, irFn)
+		} else {
+			out.Functions = append(out.Functions, irFn)
+		}
 	}
 
 	return out, nil
@@ -384,6 +492,7 @@ func (b builder) buildProgram(program *ast.Program) (*Program, error) {
 func (b builder) buildFunc(fn *ast.FuncDecl) (*Func, error) {
 	out := &Func{
 		Name:       fn.Name,
+		Kernel:     fn.Kernel,
 		ReturnType: fn.ReturnType,
 	}
 	for _, param := range fn.Params {
@@ -506,6 +615,43 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 						return nil, err
 					}
 					return &WriteCSVStmt{Path: args[0], Cells: args[1], Columns: args[2]}, nil
+				case types.IOCallWritePPM:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &WritePPMStmt{Path: args[0], Pixels: args[1], Width: args[2], Height: args[3]}, nil
+				case types.IOCallTimeSleepMillis:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &TimeSleepStmt{Millis: args[0]}, nil
+				}
+			}
+			if gpuSig, ok := b.info.GPUCalls[call]; ok {
+				if gpuSig.Kind == types.GPUCallLaunch {
+					dims, err := b.buildExprs(call.Args[1:7])
+					if err != nil {
+						return nil, err
+					}
+					kernelArgs, err := b.buildExprs(call.Args[7:])
+					if err != nil {
+						return nil, err
+					}
+					return &GPULaunchStmt{KernelName: gpuSig.KernelName, Dims: dims, Args: kernelArgs}, nil
+				}
+				args, err := b.buildExprs(call.Args)
+				if err != nil {
+					return nil, err
+				}
+				switch gpuSig.Kind {
+				case types.GPUCallCopyToDevice, types.GPUCallCopyToHost:
+					return &GPUCopyStmt{Kind: gpuSig.Kind, First: args[0], Second: args[1]}, nil
+				case types.GPUCallFree:
+					return &GPUFreeStmt{Buffer: args[0]}, nil
+				case types.GPUCallSync:
+					return &GPUSyncStmt{}, nil
 				}
 			}
 		}
@@ -560,6 +706,18 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 	case *ast.IdentExpr:
 		return &IdentExpr{Name: expr.Name, Typ: typ, Origin: origin}, nil
 	case *ast.CallExpr:
+		if gpuSig, ok := b.info.GPUCalls[expr]; ok {
+			switch gpuSig.Kind {
+			case types.GPUCallAlloc:
+				length, err := b.buildExpr(expr.Args[0])
+				if err != nil {
+					return nil, err
+				}
+				return &GPUAllocExpr{Len: length, Typ: typ, Origin: origin}, nil
+			case types.GPUCallGlobalX, types.GPUCallGlobalY, types.GPUCallGlobalZ, types.GPUCallThreadX, types.GPUCallThreadY, types.GPUCallThreadZ, types.GPUCallBlockX, types.GPUCallBlockY, types.GPUCallBlockZ, types.GPUCallBlockDimX, types.GPUCallBlockDimY, types.GPUCallBlockDimZ:
+				return &GPUCoordExpr{Kind: gpuSig.Kind, Typ: typ, Origin: origin}, nil
+			}
+		}
 		if ioSig, ok := b.info.IOCalls[expr]; ok {
 			return b.buildIOExpr(expr, ioSig, typ, origin)
 		}
@@ -657,6 +815,20 @@ func (b builder) buildIOExpr(expr *ast.CallExpr, sig types.IOCallSig, typ ast.Ty
 			return nil, err
 		}
 		return &ReadCSVExpr{Path: path, Columns: columns, Typ: typ, Origin: origin}, nil
+	case types.IOCallImageWidth, types.IOCallImageHeight:
+		path, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &ImageDimensionExpr{Kind: sig.Kind, Path: path, Typ: typ, Origin: origin}, nil
+	case types.IOCallReadPPM:
+		path, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &ReadPPMExpr{Path: path, Typ: typ, Origin: origin}, nil
+	case types.IOCallTimeNowUnixMillis, types.IOCallTimeMonotonicNanos:
+		return &TimeNowExpr{Kind: sig.Kind, Typ: typ, Origin: origin}, nil
 	default:
 		return nil, fmt.Errorf("%s can only be used as a statement", sig.Kind)
 	}

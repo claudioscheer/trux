@@ -22,6 +22,7 @@ type FuncDecl struct {
 	NamePos    token.Position
 	Name       string
 	Public     bool
+	Kernel     bool
 	Params     []Param
 	ReturnType Type
 	Body       Block
@@ -82,6 +83,16 @@ func (t *ListType) String() string {
 
 func (*ListType) typeNode() {}
 
+type GPUBufferType struct {
+	Elem Type
+}
+
+func (t *GPUBufferType) String() string {
+	return fmt.Sprintf("gpu.Buffer[%s]", t.Elem)
+}
+
+func (*GPUBufferType) typeNode() {}
+
 func TypeEqual(left Type, right Type) bool {
 	switch left := left.(type) {
 	case ScalarType:
@@ -95,6 +106,9 @@ func TypeEqual(left Type, right Type) bool {
 		return ok && TypeEqual(left.Elem, right.Elem)
 	case *ListType:
 		right, ok := right.(*ListType)
+		return ok && TypeEqual(left.Elem, right.Elem)
+	case *GPUBufferType:
+		right, ok := right.(*GPUBufferType)
 		return ok && TypeEqual(left.Elem, right.Elem)
 	default:
 		return left == nil && right == nil

@@ -122,7 +122,7 @@
       "patterns": [
         {
           "name": "meta.function.declaration.trux",
-          "match": "\\b(?:(pub)\\s+)?(func)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(?:(pub|kernel)\\s+)?(func)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": {
               "name": "keyword.declaration.visibility.trux"
@@ -168,7 +168,7 @@
         },
         {
           "name": "keyword.declaration.trux",
-          "match": "\\b(package|import|pub|let)\\b"
+          "match": "\\b(package|import|pub|kernel|let)\\b"
         },
         {
           "name": "keyword.operator.word.trux",

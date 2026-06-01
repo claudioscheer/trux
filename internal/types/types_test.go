@@ -441,6 +441,49 @@ func main() int {
 	}
 }
 
+func TestCheckAllowsStandardImagePackage(t *testing.T) {
+	program := mustLoadProgram(t, `package main
+import "image"
+
+func main() int {
+    let width int = image.width("in.ppm")
+    let height int = image.height("in.ppm")
+    let pixels []int = image.readPpm("in.ppm")
+    image.writePpm("out.ppm", pixels, width, height)
+    print(width, " ", height, " ", len(pixels))
+    return 0
+}`)
+
+	info, err := Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kinds := map[IOCallKind]int{}
+	for _, sig := range info.IOCalls {
+		kinds[sig.Kind]++
+	}
+	for _, kind := range []IOCallKind{
+		IOCallImageWidth,
+		IOCallImageHeight,
+		IOCallReadPPM,
+		IOCallWritePPM,
+	} {
+		if kinds[kind] != 1 {
+			t.Fatalf("image call count for %s = %d, want 1", kind, kinds[kind])
+		}
+	}
+
+	mainFn := program.Functions[0]
+	readPPMLet := mainFn.Body.Statements[2].(*ast.LetStmt)
+	if !ast.TypeEqual(info.ExprTypes[readPPMLet.Value], &ast.SliceType{Elem: ast.IntType}) {
+		t.Fatalf("readPpm type = %s, want []int", info.ExprTypes[readPPMLet.Value])
+	}
+	if info.ExprOrigins[readPPMLet.Value] != OriginFrameOwned {
+		t.Fatalf("readPpm origin = %s, want %s", info.ExprOrigins[readPPMLet.Value], OriginFrameOwned)
+	}
+}
+
 func TestCheckRejectsUnsupportedClone(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

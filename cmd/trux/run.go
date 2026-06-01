@@ -57,11 +57,14 @@ func runFileWithOptions(out io.Writer, path string, opts runOptions) error {
 	defer os.RemoveAll(tmpDir)
 
 	cPath := filepath.Join(tmpDir, "main.c")
+	if result.UsesCUDA {
+		cPath = filepath.Join(tmpDir, "main.cu")
+	}
 	if err := os.WriteFile(cPath, []byte(result.CSource), 0o644); err != nil {
-		return fmt.Errorf("write generated C: %w", err)
+		return fmt.Errorf("write generated source: %w", err)
 	}
 	executablePath := filepath.Join(tmpDir, "main")
-	if err := compileC(cPath, executablePath); err != nil {
+	if err := compileGenerated(cPath, executablePath, result.UsesCUDA); err != nil {
 		return err
 	}
 

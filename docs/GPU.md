@@ -1,52 +1,41 @@
-# GPU Programming Model Idea
+# GPU Programming
 
-This document is a future design note. GPU support is not implemented in the compiler, parser, type checker, runtime, or examples.
+Trux has an initial CUDA-backed GPU path. It is intentionally small: device memory is explicit, kernels are written in Trux source, and the compiler uses `nvcc` only for programs that declare kernels.
 
-The idea here is to preserve a possible direction: CPU and GPU have separate memory address spaces, and all data movement should be explicit.
+## Requirements
 
-## Recommended Abstraction
+GPU programs require:
 
-Use `gpu.Buffer[T]` as the primary type for device memory:
+- an NVIDIA CUDA-capable GPU and driver
+- `nvcc` on `PATH`, or `NVCC=/path/to/nvcc`
+
+Non-GPU programs still compile with `cc` or `$CC`.
+
+## Device Buffers
+
+GPU memory is represented with `gpu.Buffer[T]`, where `T` is currently `int` or `float`.
 
 ```trux
-let d_data gpu.Buffer[int] = gpu.alloc(n)
+import "gpu"
+
+let n int = 1024
+let host []int = make([]int, n)
+let device gpu.Buffer[int] = gpu.alloc(n)
+
+gpu.copyToDevice(host, device)
+gpu.copyToHost(device, host)
+gpu.free(device)
 ```
 
-`gpu.Buffer[T]` would own device memory and would be the only way to pass data to kernels.
+Device buffers are not host slices. Host code cannot index a `gpu.Buffer`; it must copy data back to a host slice first.
 
-## Basic Pattern: CPU to GPU to CPU
+## Kernels
 
-```trux
-func main() int {
-  let n int = 1024 * 1024
-
-  // Data starts on the CPU.
-  let h_data []int = make([]int, n)
-
-  // Device memory is explicit.
-  let d_data gpu.Buffer[int] = gpu.alloc(n)
-
-  // Copies are explicit so cost is visible in source.
-  gpu.copy_to_device(h_data, d_data)
-
-  gpu.launch(fill, d_data, n)
-
-  // Copy results back only when host code needs them.
-  gpu.copy_to_host(d_data, h_data)
-
-  print(h_data[0])
-
-  return 0
-}
-```
-
-## Defining a Kernel
-
-Possible kernel syntax:
+Kernels are declared with `kernel func` and do not return values.
 
 ```trux
 kernel func fill(out gpu.Buffer[int], n int) {
-  let i int = gpu.global_id()
+  let i int = gpu.globalX()
 
   if i < n {
     out[i] = 42
@@ -54,83 +43,36 @@ kernel func fill(out gpu.Buffer[int], n int) {
 }
 ```
 
-Kernels would be restricted:
+Kernel code is restricted. It supports scalar locals, arithmetic, comparisons, `if`, `for`, GPU buffer indexing, and GPU coordinate helpers. It does not support strings, lists, host slices, allocation, `print`, IO, time calls, or normal function calls.
 
-- no dynamic allocation
-- limited language features
-- operate on `gpu.Buffer` and primitive types only
-- no host strings or complex host-owned values
+## Launching
 
-## Launching a Kernel
+Launch geometry is explicit and mirrors CUDA's grid/block model:
 
 ```trux
-gpu.launch(fill, d_data, n)
+gpu.launch(fill, gridX, gridY, gridZ, blockX, blockY, blockZ, out, n)
+gpu.sync()
 ```
 
-Launches would likely be asynchronous by default. Source code would need explicit synchronization when it needs completion before copying results back.
-
-## Key Operations
-
-| Operation | Description | Direction |
-|-----------|-------------|-----------|
-| `gpu.alloc(n)` | Allocate `n` elements on the device | none |
-| `gpu.copy_to_device(h, d)` | Copy from CPU slice to `gpu.Buffer` | Host to device |
-| `gpu.copy_to_host(d, h)` | Copy from `gpu.Buffer` to CPU slice | Device to host |
-| `gpu.launch(kernel, ...)` | Launch a GPU kernel | none |
-| `gpu.free(buf)` | Free device memory | none |
-
-## Mixing CPU and GPU Work
-
-The intended model allows CPU and GPU execution to be interleaved:
+Coordinate helpers inside kernels:
 
 ```trux
-let input []int = load_data_on_cpu()
-let device gpu.Buffer[int] = gpu.alloc(len(input))
-
-gpu.copy_to_device(input, device)
-gpu.launch(heavy_parallel_work, device, len(input))
-
-let results []int = make([]int, 256)
-gpu.copy_to_host_partial(device, results, 0, 256)
-
-let final int = cpu_reduce(results)
-save_results(final)
+gpu.globalX()
+gpu.globalY()
+gpu.globalZ()
+gpu.threadX()
+gpu.threadY()
+gpu.threadZ()
+gpu.blockX()
+gpu.blockY()
+gpu.blockZ()
+gpu.blockDimX()
+gpu.blockDimY()
+gpu.blockDimZ()
 ```
 
-Guideline: only copy data back when the CPU actually needs it. Avoid round-tripping large buffers unnecessarily.
+`gpu.copyToHost` is synchronous for the copied data. `gpu.sync()` is available when source code needs an explicit synchronization point, such as timing a kernel.
 
-## Synchronization Rules
+## Example
 
-Likely default rules:
-
-- `gpu.copy_to_host` is synchronous by default.
-- Explicit `gpu.sync()` or stream-based async copies can be added later.
-- Host code must not read from a host buffer that is the target of an unfinished copy.
-
-## Design Decisions
-
-- Explicit copies are the default model.
-- Unified memory should only be offered later as an opt-in if it is needed.
-- `gpu.Buffer[T]` owns its memory. It is not a view.
-- Kernels operate on `gpu.Buffer` and primitive types only.
-- Host-side arenas may help manage temporary staging buffers and other CPU-side GPU resources.
-
-## Generated Code Shape
-
-A C/CUDA backend could emit code similar to:
-
-```c
-int *h_data = ...;
-int *d_data;
-cudaMalloc(&d_data, n * sizeof(int));
-cudaMemcpy(d_data, h_data, n * sizeof(int), cudaMemcpyHostToDevice);
-
-my_kernel<<<grid, block>>>(d_data, n);
-
-cudaMemcpy(h_data, d_data, n * sizeof(int), cudaMemcpyDeviceToHost);
-cudaFree(d_data);
-```
-
-## Summary
-
-This idea prioritizes control and performance over convenience. The central rule is explicit movement between CPU and GPU memory.
+`examples/gpu_matrix_multiply.tx` runs square matrix multiplication twice in the same Trux program: once on the CPU and once with a Trux GPU kernel. It computes launch geometry from `n`, then prints CPU and GPU checksums, mismatch count, and elapsed time from the `time` package.

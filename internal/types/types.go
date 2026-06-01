@@ -25,6 +25,7 @@ type FuncSig struct {
 
 type Info struct {
 	Funcs         map[string]FuncSig
+	Kernels       map[string]FuncSig
 	Locals        map[*ast.FuncDecl]map[string]ast.Type
 	ExprTypes     map[ast.Expression]ast.Type
 	ExprOrigins   map[ast.Expression]Origin
@@ -34,6 +35,7 @@ type Info struct {
 	AppendCalls   map[*ast.CallExpr]AppendSig
 	CloneCalls    map[*ast.CallExpr]CloneSig
 	IOCalls       map[*ast.CallExpr]IOCallSig
+	GPUCalls      map[*ast.CallExpr]GPUCallSig
 }
 
 type AppendSig struct {
@@ -48,18 +50,55 @@ type CloneSig struct {
 type IOCallKind string
 
 const (
-	IOCallReadLine  IOCallKind = IOCallKind(stdlib.CallReadLine)
-	IOCallReadInt   IOCallKind = IOCallKind(stdlib.CallReadInt)
-	IOCallReadFloat IOCallKind = IOCallKind(stdlib.CallReadFloat)
-	IOCallReadBool  IOCallKind = IOCallKind(stdlib.CallReadBool)
-	IOCallReadFile  IOCallKind = IOCallKind(stdlib.CallReadFile)
-	IOCallWriteFile IOCallKind = IOCallKind(stdlib.CallWriteFile)
-	IOCallReadCSV   IOCallKind = IOCallKind(stdlib.CallReadCSV)
-	IOCallWriteCSV  IOCallKind = IOCallKind(stdlib.CallWriteCSV)
+	IOCallReadLine           IOCallKind = IOCallKind(stdlib.CallReadLine)
+	IOCallReadInt            IOCallKind = IOCallKind(stdlib.CallReadInt)
+	IOCallReadFloat          IOCallKind = IOCallKind(stdlib.CallReadFloat)
+	IOCallReadBool           IOCallKind = IOCallKind(stdlib.CallReadBool)
+	IOCallReadFile           IOCallKind = IOCallKind(stdlib.CallReadFile)
+	IOCallWriteFile          IOCallKind = IOCallKind(stdlib.CallWriteFile)
+	IOCallReadCSV            IOCallKind = IOCallKind(stdlib.CallReadCSV)
+	IOCallWriteCSV           IOCallKind = IOCallKind(stdlib.CallWriteCSV)
+	IOCallImageWidth         IOCallKind = IOCallKind(stdlib.CallImageWidth)
+	IOCallImageHeight        IOCallKind = IOCallKind(stdlib.CallImageHeight)
+	IOCallReadPPM            IOCallKind = IOCallKind(stdlib.CallReadPPM)
+	IOCallWritePPM           IOCallKind = IOCallKind(stdlib.CallWritePPM)
+	IOCallTimeNowUnixMillis  IOCallKind = IOCallKind(stdlib.CallTimeNowUnixMillis)
+	IOCallTimeMonotonicNanos IOCallKind = IOCallKind(stdlib.CallTimeMonotonicNanos)
+	IOCallTimeSleepMillis    IOCallKind = IOCallKind(stdlib.CallTimeSleepMillis)
 )
 
 type IOCallSig struct {
 	Kind IOCallKind
+}
+
+type GPUCallKind string
+
+const (
+	GPUCallAlloc        GPUCallKind = "alloc"
+	GPUCallCopyToDevice GPUCallKind = "copyToDevice"
+	GPUCallCopyToHost   GPUCallKind = "copyToHost"
+	GPUCallFree         GPUCallKind = "free"
+	GPUCallSync         GPUCallKind = "sync"
+	GPUCallLaunch       GPUCallKind = "launch"
+	GPUCallGlobalX      GPUCallKind = "globalX"
+	GPUCallGlobalY      GPUCallKind = "globalY"
+	GPUCallGlobalZ      GPUCallKind = "globalZ"
+	GPUCallThreadX      GPUCallKind = "threadX"
+	GPUCallThreadY      GPUCallKind = "threadY"
+	GPUCallThreadZ      GPUCallKind = "threadZ"
+	GPUCallBlockX       GPUCallKind = "blockX"
+	GPUCallBlockY       GPUCallKind = "blockY"
+	GPUCallBlockZ       GPUCallKind = "blockZ"
+	GPUCallBlockDimX    GPUCallKind = "blockDimX"
+	GPUCallBlockDimY    GPUCallKind = "blockDimY"
+	GPUCallBlockDimZ    GPUCallKind = "blockDimZ"
+)
+
+type GPUCallSig struct {
+	Kind       GPUCallKind
+	BufferType ast.Type
+	KernelName string
+	KernelSig  FuncSig
 }
 
 type Origin string
@@ -118,6 +157,7 @@ func Check(program *ast.Program) (*Info, error) {
 	c := &checker{
 		info: &Info{
 			Funcs:         map[string]FuncSig{},
+			Kernels:       map[string]FuncSig{},
 			Locals:        map[*ast.FuncDecl]map[string]ast.Type{},
 			ExprTypes:     map[ast.Expression]ast.Type{},
 			ExprOrigins:   map[ast.Expression]Origin{},
@@ -127,6 +167,7 @@ func Check(program *ast.Program) (*Info, error) {
 			AppendCalls:   map[*ast.CallExpr]AppendSig{},
 			CloneCalls:    map[*ast.CallExpr]CloneSig{},
 			IOCalls:       map[*ast.CallExpr]IOCallSig{},
+			GPUCalls:      map[*ast.CallExpr]GPUCallSig{},
 		},
 	}
 
@@ -137,7 +178,13 @@ func Check(program *ast.Program) (*Info, error) {
 		return nil, err
 	}
 	for _, fn := range program.Functions {
-		if err := c.checkFunc(fn); err != nil {
+		var err error
+		if fn.Kernel {
+			err = c.checkKernelFunc(fn)
+		} else {
+			err = c.checkFunc(fn)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -147,11 +194,23 @@ func Check(program *ast.Program) (*Info, error) {
 
 func (c *checker) collectFunctions(program *ast.Program) error {
 	for _, fn := range program.Functions {
+		target := c.info.Funcs
+		if fn.Kernel {
+			target = c.info.Kernels
+		}
+		if _, exists := target[fn.Name]; exists {
+			return typeError(fn.Pos, "duplicate function %q", fn.Name)
+		}
+		if !fn.Kernel {
+			if err := validateType(fn.Pos, fn.ReturnType); err != nil {
+				return err
+			}
+		}
 		if _, exists := c.info.Funcs[fn.Name]; exists {
 			return typeError(fn.Pos, "duplicate function %q", fn.Name)
 		}
-		if err := validateType(fn.Pos, fn.ReturnType); err != nil {
-			return err
+		if _, exists := c.info.Kernels[fn.Name]; exists {
+			return typeError(fn.Pos, "duplicate function %q", fn.Name)
 		}
 		for _, param := range fn.Params {
 			if err := validateType(fn.Pos, param.Type); err != nil {
@@ -159,13 +218,34 @@ func (c *checker) collectFunctions(program *ast.Program) error {
 			}
 		}
 
-		c.info.Funcs[fn.Name] = FuncSig{
+		target[fn.Name] = FuncSig{
 			Name:       fn.Name,
 			Params:     fn.Params,
 			ReturnType: fn.ReturnType,
 		}
 	}
 
+	return nil
+}
+
+func (c *checker) checkKernelFunc(fn *ast.FuncDecl) error {
+	c.info.Locals[fn] = map[string]ast.Type{}
+	locals := newScope(nil)
+	for _, param := range fn.Params {
+		if _, exists := c.info.Locals[fn][param.Name]; exists {
+			return typeError(fn.Pos, "duplicate parameter %q", param.Name)
+		}
+		if _, ok := param.Type.(*ast.GPUBufferType); !ok && !ast.TypeEqual(param.Type, ast.IntType) && !ast.TypeEqual(param.Type, ast.FloatType) && !ast.TypeEqual(param.Type, ast.BoolType) {
+			return typeError(param.Pos, "kernel parameter %q has unsupported type %s", param.Name, param.Type)
+		}
+		c.info.Locals[fn][param.Name] = param.Type
+		locals.locals[param.Name] = localInfo{typ: param.Type, origin: OriginOwned}
+	}
+	for _, stmt := range fn.Body.Statements {
+		if err := c.checkKernelStmt(fn, locals, stmt); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -222,7 +302,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 			return err
 		}
 
-		valueType, err := c.checkExpr(locals, stmt.Value, false)
+		valueType, err := c.checkLetValue(locals, stmt.Type, stmt.Value)
 		if err != nil {
 			return err
 		}
@@ -350,6 +430,225 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 	default:
 		return typeError(stmt.Pos(), "unsupported statement %T", stmt)
 	}
+}
+
+func (c *checker) checkKernelStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement) error {
+	switch stmt := stmt.(type) {
+	case *ast.LetStmt:
+		if _, exists := locals.locals[stmt.Name]; exists {
+			return typeError(stmt.Start, "duplicate local variable %q", stmt.Name)
+		}
+		if !kernelLocalType(stmt.Type) {
+			return typeError(stmt.Start, "kernel local %q has unsupported type %s", stmt.Name, stmt.Type)
+		}
+		valueType, err := c.checkKernelExpr(locals, stmt.Value)
+		if err != nil {
+			return err
+		}
+		if !ast.TypeEqual(valueType, stmt.Type) {
+			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, stmt.Type)
+		}
+		c.info.Locals[fn][stmt.Name] = stmt.Type
+		locals.locals[stmt.Name] = localInfo{typ: stmt.Type, origin: OriginOwned}
+		return nil
+	case *ast.AssignStmt:
+		local, ok := locals.lookup(stmt.Name)
+		if !ok {
+			return typeError(stmt.Start, "undefined variable %q", stmt.Name)
+		}
+		if _, isBuffer := local.typ.(*ast.GPUBufferType); isBuffer {
+			return typeError(stmt.Start, "cannot assign gpu.Buffer variable %q", stmt.Name)
+		}
+		valueType, err := c.checkKernelExpr(locals, stmt.Value)
+		if err != nil {
+			return err
+		}
+		if !ast.TypeEqual(valueType, local.typ) {
+			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, local.typ)
+		}
+		return nil
+	case *ast.IndexAssignStmt:
+		collectionType, err := c.checkKernelExpr(locals, stmt.Target.Collection)
+		if err != nil {
+			return err
+		}
+		indexType, err := c.checkKernelExpr(locals, stmt.Target.Index)
+		if err != nil {
+			return err
+		}
+		if !ast.TypeEqual(indexType, ast.IntType) {
+			return typeError(stmt.Target.Index.Pos(), "index must be int, got %s", indexType)
+		}
+		buf, ok := collectionType.(*ast.GPUBufferType)
+		if !ok {
+			return typeError(stmt.Target.Collection.Pos(), "kernel index assignment expects gpu.Buffer, got %s", collectionType)
+		}
+		valueType, err := c.checkKernelExpr(locals, stmt.Value)
+		if err != nil {
+			return err
+		}
+		if !ast.TypeEqual(valueType, buf.Elem) {
+			return typeError(stmt.Value.Pos(), "cannot assign %s to %s element", valueType, buf.Elem)
+		}
+		c.setExpr(stmt.Target, buf.Elem, OriginOwned)
+		return nil
+	case *ast.IfStmt:
+		conditionType, err := c.checkKernelExpr(locals, stmt.Condition)
+		if err != nil {
+			return err
+		}
+		if !ast.TypeEqual(conditionType, ast.BoolType) {
+			return typeError(stmt.Condition.Pos(), "if condition must be bool, got %s", conditionType)
+		}
+		thenScope := newScope(locals)
+		for _, inner := range stmt.Then.Statements {
+			if err := c.checkKernelStmt(fn, thenScope, inner); err != nil {
+				return err
+			}
+		}
+		if stmt.Else != nil {
+			elseScope := newScope(locals)
+			for _, inner := range stmt.Else.Statements {
+				if err := c.checkKernelStmt(fn, elseScope, inner); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case *ast.ForStmt:
+		loopScope := newScope(locals)
+		if stmt.Init != nil {
+			if err := c.checkKernelStmt(fn, loopScope, stmt.Init); err != nil {
+				return err
+			}
+		}
+		if stmt.Condition != nil {
+			conditionType, err := c.checkKernelExpr(loopScope, stmt.Condition)
+			if err != nil {
+				return err
+			}
+			if !ast.TypeEqual(conditionType, ast.BoolType) {
+				return typeError(stmt.Condition.Pos(), "for condition must be bool, got %s", conditionType)
+			}
+		}
+		bodyScope := newScope(loopScope)
+		for _, inner := range stmt.Body.Statements {
+			if err := c.checkKernelStmt(fn, bodyScope, inner); err != nil {
+				return err
+			}
+		}
+		if stmt.Post != nil {
+			return c.checkKernelStmt(fn, loopScope, stmt.Post)
+		}
+		return nil
+	case *ast.ReturnStmt:
+		return typeError(stmt.Start, "kernel functions cannot return values")
+	case *ast.ExprStmt:
+		if call, ok := stmt.Expr.(*ast.CallExpr); ok && call.Package == "gpu" && (call.Callee == "sync" || call.Callee == "free" || call.Callee == "launch") {
+			return typeError(stmt.Pos(), "gpu.%s cannot be used inside a kernel", call.Callee)
+		}
+		_, err := c.checkKernelExpr(locals, stmt.Expr)
+		return err
+	default:
+		return typeError(stmt.Pos(), "unsupported kernel statement %T", stmt)
+	}
+}
+
+func (c *checker) checkKernelExpr(locals *scope, expr ast.Expression) (ast.Type, error) {
+	switch expr := expr.(type) {
+	case *ast.IntLiteral:
+		c.setExpr(expr, ast.IntType, OriginOwned)
+		return ast.IntType, nil
+	case *ast.FloatLiteral:
+		c.setExpr(expr, ast.FloatType, OriginOwned)
+		return ast.FloatType, nil
+	case *ast.BoolLiteral:
+		c.setExpr(expr, ast.BoolType, OriginOwned)
+		return ast.BoolType, nil
+	case *ast.IdentExpr:
+		local, ok := locals.lookup(expr.Name)
+		if !ok {
+			return nil, typeError(expr.Start, "undefined variable %q", expr.Name)
+		}
+		c.setExpr(expr, local.typ, local.origin)
+		return local.typ, nil
+	case *ast.BinaryExpr:
+		leftType, err := c.checkKernelExpr(locals, expr.Left)
+		if err != nil {
+			return nil, err
+		}
+		rightType, err := c.checkKernelExpr(locals, expr.Right)
+		if err != nil {
+			return nil, err
+		}
+		typ, err := binaryType(expr.Start, expr.Operator, leftType, rightType)
+		if err != nil {
+			return nil, err
+		}
+		c.setExpr(expr, typ, OriginOwned)
+		return typ, nil
+	case *ast.IndexExpr:
+		collectionType, err := c.checkKernelExpr(locals, expr.Collection)
+		if err != nil {
+			return nil, err
+		}
+		indexType, err := c.checkKernelExpr(locals, expr.Index)
+		if err != nil {
+			return nil, err
+		}
+		if !ast.TypeEqual(indexType, ast.IntType) {
+			return nil, typeError(expr.Index.Pos(), "index must be int, got %s", indexType)
+		}
+		buf, ok := collectionType.(*ast.GPUBufferType)
+		if !ok {
+			return nil, typeError(expr.Collection.Pos(), "kernel indexing expects gpu.Buffer, got %s", collectionType)
+		}
+		c.setExpr(expr, buf.Elem, OriginOwned)
+		return buf.Elem, nil
+	case *ast.CallExpr:
+		if expr.Package != "gpu" {
+			return nil, typeError(expr.Start, "kernel cannot call %q", expr.SourceName())
+		}
+		typ, origin, err := c.checkGPUCall(locals, expr, false)
+		if err != nil {
+			return nil, err
+		}
+		switch c.info.GPUCalls[expr].Kind {
+		case GPUCallGlobalX, GPUCallGlobalY, GPUCallGlobalZ, GPUCallThreadX, GPUCallThreadY, GPUCallThreadZ, GPUCallBlockX, GPUCallBlockY, GPUCallBlockZ, GPUCallBlockDimX, GPUCallBlockDimY, GPUCallBlockDimZ:
+		default:
+			return nil, typeError(expr.Start, "gpu.%s cannot be used inside a kernel", expr.Callee)
+		}
+		c.setExpr(expr, typ, origin)
+		return typ, nil
+	default:
+		return nil, typeError(expr.Pos(), "unsupported kernel expression %T", expr)
+	}
+}
+
+func (c *checker) checkLetValue(locals *scope, declared ast.Type, value ast.Expression) (ast.Type, error) {
+	if call, ok := value.(*ast.CallExpr); ok && call.Package == "gpu" && call.Callee == "alloc" {
+		buf, ok := declared.(*ast.GPUBufferType)
+		if !ok {
+			return nil, typeError(call.Start, "gpu.alloc result must be assigned to gpu.Buffer, got %s", declared)
+		}
+		if !gpuScalarType(buf.Elem) {
+			return nil, typeError(call.Start, "gpu.Buffer element type must be int or float, got %s", buf.Elem)
+		}
+		if len(call.Args) != 1 {
+			return nil, typeError(call.Start, "gpu.alloc expects 1 argument, got %d", len(call.Args))
+		}
+		lenType, err := c.checkExpr(locals, call.Args[0], false)
+		if err != nil {
+			return nil, err
+		}
+		if !ast.TypeEqual(lenType, ast.IntType) {
+			return nil, typeError(call.Args[0].Pos(), "gpu.alloc length has type %s, want int", lenType)
+		}
+		c.info.GPUCalls[call] = GPUCallSig{Kind: GPUCallAlloc, BufferType: declared}
+		c.setExpr(call, declared, OriginOwned)
+		return declared, nil
+	}
+	return c.checkExpr(locals, value, false)
 }
 
 func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool) (ast.Type, error) {
@@ -512,6 +811,15 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 }
 
 func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) (ast.Type, error) {
+	if expr.Package == "gpu" {
+		typ, origin, err := c.checkGPUCall(locals, expr, allowPrint)
+		if err != nil {
+			return nil, err
+		}
+		c.setExpr(expr, typ, origin)
+		return typ, nil
+	}
+
 	argTypes := make([]ast.Type, 0, len(expr.Args))
 	for _, arg := range expr.Args {
 		argType, err := c.checkExpr(locals, arg, false)
@@ -620,6 +928,123 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 	c.info.ResolvedCalls[expr] = sig
 	c.setExpr(expr, sig.ReturnType, originForCallResult(sig.ReturnType))
 	return sig.ReturnType, nil
+}
+
+func (c *checker) checkGPUCall(locals *scope, expr *ast.CallExpr, allowStatementOnly bool) (ast.Type, Origin, error) {
+	switch expr.Callee {
+	case "alloc":
+		return nil, "", typeError(expr.Start, "gpu.alloc must be assigned to an explicitly typed gpu.Buffer")
+	case "copyToDevice", "copyToHost":
+		if !allowStatementOnly {
+			return nil, "", typeError(expr.Start, "gpu.%s can only be used as a statement", expr.Callee)
+		}
+		if len(expr.Args) != 2 {
+			return nil, "", typeError(expr.Start, "gpu.%s expects 2 arguments, got %d", expr.Callee, len(expr.Args))
+		}
+		left, err := c.checkExpr(locals, expr.Args[0], false)
+		if err != nil {
+			return nil, "", err
+		}
+		right, err := c.checkExpr(locals, expr.Args[1], false)
+		if err != nil {
+			return nil, "", err
+		}
+		var host ast.Type
+		var device ast.Type
+		if expr.Callee == "copyToDevice" {
+			host, device = left, right
+		} else {
+			device, host = left, right
+		}
+		hostSlice, ok := host.(*ast.SliceType)
+		if !ok {
+			return nil, "", typeError(expr.Args[0].Pos(), "gpu.%s host argument must be slice, got %s", expr.Callee, host)
+		}
+		deviceBuffer, ok := device.(*ast.GPUBufferType)
+		if !ok {
+			return nil, "", typeError(expr.Args[1].Pos(), "gpu.%s device argument must be gpu.Buffer, got %s", expr.Callee, device)
+		}
+		if !ast.TypeEqual(hostSlice.Elem, deviceBuffer.Elem) {
+			return nil, "", typeError(expr.Start, "gpu.%s element type mismatch: host has %s, device has %s", expr.Callee, hostSlice.Elem, deviceBuffer.Elem)
+		}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallKind(expr.Callee)}
+		return ast.StringType, OriginUnknown, nil
+	case "free", "sync":
+		if !allowStatementOnly {
+			return nil, "", typeError(expr.Start, "gpu.%s can only be used as a statement", expr.Callee)
+		}
+		if expr.Callee == "sync" {
+			if len(expr.Args) != 0 {
+				return nil, "", typeError(expr.Start, "gpu.sync expects 0 arguments, got %d", len(expr.Args))
+			}
+			c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallSync}
+			return ast.StringType, OriginUnknown, nil
+		}
+		if len(expr.Args) != 1 {
+			return nil, "", typeError(expr.Start, "gpu.free expects 1 argument, got %d", len(expr.Args))
+		}
+		argType, err := c.checkExpr(locals, expr.Args[0], false)
+		if err != nil {
+			return nil, "", err
+		}
+		if _, ok := argType.(*ast.GPUBufferType); !ok {
+			return nil, "", typeError(expr.Args[0].Pos(), "gpu.free expects gpu.Buffer, got %s", argType)
+		}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallFree}
+		return ast.StringType, OriginUnknown, nil
+	case "launch":
+		return c.checkGPULaunch(locals, expr, allowStatementOnly)
+	case "globalX", "globalY", "globalZ", "threadX", "threadY", "threadZ", "blockX", "blockY", "blockZ", "blockDimX", "blockDimY", "blockDimZ":
+		if len(expr.Args) != 0 {
+			return nil, "", typeError(expr.Start, "gpu.%s expects 0 arguments, got %d", expr.Callee, len(expr.Args))
+		}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallKind(expr.Callee)}
+		return ast.IntType, OriginOwned, nil
+	default:
+		return nil, "", typeError(expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
+	}
+}
+
+func (c *checker) checkGPULaunch(locals *scope, expr *ast.CallExpr, allowStatementOnly bool) (ast.Type, Origin, error) {
+	if !allowStatementOnly {
+		return nil, "", typeError(expr.Start, "gpu.launch can only be used as a statement")
+	}
+	if len(expr.Args) < 7 {
+		return nil, "", typeError(expr.Start, "gpu.launch expects kernel, 6 launch dimensions, and kernel args")
+	}
+	kernelIdent, ok := expr.Args[0].(*ast.IdentExpr)
+	if !ok {
+		return nil, "", typeError(expr.Args[0].Pos(), "gpu.launch first argument must be a kernel name")
+	}
+	kernel, ok := c.info.Kernels[kernelIdent.Name]
+	if !ok {
+		return nil, "", typeError(expr.Args[0].Pos(), "undefined kernel %q", kernelIdent.Name)
+	}
+	for i := 1; i <= 6; i++ {
+		argType, err := c.checkExpr(locals, expr.Args[i], false)
+		if err != nil {
+			return nil, "", err
+		}
+		if !ast.TypeEqual(argType, ast.IntType) {
+			return nil, "", typeError(expr.Args[i].Pos(), "gpu.launch dimension %d has type %s, want int", i, argType)
+		}
+	}
+	kernelArgs := expr.Args[7:]
+	if len(kernelArgs) != len(kernel.Params) {
+		return nil, "", typeError(expr.Start, "gpu.launch kernel %s expects %d arguments, got %d", kernel.Name, len(kernel.Params), len(kernelArgs))
+	}
+	for i, arg := range kernelArgs {
+		argType, err := c.checkExpr(locals, arg, false)
+		if err != nil {
+			return nil, "", err
+		}
+		want := kernel.Params[i].Type
+		if !ast.TypeEqual(argType, want) {
+			return nil, "", typeError(arg.Pos(), "argument %d to kernel %s has type %s, want %s", i+1, kernel.Name, argType, want)
+		}
+	}
+	c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallLaunch, KernelName: kernel.Name, KernelSig: kernel}
+	return ast.StringType, OriginUnknown, nil
 }
 
 func (c *checker) checkStdlibCall(expr *ast.CallExpr, member stdlib.Member, argTypes []ast.Type, allowStatementOnly bool) (ast.Type, Origin, error) {
@@ -794,9 +1219,22 @@ func validateType(pos token.Position, typ ast.Type) error {
 		return validateType(pos, typ.Elem)
 	case *ast.ListType:
 		return validateType(pos, typ.Elem)
+	case *ast.GPUBufferType:
+		if !gpuScalarType(typ.Elem) {
+			return typeError(pos, "gpu.Buffer element type must be int or float, got %s", typ.Elem)
+		}
+		return nil
 	default:
 		return typeError(pos, "unsupported type %s", typ)
 	}
+}
+
+func gpuScalarType(typ ast.Type) bool {
+	return ast.TypeEqual(typ, ast.IntType) || ast.TypeEqual(typ, ast.FloatType)
+}
+
+func kernelLocalType(typ ast.Type) bool {
+	return ast.TypeEqual(typ, ast.IntType) || ast.TypeEqual(typ, ast.FloatType) || ast.TypeEqual(typ, ast.BoolType)
 }
 
 func typeError(pos token.Position, format string, args ...any) error {

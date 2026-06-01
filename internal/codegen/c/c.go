@@ -40,8 +40,15 @@ func (u *funcUsage) noteArena(arena string) {
 func Generate(program *ir.Program) (string, error) {
 	var out bytes.Buffer
 
+	if len(program.Kernels) > 0 {
+		out.WriteString("#include <cuda_runtime.h>\n")
+	}
 	out.WriteString(runtimec.Source)
 	fmt.Fprintln(&out)
+	if len(program.Kernels) > 0 {
+		emitGPURuntime(&out)
+		fmt.Fprintln(&out)
+	}
 
 	families, err := nestedCollectionFamilies(program)
 	if err != nil {
@@ -60,7 +67,21 @@ func Generate(program *ir.Program) (string, error) {
 			return "", err
 		}
 	}
+	if len(program.Kernels) > 0 {
+		for _, kernel := range program.Kernels {
+			if err := emitKernelPrototype(&out, kernel); err != nil {
+				return "", err
+			}
+		}
+	}
 	fmt.Fprintln(&out)
+
+	for _, kernel := range program.Kernels {
+		if err := emitKernelFunc(&out, kernel); err != nil {
+			return "", err
+		}
+		fmt.Fprintln(&out)
+	}
 
 	for _, fn := range program.Functions {
 		if err := emitFunc(&out, fn); err != nil {
@@ -79,6 +100,65 @@ func Generate(program *ir.Program) (string, error) {
 	fmt.Fprintln(&out, "}")
 
 	return out.String(), nil
+}
+
+func emitGPURuntime(out *bytes.Buffer) {
+	out.WriteString(`typedef struct { int64_t* data; size_t len; } rt_gpu_buffer_int;
+typedef struct { double* data; size_t len; } rt_gpu_buffer_float;
+
+static RT_UNUSED void rt_cuda_check(cudaError_t err, const char* operation) {
+    if (err != cudaSuccess) {
+        fprintf(stderr, "trux runtime error: CUDA %s failed: %s\n", operation, cudaGetErrorString(err));
+        exit(1);
+    }
+}
+
+static RT_UNUSED rt_gpu_buffer_int rt_gpu_alloc_int(int64_t count) {
+    size_t len = rt_checked_count(count, "gpu buffer length");
+    int64_t* data = NULL;
+    rt_cuda_check(cudaMalloc((void**)&data, rt_checked_bytes(len, sizeof(int64_t))), "alloc");
+    return (rt_gpu_buffer_int){data, len};
+}
+
+static RT_UNUSED rt_gpu_buffer_float rt_gpu_alloc_float(int64_t count) {
+    size_t len = rt_checked_count(count, "gpu buffer length");
+    double* data = NULL;
+    rt_cuda_check(cudaMalloc((void**)&data, rt_checked_bytes(len, sizeof(double))), "alloc");
+    return (rt_gpu_buffer_float){data, len};
+}
+
+static RT_UNUSED void rt_gpu_copy_to_device_int(rt_slice_int host, rt_gpu_buffer_int device) {
+    if (host.len > device.len) rt_runtime_fail("gpu copyToDevice host slice is larger than device buffer");
+    rt_cuda_check(cudaMemcpy(device.data, host.data, host.len * sizeof(int64_t), cudaMemcpyHostToDevice), "copyToDevice");
+}
+
+static RT_UNUSED void rt_gpu_copy_to_device_float(rt_slice_float host, rt_gpu_buffer_float device) {
+    if (host.len > device.len) rt_runtime_fail("gpu copyToDevice host slice is larger than device buffer");
+    rt_cuda_check(cudaMemcpy(device.data, host.data, host.len * sizeof(double), cudaMemcpyHostToDevice), "copyToDevice");
+}
+
+static RT_UNUSED void rt_gpu_copy_to_host_int(rt_gpu_buffer_int device, rt_slice_int host) {
+    if (host.len > device.len) rt_runtime_fail("gpu copyToHost host slice is larger than device buffer");
+    rt_cuda_check(cudaMemcpy(host.data, device.data, host.len * sizeof(int64_t), cudaMemcpyDeviceToHost), "copyToHost");
+}
+
+static RT_UNUSED void rt_gpu_copy_to_host_float(rt_gpu_buffer_float device, rt_slice_float host) {
+    if (host.len > device.len) rt_runtime_fail("gpu copyToHost host slice is larger than device buffer");
+    rt_cuda_check(cudaMemcpy(host.data, device.data, host.len * sizeof(double), cudaMemcpyDeviceToHost), "copyToHost");
+}
+
+static RT_UNUSED void rt_gpu_free_int(rt_gpu_buffer_int buffer) {
+    rt_cuda_check(cudaFree(buffer.data), "free");
+}
+
+static RT_UNUSED void rt_gpu_free_float(rt_gpu_buffer_float buffer) {
+    rt_cuda_check(cudaFree(buffer.data), "free");
+}
+
+static RT_UNUSED void rt_gpu_sync(void) {
+    rt_cuda_check(cudaDeviceSynchronize(), "sync");
+}
+`)
 }
 
 func emitPrototype(out *bytes.Buffer, fn *ir.Func) error {
@@ -115,6 +195,42 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func) error {
 	fmt.Fprintln(out, "trux_return:")
 	fmt.Fprintln(out, "    rt_arena_deinit(&trux_frame);")
 	fmt.Fprintln(out, "    return trux_return_value;")
+	fmt.Fprintln(out, "}")
+	return nil
+}
+
+func emitKernelPrototype(out *bytes.Buffer, fn *ir.Func) error {
+	fmt.Fprintf(out, "__global__ void %s(", mangleKernel(fn.Name))
+	for i, param := range fn.Params {
+		if i > 0 {
+			fmt.Fprint(out, ", ")
+		}
+		paramType, err := emitKernelType(param.Type)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s %s", paramType, mangleIdent(param.Name))
+	}
+	fmt.Fprintln(out, ");")
+	return nil
+}
+
+func emitKernelFunc(out *bytes.Buffer, fn *ir.Func) error {
+	fmt.Fprintf(out, "__global__ void %s(", mangleKernel(fn.Name))
+	for i, param := range fn.Params {
+		if i > 0 {
+			fmt.Fprint(out, ", ")
+		}
+		paramType, err := emitKernelType(param.Type)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s %s", paramType, mangleIdent(param.Name))
+	}
+	fmt.Fprintln(out, ") {")
+	if err := emitKernelStmts(out, fn.Body, 1); err != nil {
+		return err
+	}
 	fmt.Fprintln(out, "}")
 	return nil
 }
@@ -307,6 +423,85 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) erro
 			return err
 		}
 		fmt.Fprintf(out, "%srt_write_csv(%s, %s, %s);\n", indent, path, cells, columns)
+	case *ir.WritePPMStmt:
+		path, err := emitExpr(stmt.Path, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		pixels, err := emitExpr(stmt.Pixels, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		width, err := emitExpr(stmt.Width, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		height, err := emitExpr(stmt.Height, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%srt_write_ppm(%s, %s, %s, %s);\n", indent, path, pixels, width, height)
+	case *ir.GPUCopyStmt:
+		first, err := emitExpr(stmt.First, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		second, err := emitExpr(stmt.Second, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		var elem ast.Type
+		if stmt.Kind == semtypes.GPUCallCopyToDevice {
+			elem = stmt.Second.Type().(*ast.GPUBufferType).Elem
+		} else {
+			elem = stmt.First.Type().(*ast.GPUBufferType).Elem
+		}
+		name, err := gpuElemName(elem)
+		if err != nil {
+			return err
+		}
+		if stmt.Kind == semtypes.GPUCallCopyToDevice {
+			fmt.Fprintf(out, "%srt_gpu_copy_to_device_%s(%s, %s);\n", indent, name, first, second)
+		} else {
+			fmt.Fprintf(out, "%srt_gpu_copy_to_host_%s(%s, %s);\n", indent, name, first, second)
+		}
+	case *ir.GPUFreeStmt:
+		buffer, err := emitExpr(stmt.Buffer, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		name, err := gpuElemName(stmt.Buffer.Type().(*ast.GPUBufferType).Elem)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%srt_gpu_free_%s(%s);\n", indent, name, buffer)
+	case *ir.GPUSyncStmt:
+		fmt.Fprintf(out, "%srt_gpu_sync();\n", indent)
+	case *ir.GPULaunchStmt:
+		dims := make([]string, 0, len(stmt.Dims))
+		for _, dim := range stmt.Dims {
+			value, err := emitExpr(dim, frameArena, usage)
+			if err != nil {
+				return err
+			}
+			dims = append(dims, value)
+		}
+		args := make([]string, 0, len(stmt.Args))
+		for _, arg := range stmt.Args {
+			value, err := emitKernelLaunchArg(arg, usage)
+			if err != nil {
+				return err
+			}
+			args = append(args, value)
+		}
+		fmt.Fprintf(out, "%s%s<<<dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s), dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s)>>>(%s);\n", indent, mangleKernel(stmt.KernelName), dims[0], dims[1], dims[2], dims[3], dims[4], dims[5], strings.Join(args, ", "))
+		fmt.Fprintf(out, "%srt_cuda_check(cudaGetLastError(), \"launch\");\n", indent)
+	case *ir.TimeSleepStmt:
+		millis, err := emitExpr(stmt.Millis, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%srt_time_sleep_millis(%s);\n", indent, millis)
 	case *ir.ExprStmt:
 		expr, err := emitExpr(stmt.Expr, frameArena, usage)
 		if err != nil {
@@ -449,6 +644,48 @@ func emitExpr(expr ir.Expr, targetArena string, usage *funcUsage) (string, error
 		}
 		usage.noteArena(targetArena)
 		return fmt.Sprintf("rt_read_csv(%s, %s, %s)", targetArena, path, columns), nil
+	case *ir.ImageDimensionExpr:
+		path, err := emitExpr(expr.Path, frameArena, usage)
+		if err != nil {
+			return "", err
+		}
+		switch expr.Kind {
+		case semtypes.IOCallImageWidth:
+			return fmt.Sprintf("rt_image_width(%s)", path), nil
+		case semtypes.IOCallImageHeight:
+			return fmt.Sprintf("rt_image_height(%s)", path), nil
+		default:
+			return "", fmt.Errorf("unsupported image dimension expression %s", expr.Kind)
+		}
+	case *ir.ReadPPMExpr:
+		path, err := emitExpr(expr.Path, frameArena, usage)
+		if err != nil {
+			return "", err
+		}
+		usage.noteArena(targetArena)
+		return fmt.Sprintf("rt_read_ppm(%s, %s)", targetArena, path), nil
+	case *ir.TimeNowExpr:
+		switch expr.Kind {
+		case semtypes.IOCallTimeNowUnixMillis:
+			return "rt_time_now_unix_millis()", nil
+		case semtypes.IOCallTimeMonotonicNanos:
+			return "rt_time_monotonic_nanos()", nil
+		default:
+			return "", fmt.Errorf("unsupported time expression %s", expr.Kind)
+		}
+	case *ir.GPUAllocExpr:
+		length, err := emitExpr(expr.Len, frameArena, usage)
+		if err != nil {
+			return "", err
+		}
+		buf := expr.Type().(*ast.GPUBufferType)
+		name, err := gpuElemName(buf.Elem)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("rt_gpu_alloc_%s(%s)", name, length), nil
+	case *ir.GPUCoordExpr:
+		return emitGPUCoord(expr.Kind)
 	case *ir.CallExpr:
 		args := make([]string, 0, len(expr.Args)+1)
 		callResultArena := frameArena
@@ -582,8 +819,29 @@ func emitType(typ ast.Type) (string, error) {
 			return "", err
 		}
 		return "rt_list_" + name + "*", nil
+	case *ast.GPUBufferType:
+		name, err := gpuElemName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "rt_gpu_buffer_" + name, nil
 	default:
 		return "", fmt.Errorf("unsupported type %s", typ)
+	}
+}
+
+func emitKernelType(typ ast.Type) (string, error) {
+	switch typ := typ.(type) {
+	case ast.ScalarType:
+		return emitType(typ)
+	case *ast.GPUBufferType:
+		elem, err := emitType(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return elem + "*", nil
+	default:
+		return "", fmt.Errorf("unsupported kernel type %s", typ)
 	}
 }
 
@@ -624,6 +882,187 @@ func emitOptionalBound(expr ir.Expr, usage *funcUsage) (string, string, error) {
 		return "", "", err
 	}
 	return "true", value, nil
+}
+
+func emitKernelStmts(out *bytes.Buffer, stmts []ir.Stmt, level int) error {
+	for _, stmt := range stmts {
+		if err := emitKernelStmt(out, stmt, level); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
+	indent := strings.Repeat("    ", level)
+	switch stmt := stmt.(type) {
+	case *ir.LetStmt:
+		typ, err := emitKernelType(stmt.Type)
+		if err != nil {
+			return err
+		}
+		value, err := emitKernelExpr(stmt.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s%s %s = %s;\n", indent, typ, mangleIdent(stmt.Name), value)
+	case *ir.AssignStmt:
+		value, err := emitKernelExpr(stmt.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s%s = %s;\n", indent, mangleIdent(stmt.Name), value)
+	case *ir.IndexAssignStmt:
+		target, err := emitKernelIndex(stmt.Target)
+		if err != nil {
+			return err
+		}
+		value, err := emitKernelExpr(stmt.Value)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s%s = %s;\n", indent, target, value)
+	case *ir.IfStmt:
+		condition, err := emitKernelExpr(stmt.Condition)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%sif (%s) {\n", indent, trimParens(condition))
+		if err := emitKernelStmts(out, stmt.Then, level+1); err != nil {
+			return err
+		}
+		if len(stmt.Else) == 0 {
+			fmt.Fprintf(out, "%s}\n", indent)
+			break
+		}
+		fmt.Fprintf(out, "%s} else {\n", indent)
+		if err := emitKernelStmts(out, stmt.Else, level+1); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s}\n", indent)
+	case *ir.ForStmt:
+		fmt.Fprintf(out, "%s{\n", indent)
+		if stmt.Init != nil {
+			if err := emitKernelStmt(out, stmt.Init, level+1); err != nil {
+				return err
+			}
+		}
+		if stmt.Condition == nil {
+			fmt.Fprintf(out, "%s    for (;;) {\n", indent)
+		} else {
+			condition, err := emitKernelExpr(stmt.Condition)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "%s    for (; %s;) {\n", indent, trimParens(condition))
+		}
+		if err := emitKernelStmts(out, stmt.Body, level+2); err != nil {
+			return err
+		}
+		if stmt.Post != nil {
+			if err := emitKernelStmt(out, stmt.Post, level+2); err != nil {
+				return err
+			}
+		}
+		fmt.Fprintf(out, "%s    }\n", indent)
+		fmt.Fprintf(out, "%s}\n", indent)
+	default:
+		return fmt.Errorf("unsupported kernel statement %T", stmt)
+	}
+	return nil
+}
+
+func emitKernelExpr(expr ir.Expr) (string, error) {
+	switch expr := expr.(type) {
+	case *ir.IdentExpr:
+		return mangleIdent(expr.Name), nil
+	case *ir.IntLiteral:
+		return expr.Value, nil
+	case *ir.FloatLiteral:
+		return expr.Value, nil
+	case *ir.BoolLiteral:
+		if expr.Value {
+			return "true", nil
+		}
+		return "false", nil
+	case *ir.BinaryExpr:
+		left, err := emitKernelExpr(expr.Left)
+		if err != nil {
+			return "", err
+		}
+		right, err := emitKernelExpr(expr.Right)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("(%s %s %s)", left, expr.Operator, right), nil
+	case *ir.IndexExpr:
+		return emitKernelIndex(expr)
+	case *ir.GPUCoordExpr:
+		return emitGPUCoord(expr.Kind)
+	default:
+		return "", fmt.Errorf("unsupported kernel expression %T", expr)
+	}
+}
+
+func emitKernelIndex(expr *ir.IndexExpr) (string, error) {
+	collection, err := emitKernelExpr(expr.Collection)
+	if err != nil {
+		return "", err
+	}
+	index, err := emitKernelExpr(expr.Index)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s[%s]", collection, index), nil
+}
+
+func emitKernelLaunchArg(expr ir.Expr, usage *funcUsage) (string, error) {
+	value, err := emitExpr(expr, frameArena, usage)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := expr.Type().(*ast.GPUBufferType); ok {
+		return value + ".data", nil
+	}
+	return value, nil
+}
+
+func emitGPUCoord(kind semtypes.GPUCallKind) (string, error) {
+	switch kind {
+	case semtypes.GPUCallGlobalX:
+		return "((int64_t)(blockIdx.x * blockDim.x + threadIdx.x))", nil
+	case semtypes.GPUCallGlobalY:
+		return "((int64_t)(blockIdx.y * blockDim.y + threadIdx.y))", nil
+	case semtypes.GPUCallGlobalZ:
+		return "((int64_t)(blockIdx.z * blockDim.z + threadIdx.z))", nil
+	case semtypes.GPUCallThreadX:
+		return "((int64_t)threadIdx.x)", nil
+	case semtypes.GPUCallThreadY:
+		return "((int64_t)threadIdx.y)", nil
+	case semtypes.GPUCallThreadZ:
+		return "((int64_t)threadIdx.z)", nil
+	case semtypes.GPUCallBlockX:
+		return "((int64_t)blockIdx.x)", nil
+	case semtypes.GPUCallBlockY:
+		return "((int64_t)blockIdx.y)", nil
+	case semtypes.GPUCallBlockZ:
+		return "((int64_t)blockIdx.z)", nil
+	case semtypes.GPUCallBlockDimX:
+		return "((int64_t)blockDim.x)", nil
+	case semtypes.GPUCallBlockDimY:
+		return "((int64_t)blockDim.y)", nil
+	case semtypes.GPUCallBlockDimZ:
+		return "((int64_t)blockDim.z)", nil
+	default:
+		return "", fmt.Errorf("unsupported GPU coordinate %s", kind)
+	}
+}
+
+func trimParens(value string) string {
+	if strings.HasPrefix(value, "(") && strings.HasSuffix(value, ")") {
+		return value[1 : len(value)-1]
+	}
+	return value
 }
 
 func isCollectionType(typ ast.Type) bool {
@@ -723,6 +1162,12 @@ func elemRuntimeName(typ ast.Type) (string, error) {
 			return "", err
 		}
 		return "list_" + name, nil
+	case *ast.GPUBufferType:
+		name, err := gpuElemName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "gpu_buffer_" + name, nil
 	default:
 		return "", fmt.Errorf("unsupported element type %s", typ)
 	}
@@ -831,6 +1276,39 @@ func collectStmtNestedCollectionFamilies(stmt ir.Stmt, seen map[string]bool, fam
 			return err
 		}
 		return collectExprNestedCollectionFamilies(stmt.Columns, seen, families)
+	case *ir.WritePPMStmt:
+		if err := collectExprNestedCollectionFamilies(stmt.Path, seen, families); err != nil {
+			return err
+		}
+		if err := collectExprNestedCollectionFamilies(stmt.Pixels, seen, families); err != nil {
+			return err
+		}
+		if err := collectExprNestedCollectionFamilies(stmt.Width, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(stmt.Height, seen, families)
+	case *ir.GPUCopyStmt:
+		if err := collectExprNestedCollectionFamilies(stmt.First, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(stmt.Second, seen, families)
+	case *ir.GPUFreeStmt:
+		return collectExprNestedCollectionFamilies(stmt.Buffer, seen, families)
+	case *ir.GPUSyncStmt:
+		return nil
+	case *ir.GPULaunchStmt:
+		for _, dim := range stmt.Dims {
+			if err := collectExprNestedCollectionFamilies(dim, seen, families); err != nil {
+				return err
+			}
+		}
+		for _, arg := range stmt.Args {
+			if err := collectExprNestedCollectionFamilies(arg, seen, families); err != nil {
+				return err
+			}
+		}
+	case *ir.TimeSleepStmt:
+		return collectExprNestedCollectionFamilies(stmt.Millis, seen, families)
 	case *ir.ExprStmt:
 		return collectExprNestedCollectionFamilies(stmt.Expr, seen, families)
 	default:
@@ -861,6 +1339,16 @@ func collectExprNestedCollectionFamilies(expr ir.Expr, seen map[string]bool, fam
 		}
 	case *ir.MakeExpr:
 		return collectExprNestedCollectionFamilies(expr.Len, seen, families)
+	case *ir.GPUAllocExpr:
+		return collectExprNestedCollectionFamilies(expr.Len, seen, families)
+	case *ir.GPUCoordExpr:
+		return nil
+	case *ir.ImageDimensionExpr:
+		return collectExprNestedCollectionFamilies(expr.Path, seen, families)
+	case *ir.ReadPPMExpr:
+		return collectExprNestedCollectionFamilies(expr.Path, seen, families)
+	case *ir.TimeNowExpr:
+		return nil
 	case *ir.CallExpr:
 		for _, arg := range expr.Args {
 			if err := collectExprNestedCollectionFamilies(arg, seen, families); err != nil {
@@ -929,8 +1417,23 @@ func mangleFunc(name string) string {
 	return "trux_" + name
 }
 
+func mangleKernel(name string) string {
+	return "trux_kernel_" + name
+}
+
 func mangleIdent(name string) string {
 	return fmt.Sprintf("trux_v_%d_%s", len(name), name)
+}
+
+func gpuElemName(typ ast.Type) (string, error) {
+	switch {
+	case ast.TypeEqual(typ, ast.IntType):
+		return "int", nil
+	case ast.TypeEqual(typ, ast.FloatType):
+		return "float", nil
+	default:
+		return "", fmt.Errorf("unsupported gpu buffer element type %s", typ)
+	}
 }
 
 func cStringLiteral(value string) string {

@@ -1,0 +1,227 @@
+package main
+
+import "gpu"
+import "image"
+import "time"
+
+// rotateKernel rotates a flat RGB image on the GPU.
+//
+// The image package returns pixels as a flat []int in RGB order:
+//
+//   pixel 0: R, G, B
+//   pixel 1: R, G, B
+//   ...
+//
+// So the first channel for pixel p starts at:
+//
+//   p * 3
+//
+// The `turns` argument is the normalized number of clockwise quarter turns:
+//
+//   0 = no rotation
+//   1 = 90 degrees clockwise
+//   2 = 180 degrees
+//   3 = 270 degrees clockwise
+//
+// Each GPU thread handles one output pixel. It maps that output row/column back
+// to the input row/column, then copies the three RGB channels together.
+kernel func rotateKernel(input gpu.Buffer[int], output gpu.Buffer[int], width int, height int, outWidth int, pixelCount int, turns int) {
+  let pixel int = gpu.globalX()
+
+  // The launch rounds up to a whole number of CUDA blocks, so the last block
+  // can contain extra threads. Those threads land beyond pixelCount and must
+  // skip all memory reads/writes.
+  if pixel < pixelCount {
+    let row int = pixel / outWidth
+    let col int = pixel - row * outWidth
+    let sourceRow int = row
+    let sourceCol int = col
+
+    if turns == 1 {
+      sourceRow = height - 1 - col
+      sourceCol = row
+    } else if turns == 2 {
+      sourceRow = height - 1 - row
+      sourceCol = width - 1 - col
+    } else if turns == 3 {
+      sourceRow = col
+      sourceCol = width - 1 - row
+    }
+
+    let sourcePixel int = sourceRow * width + sourceCol
+    let dst int = pixel * 3
+    let src int = sourcePixel * 3
+
+    output[dst] = input[src]
+    output[dst + 1] = input[src + 1]
+    output[dst + 2] = input[src + 2]
+  }
+}
+
+// checksum gives a small deterministic value to compare CPU and GPU buffers.
+// Rotation preserves the sum of all channel values, so this is only a quick
+// sanity check. The mismatch loop below is the stronger correctness check.
+func checksum(values []int) int {
+  let total int = 0
+
+  for let i int = 0; i < len(values); i = i + 1 {
+    total = total + values[i]
+  }
+
+  return total
+}
+
+// normalizeTurns accepts any integer and reduces it to 0, 1, 2, or 3 quarter
+// turns. This lets the example use `turns = 6` for the same result as `turns =
+// 2`, or `turns = -1` for the same result as `turns = 3`.
+func normalizeTurns(turns int) int {
+  let out int = turns
+
+  for out < 0 {
+    out = out + 4
+  }
+
+  for out >= 4 {
+    out = out - 4
+  }
+
+  return out
+}
+
+// printSeconds prints elapsed nanoseconds as seconds with millisecond precision.
+//
+// Trux does not have numeric casts yet, so this keeps the formatting in integer
+// arithmetic and pads the millisecond part manually.
+func printSeconds(label string, nanos int) int {
+  let seconds int = nanos / 1000000000
+  let remainder int = nanos - seconds * 1000000000
+  let millis int = remainder / 1000000
+
+  if millis < 10 {
+    print(label, seconds, ".00", millis, " s")
+  } else if millis < 100 {
+    print(label, seconds, ".0", millis, " s")
+  } else {
+    print(label, seconds, ".", millis, " s")
+  }
+
+  return 0
+}
+
+func main() int {
+  let path string = "examples/projects/rotate_image/source.ppm"
+
+  // Change this value to rotate by a different number of clockwise quarter
+  // turns. Examples:
+  //
+  //   turns = 1 rotates 90 degrees clockwise
+  //   turns = 2 rotates 180 degrees
+  //   turns = 3 rotates 270 degrees clockwise
+  //   turns = 6 also rotates 180 degrees, because 6 is normalized to 2
+  let turns int = 1
+  let normalizedTurns int = normalizeTurns(turns)
+
+  // The current first image API reads P3 PPM files. The project keeps the
+  // original JPEG beside this PPM copy, but Trux reads the PPM because it is a
+  // simple uncompressed RGB format.
+  let width int = image.width(path)
+  let height int = image.height(path)
+  let pixels []int = image.readPpm(path)
+
+  let pixelCount int = width * height
+  let componentCount int = pixelCount * 3
+  let outWidth int = width
+  let outHeight int = height
+
+  if normalizedTurns == 1 {
+    outWidth = height
+    outHeight = width
+  } else if normalizedTurns == 3 {
+    outWidth = height
+    outHeight = width
+  }
+
+  let cpuOut []int = make([]int, componentCount)
+  let gpuOut []int = make([]int, componentCount)
+
+  // CPU version. This is intentionally the same mapping as the GPU kernel:
+  // one loop iteration handles one output pixel and copies RGB together.
+  let cpuStart int = time.monotonicNanos()
+  for let pixel int = 0; pixel < pixelCount; pixel = pixel + 1 {
+    let row int = pixel / outWidth
+    let col int = pixel - row * outWidth
+    let sourceRow int = row
+    let sourceCol int = col
+
+    if normalizedTurns == 1 {
+      sourceRow = height - 1 - col
+      sourceCol = row
+    } else if normalizedTurns == 2 {
+      sourceRow = height - 1 - row
+      sourceCol = width - 1 - col
+    } else if normalizedTurns == 3 {
+      sourceRow = col
+      sourceCol = width - 1 - row
+    }
+
+    let sourcePixel int = sourceRow * width + sourceCol
+    let dst int = pixel * 3
+    let src int = sourcePixel * 3
+
+    cpuOut[dst] = pixels[src]
+    cpuOut[dst + 1] = pixels[src + 1]
+    cpuOut[dst + 2] = pixels[src + 2]
+  }
+  let cpuEnd int = time.monotonicNanos()
+
+  // GPU version. Device buffers are explicit in this first GPU model:
+  // allocate device memory, copy host pixels to the GPU, launch a kernel,
+  // synchronize, copy the result back, then free the device buffers.
+  let gpuStart int = time.monotonicNanos()
+  let dInput gpu.Buffer[int] = gpu.alloc(componentCount)
+  let dOutput gpu.Buffer[int] = gpu.alloc(componentCount)
+
+  gpu.copyToDevice(pixels, dInput)
+
+  // One thread rotates one pixel. A 256-thread block is a common 1D default.
+  // gridSize uses integer ceiling division so every pixel is covered:
+  //
+  //   ceil(pixelCount / blockSize) = (pixelCount + blockSize - 1) / blockSize
+  //
+  // Extra threads in the final block are harmless because the kernel checks
+  // pixel < pixelCount before touching memory.
+  let blockSize int = 256
+  let gridSize int = (pixelCount + blockSize - 1) / blockSize
+  gpu.launch(rotateKernel, gridSize, 1, 1, blockSize, 1, 1, dInput, dOutput, width, height, outWidth, pixelCount, normalizedTurns)
+
+  gpu.sync()
+  gpu.copyToHost(dOutput, gpuOut)
+  let gpuEnd int = time.monotonicNanos()
+
+  let mismatches int = 0
+  for let i int = 0; i < componentCount; i = i + 1 {
+    if cpuOut[i] != gpuOut[i] {
+      mismatches = mismatches + 1
+    }
+  }
+
+  image.writePpm("examples/projects/rotate_image/rotated_cpu.ppm", cpuOut, outWidth, outHeight)
+  image.writePpm("examples/projects/rotate_image/rotated_gpu.ppm", gpuOut, outWidth, outHeight)
+
+  print("width ", width)
+  print("height ", height)
+  print("output width ", outWidth)
+  print("output height ", outHeight)
+  print("turns ", turns)
+  print("normalized turns ", normalizedTurns)
+  print("cpu checksum ", checksum(cpuOut))
+  print("gpu checksum ", checksum(gpuOut))
+  print("mismatches ", mismatches)
+  printSeconds("cpu seconds ", cpuEnd - cpuStart)
+  printSeconds("gpu seconds ", gpuEnd - gpuStart)
+
+  gpu.free(dInput)
+  gpu.free(dOutput)
+
+  return 0
+}

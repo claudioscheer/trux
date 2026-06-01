@@ -10,14 +10,28 @@ import (
 type CallKind string
 
 const (
-	CallReadLine  CallKind = "readLine"
-	CallReadInt   CallKind = "readInt"
-	CallReadFloat CallKind = "readFloat"
-	CallReadBool  CallKind = "readBool"
-	CallReadFile  CallKind = "readFile"
-	CallWriteFile CallKind = "writeFile"
-	CallReadCSV   CallKind = "readCsv"
-	CallWriteCSV  CallKind = "writeCsv"
+	CallReadLine           CallKind = "readLine"
+	CallReadInt            CallKind = "readInt"
+	CallReadFloat          CallKind = "readFloat"
+	CallReadBool           CallKind = "readBool"
+	CallReadFile           CallKind = "readFile"
+	CallWriteFile          CallKind = "writeFile"
+	CallReadCSV            CallKind = "readCsv"
+	CallWriteCSV           CallKind = "writeCsv"
+	CallImageWidth         CallKind = "imageWidth"
+	CallImageHeight        CallKind = "imageHeight"
+	CallReadPPM            CallKind = "readPpm"
+	CallWritePPM           CallKind = "writePpm"
+	CallTimeNowUnixMillis  CallKind = "nowUnixMillis"
+	CallTimeMonotonicNanos CallKind = "monotonicNanos"
+	CallTimeSleepMillis    CallKind = "sleepMillis"
+	CallGPUAlloc           CallKind = "gpuAlloc"
+	CallGPUCopyToDevice    CallKind = "copyToDevice"
+	CallGPUCopyToHost      CallKind = "copyToHost"
+	CallGPUFree            CallKind = "gpuFree"
+	CallGPUSync            CallKind = "gpuSync"
+	CallGPULaunch          CallKind = "gpuLaunch"
+	CallGPUCoord           CallKind = "gpuCoord"
 )
 
 type ResultOrigin string
@@ -42,6 +56,7 @@ type Member struct {
 	ResultOrigin  ResultOrigin
 	StatementOnly bool
 	Detail        string
+	SignatureText string
 }
 
 func (m Member) SourceName() string {
@@ -49,6 +64,9 @@ func (m Member) SourceName() string {
 }
 
 func (m Member) Signature() string {
+	if m.SignatureText != "" {
+		return m.SignatureText
+	}
 	params := make([]string, 0, len(m.Params))
 	for _, param := range m.Params {
 		params = append(params, param.Name+" "+param.Type.String())
@@ -156,6 +174,90 @@ var packages = []Package{
 				StatementOnly: true,
 				Detail:        "write row-major cells to a CSV file",
 			},
+		},
+	},
+	{
+		Name: "time",
+		Members: []Member{
+			{Package: "time", Name: "nowUnixMillis", Kind: CallTimeNowUnixMillis, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "current Unix wall-clock time in milliseconds"},
+			{Package: "time", Name: "monotonicNanos", Kind: CallTimeMonotonicNanos, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "monotonic timestamp in nanoseconds for elapsed-time measurement"},
+			{Package: "time", Name: "sleepMillis", Kind: CallTimeSleepMillis, Params: []Param{{Name: "ms", Type: ast.IntType}}, ReturnType: ast.StringType, ResultOrigin: ResultUnknown, StatementOnly: true, Detail: "sleep for a number of milliseconds"},
+		},
+	},
+	{
+		Name: "image",
+		Members: []Member{
+			{
+				Package: "image",
+				Name:    "width",
+				Kind:    CallImageWidth,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   ast.IntType,
+				ResultOrigin: ResultOwned,
+				Detail:       "read the width from a P3 PPM image",
+			},
+			{
+				Package: "image",
+				Name:    "height",
+				Kind:    CallImageHeight,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   ast.IntType,
+				ResultOrigin: ResultOwned,
+				Detail:       "read the height from a P3 PPM image",
+			},
+			{
+				Package: "image",
+				Name:    "readPpm",
+				Kind:    CallReadPPM,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   &ast.SliceType{Elem: ast.IntType},
+				ResultOrigin: ResultFrameOwned,
+				Detail:       "read P3 PPM RGB pixels into a flat slice",
+			},
+			{
+				Package: "image",
+				Name:    "writePpm",
+				Kind:    CallWritePPM,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+					{Name: "pixels", Type: &ast.SliceType{Elem: ast.IntType}},
+					{Name: "width", Type: ast.IntType},
+					{Name: "height", Type: ast.IntType},
+				},
+				ReturnType:    ast.StringType,
+				ResultOrigin:  ResultUnknown,
+				StatementOnly: true,
+				Detail:        "write flat RGB pixels as a P3 PPM image",
+			},
+		},
+	},
+	{
+		Name: "gpu",
+		Members: []Member{
+			{Package: "gpu", Name: "alloc", Kind: CallGPUAlloc, Detail: "allocate a device buffer", SignatureText: "gpu.alloc(n int) gpu.Buffer[T]"},
+			{Package: "gpu", Name: "copyToDevice", Kind: CallGPUCopyToDevice, Detail: "copy a host slice to a device buffer", StatementOnly: true, SignatureText: "gpu.copyToDevice(host []T, device gpu.Buffer[T])"},
+			{Package: "gpu", Name: "copyToHost", Kind: CallGPUCopyToHost, Detail: "copy a device buffer to a host slice", StatementOnly: true, SignatureText: "gpu.copyToHost(device gpu.Buffer[T], host []T)"},
+			{Package: "gpu", Name: "free", Kind: CallGPUFree, Detail: "free a device buffer", StatementOnly: true, SignatureText: "gpu.free(device gpu.Buffer[T])"},
+			{Package: "gpu", Name: "sync", Kind: CallGPUSync, Detail: "synchronize the CUDA device", StatementOnly: true},
+			{Package: "gpu", Name: "launch", Kind: CallGPULaunch, Detail: "launch a GPU kernel", StatementOnly: true, SignatureText: "gpu.launch(kernel, gridX int, gridY int, gridZ int, blockX int, blockY int, blockZ int, args...)"},
+			{Package: "gpu", Name: "globalX", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "global GPU x coordinate"},
+			{Package: "gpu", Name: "globalY", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "global GPU y coordinate"},
+			{Package: "gpu", Name: "globalZ", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "global GPU z coordinate"},
+			{Package: "gpu", Name: "threadX", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "thread x coordinate"},
+			{Package: "gpu", Name: "threadY", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "thread y coordinate"},
+			{Package: "gpu", Name: "threadZ", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "thread z coordinate"},
+			{Package: "gpu", Name: "blockX", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "block x coordinate"},
+			{Package: "gpu", Name: "blockY", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "block y coordinate"},
+			{Package: "gpu", Name: "blockZ", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "block z coordinate"},
+			{Package: "gpu", Name: "blockDimX", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "block x dimension"},
+			{Package: "gpu", Name: "blockDimY", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "block y dimension"},
+			{Package: "gpu", Name: "blockDimZ", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "block z dimension"},
 		},
 	},
 }

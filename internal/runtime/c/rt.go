@@ -1,6 +1,7 @@
 package c
 
-const Source = `#include <ctype.h>
+const Source = `#define _POSIX_C_SOURCE 200809L
+#include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -9,11 +10,18 @@ const Source = `#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <time.h>
 
 #if defined(__GNUC__) || defined(__clang__)
 #define RT_UNUSED __attribute__((unused))
 #else
 #define RT_UNUSED
+#endif
+
+#if defined(__cplusplus)
+#define RT_ALIGNOF(T) alignof(T)
+#else
+#define RT_ALIGNOF(T) _Alignof(T)
 #endif
 
 #define RT_ARENA_DEFAULT_CHUNK_SIZE ((size_t)4096)
@@ -68,7 +76,7 @@ static RT_UNUSED void rt_runtime_fail(const char* message) {
 }
 
 static RT_UNUSED size_t rt_arena_align_up(size_t size) {
-    size_t align = _Alignof(max_align_t);
+    size_t align = RT_ALIGNOF(max_align_t);
     size_t remainder = size % align;
     if (remainder == 0) {
         return size;
@@ -104,7 +112,7 @@ static RT_UNUSED rt_arena_chunk* rt_arena_new_chunk(size_t min_cap) {
         rt_runtime_fail("allocation size overflow");
     }
 
-    rt_arena_chunk* chunk = malloc(sizeof(rt_arena_chunk) + cap);
+    rt_arena_chunk* chunk = (rt_arena_chunk*)malloc(sizeof(rt_arena_chunk) + cap);
     if (chunk == NULL) {
         rt_runtime_fail("allocation failed");
     }
@@ -163,7 +171,7 @@ static RT_UNUSED void rt_arena_rewind(rt_arena* arena, rt_arena_mark mark) {
 }
 
 static RT_UNUSED void rt_arena_register_list(rt_arena* arena, void* list, void (*free_list)(void*)) {
-    rt_list_allocation* node = malloc(sizeof(rt_list_allocation));
+    rt_list_allocation* node = (rt_list_allocation*)malloc(sizeof(rt_list_allocation));
     if (node == NULL) {
         rt_runtime_fail("allocation failed");
     }
@@ -287,7 +295,7 @@ static RT_UNUSED void rt_byte_buffer_reserve(rt_byte_buffer* buffer, size_t need
         cap *= 2;
     }
 
-    uint8_t* data = realloc(buffer->data, cap);
+    uint8_t* data = (uint8_t*)realloc(buffer->data, cap);
     if (data == NULL) {
         rt_runtime_fail("allocation failed");
     }
@@ -323,7 +331,7 @@ static RT_UNUSED rt_string rt_byte_buffer_to_string(rt_arena* arena, const rt_by
     if (buffer->len == 0) {
         return (rt_string){NULL, 0};
     }
-    uint8_t* data = rt_arena_alloc(arena, buffer->len);
+    uint8_t* data = (uint8_t*)rt_arena_alloc(arena, buffer->len);
     memcpy(data, buffer->data, buffer->len);
     return (rt_string){data, buffer->len};
 }
@@ -358,7 +366,7 @@ static RT_UNUSED char* rt_string_to_c_string(rt_string value, const char* what) 
             exit(1);
         }
     }
-    char* out = malloc(value.len + 1);
+    char* out = (char*)malloc(value.len + 1);
     if (out == NULL) {
         rt_runtime_fail("allocation failed");
     }
@@ -457,6 +465,42 @@ static RT_UNUSED bool rt_read_bool(rt_arena* arena) {
     return false;
 }
 
+static RT_UNUSED int64_t rt_time_from_timespec_millis(struct timespec ts) {
+    return (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+}
+
+static RT_UNUSED int64_t rt_time_from_timespec_nanos(struct timespec ts) {
+    return (int64_t)ts.tv_sec * 1000000000 + (int64_t)ts.tv_nsec;
+}
+
+static RT_UNUSED int64_t rt_time_now_unix_millis(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+        rt_runtime_fail("clock_gettime failed");
+    }
+    return rt_time_from_timespec_millis(ts);
+}
+
+static RT_UNUSED int64_t rt_time_monotonic_nanos(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        rt_runtime_fail("clock_gettime failed");
+    }
+    return rt_time_from_timespec_nanos(ts);
+}
+
+static RT_UNUSED void rt_time_sleep_millis(int64_t millis) {
+    size_t checked = rt_checked_count(millis, "sleep milliseconds");
+    struct timespec remaining;
+    remaining.tv_sec = (time_t)(checked / 1000);
+    remaining.tv_nsec = (long)((checked % 1000) * 1000000);
+    while (nanosleep(&remaining, &remaining) != 0) {
+        if (errno != EINTR) {
+            rt_runtime_fail("sleep failed");
+        }
+    }
+}
+
 static RT_UNUSED rt_string rt_read_file(rt_arena* arena, rt_string path) {
     char* c_path = rt_string_to_c_string(path, "file path");
     FILE* file = fopen(c_path, "rb");
@@ -549,7 +593,7 @@ static RT_UNUSED rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_
         return (rt_string){NULL, 0};
     }
 
-    uint8_t* data = rt_arena_alloc(arena, len);
+    uint8_t* data = (uint8_t*)rt_arena_alloc(arena, len);
     if (left.len > 0) {
         rt_check_string(left);
         memcpy(data, left.data, left.len);
@@ -566,7 +610,7 @@ static RT_UNUSED rt_string rt_string_clone(rt_arena* arena, rt_string value) {
         return (rt_string){NULL, 0};
     }
     rt_check_string(value);
-    uint8_t* data = rt_arena_alloc(arena, value.len);
+    uint8_t* data = (uint8_t*)rt_arena_alloc(arena, value.len);
     memcpy(data, value.data, value.len);
     return (rt_string){data, value.len};
 }
@@ -633,7 +677,7 @@ typedef struct { \
 } rt_list_##NAME; \
 static RT_UNUSED rt_array_##NAME rt_array_##NAME##_from_values(rt_arena* arena, CTYPE const* values, size_t len) { \
     rt_check_array_like(values, len, "array values"); \
-    CTYPE* data = rt_arena_alloc_count(arena, len, sizeof(CTYPE), false); \
+    CTYPE* data = (CTYPE*)rt_arena_alloc_count(arena, len, sizeof(CTYPE), false); \
     if (len > 0) { \
         memcpy(data, values, len * sizeof(CTYPE)); \
     } \
@@ -641,7 +685,7 @@ static RT_UNUSED rt_array_##NAME rt_array_##NAME##_from_values(rt_arena* arena, 
 } \
 static RT_UNUSED rt_array_##NAME rt_array_##NAME##_clone(rt_arena* arena, rt_array_##NAME value) { \
     rt_check_array_like(value.data, value.len, "array"); \
-    CTYPE* data = rt_arena_alloc_count(arena, value.len, sizeof(CTYPE), false); \
+    CTYPE* data = (CTYPE*)rt_arena_alloc_count(arena, value.len, sizeof(CTYPE), false); \
     for (size_t i = 0; i < value.len; i++) { \
         data[i] = RT_CLONE_VALUE_##NAME(arena, value.data[i]); \
     } \
@@ -649,12 +693,12 @@ static RT_UNUSED rt_array_##NAME rt_array_##NAME##_clone(rt_arena* arena, rt_arr
 } \
 static RT_UNUSED rt_slice_##NAME rt_make_slice_##NAME(rt_arena* arena, int64_t count) { \
     size_t len = rt_checked_count(count, "slice length"); \
-    CTYPE* data = rt_arena_alloc_count(arena, len, sizeof(CTYPE), true); \
+    CTYPE* data = (CTYPE*)rt_arena_alloc_count(arena, len, sizeof(CTYPE), true); \
     return (rt_slice_##NAME){data, len}; \
 } \
 static RT_UNUSED rt_slice_##NAME rt_slice_##NAME##_clone(rt_arena* arena, rt_slice_##NAME value) { \
     rt_check_array_like(value.data, value.len, "slice"); \
-    CTYPE* data = rt_arena_alloc_count(arena, value.len, sizeof(CTYPE), false); \
+    CTYPE* data = (CTYPE*)rt_arena_alloc_count(arena, value.len, sizeof(CTYPE), false); \
     for (size_t i = 0; i < value.len; i++) { \
         data[i] = RT_CLONE_VALUE_##NAME(arena, value.data[i]); \
     } \
@@ -703,12 +747,12 @@ static RT_UNUSED rt_slice_##NAME rt_list_##NAME##_slice(rt_list_##NAME* value, b
     return (rt_slice_##NAME){data, range.end - range.start}; \
 } \
 static RT_UNUSED void rt_list_##NAME##_free(void* ptr) { \
-    rt_list_##NAME* list = ptr; \
+    rt_list_##NAME* list = (rt_list_##NAME*)ptr; \
     free(list->data); \
     free(list); \
 } \
 static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_new(rt_arena* arena, size_t cap) { \
-    rt_list_##NAME* list = malloc(sizeof(rt_list_##NAME)); \
+    rt_list_##NAME* list = (rt_list_##NAME*)malloc(sizeof(rt_list_##NAME)); \
     if (list == NULL) { \
         rt_runtime_fail("allocation failed"); \
     } \
@@ -716,7 +760,7 @@ static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_new(rt_arena* arena, size_t ca
     list->len = 0; \
     list->cap = cap; \
     if (cap > 0) { \
-        list->data = malloc(rt_checked_bytes(cap, sizeof(CTYPE))); \
+        list->data = (CTYPE*)malloc(rt_checked_bytes(cap, sizeof(CTYPE))); \
         if (list->data == NULL) { \
             free(list); \
             rt_runtime_fail("allocation failed"); \
@@ -750,7 +794,7 @@ static RT_UNUSED void rt_list_##NAME##_append(rt_list_##NAME* list, CTYPE elem) 
         if (new_cap < list->cap || new_cap > SIZE_MAX / sizeof(CTYPE)) { \
             rt_runtime_fail("list capacity overflow"); \
         } \
-        CTYPE* data = realloc(list->data, new_cap * sizeof(CTYPE)); \
+        CTYPE* data = (CTYPE*)realloc(list->data, new_cap * sizeof(CTYPE)); \
         if (data == NULL) { \
             rt_runtime_fail("allocation failed"); \
         } \
@@ -765,6 +809,159 @@ RT_DEFINE_COLLECTIONS(int, int64_t)
 RT_DEFINE_COLLECTIONS(float, double)
 RT_DEFINE_COLLECTIONS(bool, bool)
 RT_DEFINE_COLLECTIONS(string, rt_string)
+
+typedef struct {
+    int64_t width;
+    int64_t height;
+    int64_t max_value;
+    size_t pixel_start;
+} rt_ppm_header;
+
+static RT_UNUSED void rt_ppm_skip_space_and_comments(rt_string contents, size_t* index) {
+    rt_check_string(contents);
+    for (;;) {
+        while (*index < contents.len && isspace((unsigned char)contents.data[*index])) {
+            (*index)++;
+        }
+        if (*index >= contents.len || contents.data[*index] != '#') {
+            return;
+        }
+        while (*index < contents.len && contents.data[*index] != '\n' && contents.data[*index] != '\r') {
+            (*index)++;
+        }
+    }
+}
+
+static RT_UNUSED int64_t rt_ppm_read_int_token(rt_string contents, size_t* index, const char* what) {
+    rt_ppm_skip_space_and_comments(contents, index);
+    if (*index >= contents.len || !isdigit((unsigned char)contents.data[*index])) {
+        fprintf(stderr, "trux runtime error: expected ppm %s\n", what);
+        exit(1);
+    }
+
+    int64_t value = 0;
+    while (*index < contents.len && isdigit((unsigned char)contents.data[*index])) {
+        int digit = contents.data[*index] - '0';
+        if (value > (INT64_MAX - digit) / 10) {
+            rt_runtime_fail("ppm integer overflow");
+        }
+        value = value * 10 + digit;
+        (*index)++;
+    }
+    return value;
+}
+
+static RT_UNUSED rt_ppm_header rt_ppm_read_header(rt_string contents) {
+    rt_check_string(contents);
+    size_t index = 0;
+    rt_ppm_skip_space_and_comments(contents, &index);
+    if (index + 2 > contents.len || contents.data[index] != 'P' || contents.data[index + 1] != '3') {
+        rt_runtime_fail("expected P3 ppm image");
+    }
+    index += 2;
+
+    int64_t width = rt_ppm_read_int_token(contents, &index, "width");
+    int64_t height = rt_ppm_read_int_token(contents, &index, "height");
+    int64_t max_value = rt_ppm_read_int_token(contents, &index, "max value");
+    if (width <= 0 || height <= 0) {
+        rt_runtime_fail("ppm width and height must be positive");
+    }
+    if (max_value != 255) {
+        rt_runtime_fail("only 8-bit P3 ppm images with max value 255 are supported");
+    }
+    rt_ppm_skip_space_and_comments(contents, &index);
+    return (rt_ppm_header){width, height, max_value, index};
+}
+
+static RT_UNUSED size_t rt_ppm_pixel_count(rt_ppm_header header) {
+    size_t width = rt_checked_positive_count(header.width, "ppm width");
+    size_t height = rt_checked_positive_count(header.height, "ppm height");
+    size_t pixels = rt_checked_bytes(width, height);
+    return rt_checked_bytes(pixels, 3);
+}
+
+static RT_UNUSED int64_t rt_image_width(rt_string path) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+    rt_ppm_header header = rt_ppm_read_header(rt_read_file(&arena, path));
+    int64_t width = header.width;
+    rt_arena_deinit(&arena);
+    return width;
+}
+
+static RT_UNUSED int64_t rt_image_height(rt_string path) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+    rt_ppm_header header = rt_ppm_read_header(rt_read_file(&arena, path));
+    int64_t height = header.height;
+    rt_arena_deinit(&arena);
+    return height;
+}
+
+static RT_UNUSED rt_slice_int rt_read_ppm(rt_arena* arena, rt_string path) {
+    rt_string contents = rt_read_file(arena, path);
+    rt_ppm_header header = rt_ppm_read_header(contents);
+    size_t count = rt_ppm_pixel_count(header);
+    if (count > (size_t)INT64_MAX) {
+        rt_runtime_fail("ppm image too large");
+    }
+
+    rt_slice_int pixels = rt_make_slice_int(arena, (int64_t)count);
+    size_t index = header.pixel_start;
+    for (size_t i = 0; i < count; i++) {
+        int64_t value = rt_ppm_read_int_token(contents, &index, "pixel value");
+        if (value < 0 || value > 255) {
+            rt_runtime_fail("ppm pixel value must be between 0 and 255");
+        }
+        pixels.data[i] = value;
+    }
+
+    rt_ppm_skip_space_and_comments(contents, &index);
+    if (index < contents.len) {
+        rt_runtime_fail("unexpected trailing data in ppm image");
+    }
+    return pixels;
+}
+
+static RT_UNUSED void rt_write_ppm(rt_string path, rt_slice_int pixels, int64_t width_value, int64_t height_value) {
+    size_t width = rt_checked_positive_count(width_value, "ppm width");
+    size_t height = rt_checked_positive_count(height_value, "ppm height");
+    size_t expected = rt_checked_bytes(rt_checked_bytes(width, height), 3);
+    rt_check_array_like(pixels.data, pixels.len, "ppm pixels");
+    if (pixels.len != expected) {
+        fprintf(stderr, "trux runtime error: ppm pixel count %zu does not match %zux%zux3\n", pixels.len, width, height);
+        exit(1);
+    }
+
+    char* c_path = rt_string_to_c_string(path, "file path");
+    FILE* file = fopen(c_path, "wb");
+    if (file == NULL) {
+        rt_file_fail("open ppm for writing", c_path);
+    }
+    if (fprintf(file, "P3\n%zu %zu\n255\n", width, height) < 0) {
+        rt_runtime_fail("write failed");
+    }
+
+    for (size_t i = 0; i < pixels.len; i++) {
+        int64_t value = pixels.data[i];
+        if (value < 0 || value > 255) {
+            rt_runtime_fail("ppm pixel value must be between 0 and 255");
+        }
+        if (fprintf(file, "%" PRId64, value) < 0) {
+            rt_runtime_fail("write failed");
+        }
+        if ((i + 1) % 12 == 0 || i + 1 == pixels.len) {
+            rt_file_write_byte(file, '\n');
+        } else {
+            rt_file_write_byte(file, ' ');
+        }
+    }
+
+    if (fclose(file) != 0) {
+        rt_file_fail("close ppm after writing", c_path);
+    }
+    free(c_path);
+}
 
 static RT_UNUSED bool rt_csv_is_newline(uint8_t ch) {
     return ch == '\n' || ch == '\r';

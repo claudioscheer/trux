@@ -6,7 +6,7 @@
 
 `trux` is not Go-compatible. It borrows simple syntax ideas from Go while keeping the compiler small enough to understand end to end.
 
-The compiler is written in Go. The current backend emits C and invokes `cc` or `$CC`.
+The compiler is written in Go. The current backend emits C and invokes `cc` or `$CC` for normal programs. Programs that declare GPU kernels are emitted as CUDA source and invoke `nvcc` or `$NVCC`.
 
 Source-level identifiers use lower camelCase. See [Naming](NAMING.md) for the builtin naming pattern and the distinction between source names and internal implementation names.
 
@@ -21,8 +21,8 @@ source code
   -> AST
   -> type checker
   -> typed IR
-  -> C code
-  -> cc (or $CC)
+  -> C or CUDA code
+  -> cc/$CC or nvcc/$NVCC
   -> executable
 ```
 
@@ -66,6 +66,15 @@ list[T]
 ```
 
 Collection element types are limited to scalar types. Nested collections are rejected.
+
+Supported GPU device buffer types:
+
+```text
+gpu.Buffer[int]
+gpu.Buffer[float]
+```
+
+GPU buffers require `import "gpu"` for operations. They are device memory handles, not host collections.
 
 Current C mappings:
 
@@ -137,6 +146,24 @@ io.readFloat()
 io.readBool()
 io.readFile(path)
 csv.read(path, columns)
+image.width(path)
+image.height(path)
+image.readPpm(path)
+time.nowUnixMillis()
+time.monotonicNanos()
+gpu.alloc(n)
+gpu.globalX()
+gpu.globalY()
+gpu.globalZ()
+gpu.threadX()
+gpu.threadY()
+gpu.threadZ()
+gpu.blockX()
+gpu.blockY()
+gpu.blockZ()
+gpu.blockDimX()
+gpu.blockDimY()
+gpu.blockDimZ()
 ```
 
 Imported public functions must be called through the package declared by the imported file. Multiple direct imports may declare the same package name, and the shared package qualifier resolves across all uniquely named public functions in those package groups:
@@ -196,6 +223,12 @@ print(...)
 append(list, value)
 io.writeFile(path, contents)
 csv.write(path, cells, columns)
+time.sleepMillis(ms)
+gpu.copyToDevice(host, device)
+gpu.copyToHost(device, host)
+gpu.launch(kernel, gridX, gridY, gridZ, blockX, blockY, blockZ, args...)
+gpu.sync()
+gpu.free(device)
 ```
 
 `if` and `for` conditions require `bool` values. `for` supports condition-only, infinite, and init/condition/post forms:
@@ -245,11 +278,12 @@ append(items, 2)
 
 ## IO
 
-Input and file operations require `import "io"`. CSV operations require `import "csv"`:
+Input and file operations require `import "io"`. CSV operations require `import "csv"`. P3 PPM image operations require `import "image"`:
 
 ```trux
 import "io"
 import "csv"
+import "image"
 
 let line string = io.readLine()
 let count int = io.readInt()
@@ -261,6 +295,11 @@ io.writeFile("copy.txt", contents)
 
 let cells list[string] = csv.read("input.csv", 2)
 csv.write("copy.csv", cells, 2)
+
+let width int = image.width("input.ppm")
+let height int = image.height("input.ppm")
+let pixels []int = image.readPpm("input.ppm")
+image.writePpm("copy.ppm", pixels, width, height)
 ```
 
 `io.readLine` reads one line from stdin without the trailing newline. `io.readInt`, `io.readFloat`, and `io.readBool` read one line from stdin and parse it as the requested scalar type. Invalid typed input is a runtime error.
@@ -270,6 +309,60 @@ csv.write("copy.csv", cells, 2)
 `csv.read` returns a flat row-major `list[string]`. The `columns` argument must be positive and each CSV row must have exactly that many columns. `csv.write` writes a flat row-major `list[string]` using the same column count.
 
 CSV supports quoted fields and escaped quotes using doubled quotes.
+
+`image.readPpm` returns flat RGB channel values from a P3 PPM image with max value `255`. `image.writePpm` writes a flat RGB `[]int` as P3 PPM and requires `len(pixels) == width * height * 3`.
+
+## Time
+
+Time operations require `import "time"`:
+
+```trux
+import "time"
+
+let wall int = time.nowUnixMillis()
+let start int = time.monotonicNanos()
+time.sleepMillis(10)
+let elapsed int = time.monotonicNanos() - start
+```
+
+`time.nowUnixMillis` returns wall-clock Unix time in milliseconds. `time.monotonicNanos` returns a monotonic timestamp for elapsed-time measurement. `time.sleepMillis` is statement-only and sleeps for a non-negative number of milliseconds.
+
+## GPU
+
+GPU operations require `import "gpu"` and a CUDA toolchain. Device memory is explicit:
+
+```trux
+import "gpu"
+
+let n int = 1024
+let host []int = make([]int, n)
+let device gpu.Buffer[int] = gpu.alloc(n)
+
+gpu.copyToDevice(host, device)
+gpu.copyToHost(device, host)
+gpu.free(device)
+```
+
+Kernels are declared with `kernel func` and do not return values:
+
+```trux
+kernel func fill(out gpu.Buffer[int], n int) {
+  let i int = gpu.globalX()
+
+  if i < n {
+    out[i] = 42
+  }
+}
+```
+
+Kernels support scalar locals, arithmetic, comparisons, `if`, `for`, GPU buffer indexing, and GPU coordinate helpers. They do not support strings, lists, host slices, allocation, `print`, IO, time calls, or normal function calls.
+
+Launch geometry is explicit:
+
+```trux
+gpu.launch(fill, gridX, gridY, gridZ, blockX, blockY, blockZ, out, n)
+gpu.sync()
+```
 
 ## Collections
 
@@ -419,8 +512,9 @@ mutation of parameter-owned collections or aliases/views of them
 make with a non-slice type or non-int length
 clone with the wrong arity or unsupported type
 qualified calls to private package functions
-standard `io` and `csv` package calls with the wrong arity or argument types
-io.writeFile and csv.write outside statement position
+standard `io`, `csv`, `time`, and `gpu` package calls with the wrong arity or argument types
+io.writeFile, csv.write, time.sleepMillis, and statement-only gpu calls outside statement position
+unsupported host-only constructs inside kernels
 ```
 
 ## Build Commands
@@ -444,7 +538,6 @@ These ideas are not implemented and should not drive current language usage:
 
 - recursive directory-based packages
 - multi-file C output
-- GPU kernels
 
 Possible package/export syntax:
 
@@ -459,17 +552,3 @@ func double(x int) int {
   return x * 2
 }
 ```
-
-Possible GPU kernel syntax:
-
-```trux
-kernel func fill(out gpu.Buffer[int], n int) {
-  let i int = gpu.global_id()
-
-  if i < n {
-    out[i] = 42
-  }
-}
-```
-
-Kernel functions would be restricted and compiled through a separate GPU backend.

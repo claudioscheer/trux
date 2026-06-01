@@ -877,6 +877,9 @@ func TestGeneratedExamplesCompileWithStrictCWarnings(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if result.UsesCUDA {
+				t.Skip("CUDA examples are compiled by nvcc, not strict C")
+			}
 
 			dir := t.TempDir()
 			cPath := filepath.Join(dir, "main.c")
@@ -898,6 +901,88 @@ func TestGeneratedExamplesCompileWithStrictCWarnings(t *testing.T) {
 				t.Fatalf("strict C compiler emitted warnings:\n%s", output)
 			}
 		})
+	}
+}
+
+func TestRunFileCompilesAndExecutesGPUMatrixExample(t *testing.T) {
+	requireNVCCAndCUDA(t)
+
+	var out bytes.Buffer
+	err := runFile(&out, "../../examples/gpu_matrix_multiply.tx")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cpuChecksum := outputValue(t, out.String(), "cpu checksum ")
+	gpuChecksum := outputValue(t, out.String(), "gpu checksum ")
+	if cpuChecksum == "0" {
+		t.Fatalf("cpu checksum = 0, want non-zero matrix result")
+	}
+	if cpuChecksum != gpuChecksum {
+		t.Fatalf("checksums differ: cpu=%s gpu=%s\n%s", cpuChecksum, gpuChecksum, out.String())
+	}
+
+	wantParts := []string{
+		"mismatches 0\n",
+		"cpu seconds ",
+		"gpu seconds ",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(out.String(), part) {
+			t.Fatalf("output = %q, want it to contain %q", out.String(), part)
+		}
+	}
+}
+
+func outputValue(t *testing.T, output string, prefix string) string {
+	t.Helper()
+
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	t.Fatalf("output = %q, want line with prefix %q", output, prefix)
+	return ""
+}
+
+func TestBuildFileRespectsNVCCEnvironmentVariableForGPUProgram(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+
+kernel func fill(out gpu.Buffer[int], n int) {
+    let i int = gpu.globalX()
+    if i < n {
+        out[i] = 1
+    }
+}
+
+func main() int {
+    let out gpu.Buffer[int] = gpu.alloc(1)
+    gpu.launch(fill, 1, 1, 1, 1, 1, 1, out, 1)
+    gpu.free(out)
+    return 0
+}`)
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "nvcc.log")
+	fakeNVCC := filepath.Join(dir, "fake-nvcc")
+	writeFakeCompiler(t, fakeNVCC, logPath)
+	t.Setenv("NVCC", fakeNVCC)
+
+	if err := buildFile(path, outputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	if !strings.Contains(log, "-x cu") {
+		t.Fatalf("compiler args = %q, want CUDA source flag", log)
+	}
+	if strings.Contains(log, "-std=c11") {
+		t.Fatalf("compiler args = %q, did not expect C11 flag for nvcc", log)
+	}
+	if !strings.Contains(log, "-o "+outputPath) {
+		t.Fatalf("compiler args = %q, want output path", log)
 	}
 }
 
@@ -973,6 +1058,25 @@ func requireCC(t *testing.T) {
 	}
 	if _, err := exec.LookPath(compiler); err != nil {
 		t.Skipf("C compiler %q not found", compiler)
+	}
+}
+
+func requireNVCCAndCUDA(t *testing.T) {
+	t.Helper()
+
+	compiler := os.Getenv("NVCC")
+	if compiler == "" {
+		compiler = "nvcc"
+	}
+	if _, err := exec.LookPath(compiler); err != nil {
+		t.Skipf("CUDA compiler %q not found", compiler)
+	}
+	if _, err := exec.LookPath("nvidia-smi"); err != nil {
+		t.Skip("nvidia-smi not found")
+	}
+	cmd := exec.Command("nvidia-smi")
+	if err := cmd.Run(); err != nil {
+		t.Skipf("CUDA device unavailable: %v", err)
 	}
 }
 

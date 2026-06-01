@@ -13,9 +13,15 @@ io.readFile(path)
 io.writeFile(path, contents)
 csv.read(path, columns)
 csv.write(path, cells, columns)
+time.nowUnixMillis()
+time.monotonicNanos()
+time.sleepMillis(ms)
+gpu.copyToDevice(host, device)
+gpu.copyToHost(device, host)
+gpu.globalX()
 ```
 
-Package names stay short and lowercase. The old global `readCsv`/`writeCsv` names are replaced by `csv.read`/`csv.write`, so there is no source-level acronym in the CSV API.
+Package names stay short and lowercase. The old global `readCsv`/`writeCsv` names are replaced by `csv.read`/`csv.write`, so there is no source-level acronym in the CSV API. GPU coordinate helpers use the conventional `X`/`Y`/`Z` axis suffixes.
 
 Host implementation names follow the conventions of the host language. Internal Go names may use Go-style initialisms such as `IOCallReadCSV`, and runtime C helpers may use snake_case names such as `rt_read_line`. Those names are implementation details and are not part of the Trux source language surface.
 

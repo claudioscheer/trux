@@ -99,8 +99,14 @@ func (p *Parser) parseImportDecl() (*ast.ImportDecl, error) {
 
 func (p *Parser) parseFuncDecl() (*ast.FuncDecl, error) {
 	public := false
+	kernel := false
 	start := p.current()
-	if p.match(token.Pub) {
+	if p.match(token.Kernel) {
+		kernel = true
+		if _, err := p.expect(token.Func); err != nil {
+			return nil, err
+		}
+	} else if p.match(token.Pub) {
 		public = true
 		if _, err := p.expect(token.Func); err != nil {
 			return nil, err
@@ -131,9 +137,12 @@ func (p *Parser) parseFuncDecl() (*ast.FuncDecl, error) {
 		return nil, err
 	}
 
-	returnType, err := p.parseType()
-	if err != nil {
-		return nil, err
+	var returnType ast.Type
+	if !kernel {
+		returnType, err = p.parseType()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	body, err := p.parseBlock()
@@ -146,6 +155,7 @@ func (p *Parser) parseFuncDecl() (*ast.FuncDecl, error) {
 		NamePos:    name.Pos,
 		Name:       name.Lexeme,
 		Public:     public,
+		Kernel:     kernel,
 		Params:     params,
 		ReturnType: returnType,
 		Body:       body,
@@ -216,6 +226,29 @@ func (p *Parser) parseType() (ast.Type, error) {
 			return nil, err
 		}
 		return &ast.ListType{Elem: elem}, nil
+	case p.check(token.Ident) && p.current().Lexeme == "gpu":
+		p.advance()
+		if _, err := p.expect(token.Dot); err != nil {
+			return nil, err
+		}
+		name, err := p.expect(token.Ident)
+		if err != nil {
+			return nil, err
+		}
+		if name.Lexeme != "Buffer" {
+			return nil, p.errorf(name, "expected gpu.Buffer type, got gpu.%s", name.Lexeme)
+		}
+		if _, err := p.expect(token.LBracket); err != nil {
+			return nil, err
+		}
+		elem, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(token.RBracket); err != nil {
+			return nil, err
+		}
+		return &ast.GPUBufferType{Elem: elem}, nil
 	case p.match(token.IntType):
 		return ast.IntType, nil
 	case p.match(token.FloatType):

@@ -42,8 +42,11 @@ The compiler currently supports:
 - C code generation and execution through `cc` or `$CC`
 - `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
 - standard `io` and `csv` packages for stdin, file, and CSV IO
+- standard `image` package for first P3 PPM image reads/writes
+- standard `time` package for wall-clock timestamps, monotonic timing, and sleeping
+- initial CUDA GPU support with explicit `gpu.Buffer[int|float]`, Trux `kernel func`, and `gpu.launch`
 
-Recursive directory-based packages, separate module compilation, reusable package artifacts, and GPU kernels are not implemented.
+Recursive directory-based packages, separate module compilation, and reusable package artifacts are not implemented.
 
 ## Building
 
@@ -135,6 +138,7 @@ More complete IO examples live under [examples/projects/](examples/projects/):
 - `interactive_counter`: stdin with `io.readLine` and `io.readInt`
 - `file_notes`: `io.readFile` and `io.writeFile`
 - `csv_roster`: `csv.read`, list mutation, and `csv.write`
+- `rotate_image`: PPM image rotation on CPU and GPU
 
 ## Commands
 
@@ -149,5 +153,5 @@ make lsp
 
 ## Documentation
 
-See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including naming, arenas, IO, modules, and future GPU ideas.
+See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including naming, arenas, IO, image, time, modules, and GPU support.
 Editor tooling lives in [tooling/](tooling/), including the Go language server and VS Code extension.

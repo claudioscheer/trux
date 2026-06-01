@@ -1838,6 +1838,43 @@ func main() int {
 	assertRange(t, hover.Range, positionOfAfter(t, src, "csv.", "read"), "read")
 }
 
+func TestHoverReturnsGPULaunchSignature(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+import "gpu"
+
+kernel func fill(out gpu.Buffer[int], n int) {
+    let i int = gpu.globalX()
+    if i < n {
+        out[i] = 1
+    }
+}
+
+func main() int {
+    let out gpu.Buffer[int] = gpu.alloc(1)
+    gpu.launch(fill, 1, 1, 1, 1, 1, 1, out, 1)
+    return 0
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleHover(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "gpu.", "launch"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hover := result.(Hover)
+	want := "`gpu.launch(kernel, gridX int, gridY int, gridZ int, blockX int, blockY int, blockZ int, args...)`"
+	if hover.Contents.Value != want {
+		t.Fatalf("hover = %#v, want gpu.launch signature", hover)
+	}
+	assertRange(t, hover.Range, positionOfAfter(t, src, "gpu.", "launch"), "launch")
+}
+
 func TestHoverHighlightsFullImportPath(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	uri := "file:///tmp/src/main.tx"

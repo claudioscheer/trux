@@ -1322,7 +1322,7 @@ func qualifiedImportedFunctionCompletionItems(imports []importedPackage) []Compl
 				items = append(items, CompletionItem{
 					Label:      label,
 					Kind:       completionKindFunction,
-					Detail:     member.Detail,
+					Detail:     member.Signature(),
 					InsertText: label,
 					FilterText: label + " " + member.Name,
 				})
@@ -1359,7 +1359,7 @@ func standardAutoImportFunctionCompletionItems(text string, imports []importedPa
 			items = append(items, CompletionItem{
 				Label:               label,
 				Kind:                completionKindFunction,
-				Detail:              member.Detail,
+				Detail:              member.Signature(),
 				InsertText:          label,
 				FilterText:          label + " " + member.Name,
 				AdditionalTextEdits: []TextEdit{importEdit(text, pkg.Name)},
@@ -1638,7 +1638,7 @@ func declarationCompletionItems() []CompletionItem {
 	items := []CompletionItem{}
 	for _, item := range baseCompletionItems() {
 		switch item.Label {
-		case "package", "import", "pub", "func", "int", "float", "string", "bool", "list":
+		case "package", "import", "pub", "kernel", "func", "int", "float", "string", "bool", "list":
 			items = append(items, item)
 		}
 	}
@@ -1869,7 +1869,9 @@ func findFunctionDecl(graph *sourceGraph, def symbolDefinition) (*ast.FuncDecl, 
 
 func functionSignature(fn *ast.FuncDecl) string {
 	prefix := "func"
-	if fn.Public {
+	if fn.Kernel {
+		prefix = "kernel func"
+	} else if fn.Public {
 		prefix = "pub func"
 	}
 
@@ -1877,7 +1879,11 @@ func functionSignature(fn *ast.FuncDecl) string {
 	for _, param := range fn.Params {
 		params = append(params, param.Name+" "+param.Type.String())
 	}
-	return prefix + " " + fn.Name + "(" + strings.Join(params, ", ") + ") " + fn.ReturnType.String()
+	signature := prefix + " " + fn.Name + "(" + strings.Join(params, ", ") + ")"
+	if fn.Kernel {
+		return signature
+	}
+	return signature + " " + fn.ReturnType.String()
 }
 
 func collectFunctionReferences(graph *sourceGraph, def symbolDefinition, includeDeclaration bool) []Location {

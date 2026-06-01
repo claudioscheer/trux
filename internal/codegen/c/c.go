@@ -219,15 +219,31 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) erro
 			return err
 		}
 		fmt.Fprintf(out, "%s}\n", indent)
-	case *ir.WhileStmt:
-		condition, err := emitCondition(stmt.Condition, usage)
-		if err != nil {
+	case *ir.ForStmt:
+		fmt.Fprintf(out, "%s{\n", indent)
+		if stmt.Init != nil {
+			if err := emitStmt(out, stmt.Init, level+1, usage); err != nil {
+				return err
+			}
+		}
+		if stmt.Condition == nil {
+			fmt.Fprintf(out, "%s    for (;;) {\n", indent)
+		} else {
+			condition, err := emitCondition(stmt.Condition, usage)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "%s    for (; %s;) {\n", indent, condition)
+		}
+		if err := emitStmts(out, stmt.Body, level+2, usage); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%swhile (%s) {\n", indent, condition)
-		if err := emitStmts(out, stmt.Body, level+1, usage); err != nil {
-			return err
+		if stmt.Post != nil {
+			if err := emitStmt(out, stmt.Post, level+2, usage); err != nil {
+				return err
+			}
 		}
+		fmt.Fprintf(out, "%s    }\n", indent)
 		fmt.Fprintf(out, "%s}\n", indent)
 	case *ir.PrintStmt:
 		if len(stmt.Args) != len(stmt.Types) {
@@ -763,14 +779,24 @@ func collectStmtNestedCollectionFamilies(stmt ir.Stmt, seen map[string]bool, fam
 				return err
 			}
 		}
-	case *ir.WhileStmt:
-		if err := collectExprNestedCollectionFamilies(stmt.Condition, seen, families); err != nil {
-			return err
+	case *ir.ForStmt:
+		if stmt.Init != nil {
+			if err := collectStmtNestedCollectionFamilies(stmt.Init, seen, families); err != nil {
+				return err
+			}
+		}
+		if stmt.Condition != nil {
+			if err := collectExprNestedCollectionFamilies(stmt.Condition, seen, families); err != nil {
+				return err
+			}
 		}
 		for _, inner := range stmt.Body {
 			if err := collectStmtNestedCollectionFamilies(inner, seen, families); err != nil {
 				return err
 			}
+		}
+		if stmt.Post != nil {
+			return collectStmtNestedCollectionFamilies(stmt.Post, seen, families)
 		}
 	case *ir.PrintStmt:
 		for i, arg := range stmt.Args {

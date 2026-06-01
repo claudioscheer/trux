@@ -15,7 +15,7 @@ func printIterative(count int) int {
   let b int = 1
 
   // The loop version demonstrates mutable locals without recursion.
-  while i < count {
+  for i < count {
     print(a)
 
     let next int = a + b
@@ -30,7 +30,7 @@ func printIterative(count int) int {
 func printRecursive(count int) int {
   let i int = 0
 
-  while i < count {
+  for i < count {
     print(fibRecursive(i))
     i = i + 1
   }

@@ -107,7 +107,7 @@ func main() int {
         total = 0.0
     }
 
-    while i < 3 {
+    for i < 3 {
         i = i + 1
     }
 
@@ -134,6 +134,24 @@ func main() int {
 	printCall := mainFn.Body.Statements[6].(*ast.ExprStmt).Expr.(*ast.CallExpr)
 	if !sameTypes(info.PrintCalls[printCall], []ast.Type{ast.FloatType, ast.StringType, ast.BoolType, ast.StringType, ast.BoolType}) {
 		t.Fatalf("print call types = %q, want float string bool string bool", info.PrintCalls[printCall])
+	}
+}
+
+func TestCheckAllowsCStyleForLoopScopedLocal(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let sum int = 0
+    for let i int = 0; i < 3; i = i + 1 {
+        sum = sum + i
+    }
+    for let i int = 0; i < 2; i = i + 1 {
+        sum = sum + i
+    }
+    return sum
+}`)
+
+	if _, err := Check(program); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -643,15 +661,26 @@ func main() int {
 			want: `if condition must be bool, got int`,
 		},
 		{
-			name: "while condition not bool",
+			name: "for condition not bool",
 			src: `package main
 func main() int {
-    while "bad" {
+    for "bad" {
         print("bad")
     }
     return 0
 }`,
-			want: `while condition must be bool, got string`,
+			want: `for condition must be bool, got string`,
+		},
+		{
+			name: "for init local outside loop",
+			src: `package main
+func main() int {
+    for let i int = 0; i < 3; i = i + 1 {
+        print(i)
+    }
+    return i
+}`,
+			want: `undefined variable "i"`,
 		},
 		{
 			name: "assignment undefined variable",

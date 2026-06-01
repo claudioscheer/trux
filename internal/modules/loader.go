@@ -499,11 +499,23 @@ func (l *loader) rewriteStmtCalls(unit *fileUnit, stmt ast.Statement, ctx resolu
 		if stmt.Else != nil {
 			return l.rewriteCalls(unit, stmt.Else.Statements, ctx)
 		}
-	case *ast.WhileStmt:
-		if err := l.rewriteExprCalls(unit, stmt.Condition, ctx); err != nil {
+	case *ast.ForStmt:
+		if stmt.Init != nil {
+			if err := l.rewriteStmtCalls(unit, stmt.Init, ctx); err != nil {
+				return err
+			}
+		}
+		if stmt.Condition != nil {
+			if err := l.rewriteExprCalls(unit, stmt.Condition, ctx); err != nil {
+				return err
+			}
+		}
+		if err := l.rewriteCalls(unit, stmt.Body.Statements, ctx); err != nil {
 			return err
 		}
-		return l.rewriteCalls(unit, stmt.Body.Statements, ctx)
+		if stmt.Post != nil {
+			return l.rewriteStmtCalls(unit, stmt.Post, ctx)
+		}
 	case *ast.ExprStmt:
 		return l.rewriteExprCalls(unit, stmt.Expr, ctx)
 	}

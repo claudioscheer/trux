@@ -385,7 +385,7 @@ func isFunctionParamsOpenParen(tokens []token.Token, lparen int) bool {
 
 func noSpaceBefore(typ token.Type) bool {
 	switch typ {
-	case token.RParen, token.RBracket, token.Comma, token.Colon, token.Dot:
+	case token.RParen, token.RBracket, token.Comma, token.Colon, token.Dot, token.Semicolon:
 		return true
 	default:
 		return false

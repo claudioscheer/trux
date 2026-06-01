@@ -125,9 +125,17 @@ func formatResolvedCalls(out *bytes.Buffer, statements []ast.Statement, info *se
 			if stmt.Else != nil {
 				formatResolvedCalls(out, stmt.Else.Statements, info)
 			}
-		case *ast.WhileStmt:
-			formatExprCalls(out, stmt.Condition, info)
+		case *ast.ForStmt:
+			if stmt.Init != nil {
+				formatResolvedCalls(out, []ast.Statement{stmt.Init}, info)
+			}
+			if stmt.Condition != nil {
+				formatExprCalls(out, stmt.Condition, info)
+			}
 			formatResolvedCalls(out, stmt.Body.Statements, info)
+			if stmt.Post != nil {
+				formatResolvedCalls(out, []ast.Statement{stmt.Post}, info)
+			}
 		case *ast.ExprStmt:
 			formatExprCalls(out, stmt.Expr, info)
 		}

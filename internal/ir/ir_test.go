@@ -140,7 +140,7 @@ func main() int {
     if "ru" in text {
         x = x + 1.0
     }
-    while x > 0.0 {
+    for x > 0.0 {
         x = x - 1.0
     }
     print(x)
@@ -170,14 +170,45 @@ func main() int {
 		t.Fatalf("then statement = %T, want AssignStmt", ifStmt.Then[0])
 	}
 
-	whileStmt := mainFn.Body[3].(*WhileStmt)
-	if whileStmt.Condition.Type() != ast.BoolType {
-		t.Fatalf("while condition type = %q, want bool", whileStmt.Condition.Type())
+	forStmt := mainFn.Body[3].(*ForStmt)
+	if forStmt.Condition.Type() != ast.BoolType {
+		t.Fatalf("for condition type = %q, want bool", forStmt.Condition.Type())
 	}
 
 	printStmt := mainFn.Body[4].(*PrintStmt)
 	if !sameTypes(printStmt.Types, []ast.Type{ast.FloatType}) {
 		t.Fatalf("print types = %q, want float", printStmt.Types)
+	}
+}
+
+func TestBuildCreatesTypedIRForCStyleFor(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let sum int = 0
+    for let i int = 0; i < 3; i = i + 1 {
+        sum = sum + i
+    }
+    return sum
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	forStmt := irProgram.Functions[0].Body[1].(*ForStmt)
+	if _, ok := forStmt.Init.(*LetStmt); !ok {
+		t.Fatalf("for init = %T, want LetStmt", forStmt.Init)
+	}
+	if forStmt.Condition.Type() != ast.BoolType {
+		t.Fatalf("for condition type = %q, want bool", forStmt.Condition.Type())
+	}
+	if _, ok := forStmt.Post.(*AssignStmt); !ok {
+		t.Fatalf("for post = %T, want AssignStmt", forStmt.Post)
 	}
 }
 

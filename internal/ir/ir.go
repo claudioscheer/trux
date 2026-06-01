@@ -64,12 +64,14 @@ type IfStmt struct {
 
 func (*IfStmt) stmtNode() {}
 
-type WhileStmt struct {
+type ForStmt struct {
+	Init      Stmt
 	Condition Expr
+	Post      Stmt
 	Body      []Stmt
 }
 
-func (*WhileStmt) stmtNode() {}
+func (*ForStmt) stmtNode() {}
 
 type PrintStmt struct {
 	Args  []Expr
@@ -445,16 +447,35 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 			}
 		}
 		return &IfStmt{Condition: condition, Then: thenStmts, Else: elseStmts}, nil
-	case *ast.WhileStmt:
-		condition, err := b.buildExpr(stmt.Condition)
-		if err != nil {
-			return nil, err
+	case *ast.ForStmt:
+		var init Stmt
+		if stmt.Init != nil {
+			var err error
+			init, err = b.buildStmt(stmt.Init)
+			if err != nil {
+				return nil, err
+			}
+		}
+		var condition Expr
+		if stmt.Condition != nil {
+			var err error
+			condition, err = b.buildExpr(stmt.Condition)
+			if err != nil {
+				return nil, err
+			}
 		}
 		body, err := b.buildStmts(stmt.Body.Statements)
 		if err != nil {
 			return nil, err
 		}
-		return &WhileStmt{Condition: condition, Body: body}, nil
+		var post Stmt
+		if stmt.Post != nil {
+			post, err = b.buildStmt(stmt.Post)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return &ForStmt{Init: init, Condition: condition, Post: post, Body: body}, nil
 	case *ast.ExprStmt:
 		if call, ok := stmt.Expr.(*ast.CallExpr); ok {
 			if printTypes, ok := b.info.PrintCalls[call]; ok {

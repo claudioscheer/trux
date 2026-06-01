@@ -177,15 +177,17 @@ func (s *IfStmt) Pos() token.Position { return s.Start }
 
 func (*IfStmt) statementNode() {}
 
-type WhileStmt struct {
+type ForStmt struct {
 	Start     token.Position
+	Init      Statement
 	Condition Expression
+	Post      Statement
 	Body      Block
 }
 
-func (s *WhileStmt) Pos() token.Position { return s.Start }
+func (s *ForStmt) Pos() token.Position { return s.Start }
 
-func (*WhileStmt) statementNode() {}
+func (*ForStmt) statementNode() {}
 
 type ExprStmt struct {
 	Expr Expression

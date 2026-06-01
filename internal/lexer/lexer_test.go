@@ -103,6 +103,13 @@ func TestElifIsIdentifier(t *testing.T) {
 	})
 }
 
+func TestWhileIsIdentifier(t *testing.T) {
+	assertTokens(t, Lex("while"), []expectedToken{
+		{token.Ident, "while"},
+		{token.EOF, ""},
+	})
+}
+
 func TestLexesImportAndPubTokens(t *testing.T) {
 	assertTokens(t, Lex(`import "math.tx" pub func add math.add`), []expectedToken{
 		{token.Import, "import"},
@@ -135,7 +142,7 @@ func TestLexesPrimitiveLiteralsAndTypes(t *testing.T) {
 }
 
 func TestLexesControlFlowAndComparisonTokens(t *testing.T) {
-	assertTokens(t, Lex(`if x <= 10 { y = 1.5 } else if x > 5 { y = 2.0 } else { while "x" in name != false { y = y + 1.0 } }`), []expectedToken{
+	assertTokens(t, Lex(`if x <= 10 { y = 1.5 } else if x > 5 { y = 2.0 } else { for "x" in name != false { y = y + 1.0 } }`), []expectedToken{
 		{token.If, "if"},
 		{token.Ident, "x"},
 		{token.LessEqual, "<="},
@@ -157,7 +164,7 @@ func TestLexesControlFlowAndComparisonTokens(t *testing.T) {
 		{token.RBrace, "}"},
 		{token.Else, "else"},
 		{token.LBrace, "{"},
-		{token.While, "while"},
+		{token.For, "for"},
 		{token.String, "x"},
 		{token.In, "in"},
 		{token.Ident, "name"},
@@ -170,6 +177,30 @@ func TestLexesControlFlowAndComparisonTokens(t *testing.T) {
 		{token.Plus, "+"},
 		{token.Float, "1.0"},
 		{token.RBrace, "}"},
+		{token.RBrace, "}"},
+		{token.EOF, ""},
+	})
+}
+
+func TestLexesForSemicolonTokens(t *testing.T) {
+	assertTokens(t, Lex(`for let i int = 0; i < 3; i = i + 1 {}`), []expectedToken{
+		{token.For, "for"},
+		{token.Let, "let"},
+		{token.Ident, "i"},
+		{token.IntType, "int"},
+		{token.Assign, "="},
+		{token.Int, "0"},
+		{token.Semicolon, ";"},
+		{token.Ident, "i"},
+		{token.Less, "<"},
+		{token.Int, "3"},
+		{token.Semicolon, ";"},
+		{token.Ident, "i"},
+		{token.Assign, "="},
+		{token.Ident, "i"},
+		{token.Plus, "+"},
+		{token.Int, "1"},
+		{token.LBrace, "{"},
 		{token.RBrace, "}"},
 		{token.EOF, ""},
 	})

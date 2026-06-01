@@ -770,6 +770,7 @@ pub func add(a int, b int) int {
 	items := result.(CompletionList).Items
 	want := map[string]int{
 		"return":   completionKindKeyword,
+		"for":      completionKindKeyword,
 		"print":    completionKindFunction,
 		"total":    completionKindVariable,
 		"helper":   completionKindFunction,
@@ -796,6 +797,50 @@ pub func add(a int, b int) int {
 		}
 	}
 	assertMissingCompletion(t, items, "add")
+	assertMissingCompletion(t, items, "while")
+}
+
+func TestCompletionIncludesForInitLocalOnlyInsideLoop(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+func main() int {
+    let sum int = 0
+    for let i int = 0; i < 3; i = i + 1 {
+        print(i)
+    }
+    return sum
+}
+`
+	server.documents[uri] = src
+
+	insideResult, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "        print(", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	insideItems := insideResult.(CompletionList).Items
+	if _, ok := findCompletionItem(insideItems, "i"); !ok {
+		t.Fatalf("missing for init local i inside loop in %#v", insideItems)
+	}
+	if _, ok := findCompletionItem(insideItems, "sum"); !ok {
+		t.Fatalf("missing outer local sum inside loop in %#v", insideItems)
+	}
+
+	afterResult, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "    return ", "sum"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterItems := afterResult.(CompletionList).Items
+	assertMissingCompletion(t, afterItems, "i")
+	if _, ok := findCompletionItem(afterItems, "sum"); !ok {
+		t.Fatalf("missing outer local sum after loop in %#v", afterItems)
+	}
 }
 
 func TestCompletionIncludesSamePackagePrivateFunctions(t *testing.T) {

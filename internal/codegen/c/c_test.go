@@ -155,7 +155,7 @@ func main() int {
     } else {
         x = 0.0
     }
-    while x > 0.0 {
+    for x > 0.0 {
         x = x - 1.0
     }
     print(x, " ", text == "trux")
@@ -190,10 +190,51 @@ func main() int {
 		"trux_v_1_x = (trux_v_1_x + 1.0);",
 		"} else {",
 		"trux_v_1_x = 0.0;",
-		"while (trux_v_1_x > 0.0) {",
+		"for (; trux_v_1_x > 0.0;) {",
 		"trux_v_1_x = (trux_v_1_x - 1.0);",
 		"rt_print_float(trux_v_1_x);",
 		"rt_print_bool(rt_string_equal(trux_v_4_text, (rt_string){(const uint8_t*)\"trux\", 4}));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
+func TestGenerateCreatesCForCStyleFor(t *testing.T) {
+	program, err := parser.Parse(`package main
+func main() int {
+    let sum int = 0
+    for let i int = 0; i < 3; i = i + 1 {
+        sum = sum + i
+    }
+    print(sum)
+    return 0
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantParts := []string{
+		"{",
+		"int64_t trux_v_1_i = 0;",
+		"for (; trux_v_1_i < 3;) {",
+		"trux_v_3_sum = (trux_v_3_sum + trux_v_1_i);",
+		"trux_v_1_i = (trux_v_1_i + 1);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {

@@ -262,8 +262,8 @@ func (p *Parser) parseStatement() (ast.Statement, error) {
 		return p.parseReturnStmt()
 	case p.check(token.If):
 		return p.parseIfStmt()
-	case p.check(token.While):
-		return p.parseWhileStmt()
+	case p.check(token.For):
+		return p.parseForStmt()
 	default:
 		return p.parseAssignOrExprStmt()
 	}
@@ -365,22 +365,56 @@ func statementEnd(stmt ast.Statement) token.Position {
 	switch stmt := stmt.(type) {
 	case *ast.IfStmt:
 		return ifEnd(stmt.Then, stmt.Else)
-	case *ast.WhileStmt:
+	case *ast.ForStmt:
 		return stmt.Body.End
 	default:
 		return stmt.Pos()
 	}
 }
 
-func (p *Parser) parseWhileStmt() (ast.Statement, error) {
-	start, err := p.expect(token.While)
+func (p *Parser) parseForStmt() (ast.Statement, error) {
+	start, err := p.expect(token.For)
 	if err != nil {
 		return nil, err
 	}
 
-	condition, err := p.parseExpression(0)
-	if err != nil {
-		return nil, err
+	var init ast.Statement
+	var condition ast.Expression
+	var post ast.Statement
+
+	if !p.check(token.LBrace) {
+		first, err := p.parseForInitStmt()
+		if err != nil {
+			return nil, err
+		}
+
+		if p.check(token.LBrace) {
+			exprStmt, ok := first.(*ast.ExprStmt)
+			if !ok {
+				return nil, p.errorf(p.current(), `expected %q after for init statement`, string(token.Semicolon))
+			}
+			condition = exprStmt.Expr
+		} else {
+			init = first
+			if _, err := p.expect(token.Semicolon); err != nil {
+				return nil, err
+			}
+			if !p.check(token.Semicolon) {
+				condition, err = p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if _, err := p.expect(token.Semicolon); err != nil {
+				return nil, err
+			}
+			if !p.check(token.LBrace) {
+				post, err = p.parseForPostStmt()
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 
 	body, err := p.parseBlock()
@@ -391,7 +425,24 @@ func (p *Parser) parseWhileStmt() (ast.Statement, error) {
 		return nil, p.errorf(p.current(), `unexpected "if" after block on the same line; put the next if on a new line`)
 	}
 
-	return &ast.WhileStmt{Start: start.Pos, Condition: condition, Body: body}, nil
+	return &ast.ForStmt{Start: start.Pos, Init: init, Condition: condition, Post: post, Body: body}, nil
+}
+
+func (p *Parser) parseForInitStmt() (ast.Statement, error) {
+	if p.check(token.Semicolon) {
+		return nil, nil
+	}
+	if p.check(token.Let) {
+		return p.parseLetStmt()
+	}
+	return p.parseAssignOrExprStmt()
+}
+
+func (p *Parser) parseForPostStmt() (ast.Statement, error) {
+	if p.check(token.Let) {
+		return nil, p.errorf(p.current(), "for post statement cannot be let")
+	}
+	return p.parseAssignOrExprStmt()
 }
 
 func (p *Parser) parseAssignOrExprStmt() (ast.Statement, error) {
@@ -726,7 +777,7 @@ func isLiteralToken(typ token.Type) bool {
 	switch typ {
 	case token.Assign, token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
 		token.Plus, token.Minus, token.Asterisk, token.Slash,
-		token.Comma, token.Colon, token.Dot, token.LParen, token.RParen, token.LBrace, token.RBrace, token.LBracket, token.RBracket:
+		token.Comma, token.Colon, token.Dot, token.Semicolon, token.LParen, token.RParen, token.LBrace, token.RBrace, token.LBracket, token.RBracket:
 		return true
 	default:
 		return false

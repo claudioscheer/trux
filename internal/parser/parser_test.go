@@ -231,7 +231,7 @@ func main() int {
     } else {
         x = 0.0
     }
-    while x >= 1.0 {
+    for x >= 1.0 {
         x = x - 1.0
     }
     return 0
@@ -252,12 +252,64 @@ func main() int {
 		t.Fatalf("then statement = %T, want ast.AssignStmt", ifStmt.Then.Statements[0])
 	}
 
-	whileStmt, ok := mainFn.Body.Statements[3].(*ast.WhileStmt)
+	forStmt, ok := mainFn.Body.Statements[3].(*ast.ForStmt)
 	if !ok {
-		t.Fatalf("statement = %T, want ast.WhileStmt", mainFn.Body.Statements[3])
+		t.Fatalf("statement = %T, want ast.ForStmt", mainFn.Body.Statements[3])
 	}
-	if _, ok := whileStmt.Condition.(*ast.BinaryExpr); !ok {
-		t.Fatalf("while condition = %T, want ast.BinaryExpr", whileStmt.Condition)
+	if _, ok := forStmt.Condition.(*ast.BinaryExpr); !ok {
+		t.Fatalf("for condition = %T, want ast.BinaryExpr", forStmt.Condition)
+	}
+}
+
+func TestParsesForForms(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let sum int = 0
+    for {
+        sum = sum + 1
+    }
+    for sum < 10 {
+        sum = sum + 1
+    }
+    for let i int = 0; i < 10; i = i + 1 {
+        sum = sum + i
+    }
+    return sum
+}`)
+
+	mainFn := program.Functions[0]
+
+	infiniteStmt, ok := mainFn.Body.Statements[1].(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("statement = %T, want ast.ForStmt", mainFn.Body.Statements[1])
+	}
+	if infiniteStmt.Init != nil || infiniteStmt.Condition != nil || infiniteStmt.Post != nil {
+		t.Fatalf("infinite for = %#v, want empty header", infiniteStmt)
+	}
+
+	conditionStmt, ok := mainFn.Body.Statements[2].(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("statement = %T, want ast.ForStmt", mainFn.Body.Statements[2])
+	}
+	if conditionStmt.Init != nil || conditionStmt.Post != nil {
+		t.Fatalf("condition for init/post = %#v/%#v, want nil", conditionStmt.Init, conditionStmt.Post)
+	}
+	if _, ok := conditionStmt.Condition.(*ast.BinaryExpr); !ok {
+		t.Fatalf("condition for condition = %T, want ast.BinaryExpr", conditionStmt.Condition)
+	}
+
+	cStyleStmt, ok := mainFn.Body.Statements[3].(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("statement = %T, want ast.ForStmt", mainFn.Body.Statements[3])
+	}
+	if _, ok := cStyleStmt.Init.(*ast.LetStmt); !ok {
+		t.Fatalf("c-style for init = %T, want ast.LetStmt", cStyleStmt.Init)
+	}
+	if _, ok := cStyleStmt.Condition.(*ast.BinaryExpr); !ok {
+		t.Fatalf("c-style for condition = %T, want ast.BinaryExpr", cStyleStmt.Condition)
+	}
+	if _, ok := cStyleStmt.Post.(*ast.AssignStmt); !ok {
+		t.Fatalf("c-style for post = %T, want ast.AssignStmt", cStyleStmt.Post)
 	}
 }
 
@@ -307,6 +359,22 @@ func main() int {
 	}
 	if !strings.Contains(err.Error(), `unexpected "if" after block on the same line`) {
 		t.Fatalf("error = %q, want same-line if error", err.Error())
+	}
+}
+
+func TestRejectsLetInForPost(t *testing.T) {
+	_, err := Parse(`package main
+func main() int {
+    for let i int = 0; i < 10; let next int = i + 1 {
+        print(i)
+    }
+    return 0
+}`)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "for post statement cannot be let") {
+		t.Fatalf("error = %q, want for post statement error", err.Error())
 	}
 }
 

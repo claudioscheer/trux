@@ -16,7 +16,7 @@ print( "big" , x)
 }else if x==2{
 print("exact")
 }else{
-while x<10{
+for x<10{
 x=x+1
 }
 }
@@ -39,11 +39,39 @@ pub func add(a int, b int) int {
   } else if x == 2 {
     print("exact")
   } else {
-    while x < 10 {
+    for x < 10 {
       x = x + 1
     }
   }
   return x
+}
+`
+	if got != want {
+		t.Fatalf("formatted source:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestFormatNormalizesCStyleFor(t *testing.T) {
+	src := `package main
+func main() int{
+for let i int=0;i<10;i=i+1{
+print(i)
+}
+return 0
+}`
+
+	got, err := Format("main.tx", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := `package main
+
+func main() int {
+  for let i int = 0; i < 10; i = i + 1 {
+    print(i)
+  }
+  return 0
 }
 `
 	if got != want {

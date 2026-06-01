@@ -13,25 +13,17 @@ func multiply2x2(left [2][2]int, right [2][2]int) [2][2]int {
 
 func multiply2x2Loop(left [2][2]int, right [2][2]int) [2][2]int {
   let result [2][2]int = [2][2]int{[2]int{0, 0}, [2]int{0, 0}}
-  let row int = 0
 
-  while row < 2 {
-    let col int = 0
-
-    while col < 2 {
-      let k int = 0
+  for let row int = 0; row < 2; row = row + 1 {
+    for let col int = 0; col < 2; col = col + 1 {
       let sum int = 0
 
-      while k < 2 {
+      for let k int = 0; k < 2; k = k + 1 {
         sum = sum + left[row][k] * right[k][col]
-        k = k + 1
       }
 
       result[row][col] = sum
-      col = col + 1
     }
-
-    row = row + 1
   }
 
   return result

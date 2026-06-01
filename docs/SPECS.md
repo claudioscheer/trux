@@ -191,14 +191,14 @@ assignment
 indexed assignment
 return
 if / else if / else
-while
+for
 print(...)
 append(list, value)
 io.writeFile(path, contents)
 csv.write(path, cells, columns)
 ```
 
-`if` and `while` require `bool` conditions:
+`if` and `for` conditions require `bool` values. `for` supports condition-only, infinite, and init/condition/post forms:
 
 ```trux
 if x > 5 {
@@ -209,8 +209,16 @@ if x > 5 {
   print("small")
 }
 
-while x < 10 {
+for x < 10 {
   x = x + 1
+}
+
+for {
+  print("forever")
+}
+
+for let i int = 0; i < 10; i = i + 1 {
+  print(i)
 }
 ```
 
@@ -395,7 +403,7 @@ calling functions with wrong argument types
 using arithmetic with incompatible operands
 using comparisons with incompatible operands
 using in with non-string operands
-if or while conditions that are not bool
+if or for conditions that are not bool
 assignment to undefined variables
 nested collection element types
 array literals with the wrong element count

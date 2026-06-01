@@ -362,11 +362,21 @@ func stdlibMemberCallInStmt(stmt ast.Statement, imports map[string]struct{}, cur
 		if stmt.Else != nil {
 			return stdlibMemberCallInBlock(*stmt.Else, imports, cursor)
 		}
-	case *ast.WhileStmt:
+	case *ast.ForStmt:
+		if stmt.Init != nil {
+			if member, ok := stdlibMemberCallInStmt(stmt.Init, imports, cursor); ok {
+				return member, true
+			}
+		}
 		if member, ok := stdlibMemberCallInExpr(stmt.Condition, imports, cursor); ok {
 			return member, true
 		}
-		return stdlibMemberCallInBlock(stmt.Body, imports, cursor)
+		if member, ok := stdlibMemberCallInBlock(stmt.Body, imports, cursor); ok {
+			return member, true
+		}
+		if stmt.Post != nil {
+			return stdlibMemberCallInStmt(stmt.Post, imports, cursor)
+		}
 	case *ast.ExprStmt:
 		return stdlibMemberCallInExpr(stmt.Expr, imports, cursor)
 	}
@@ -594,8 +604,14 @@ func packageQualifierInBlock(block ast.Block, packageName string, cursor token.P
 			if stmt.Else != nil && packageQualifierInBlock(*stmt.Else, packageName, cursor) {
 				return true
 			}
-		case *ast.WhileStmt:
+		case *ast.ForStmt:
+			if stmt.Init != nil && packageQualifierInStmt(stmt.Init, packageName, cursor) {
+				return true
+			}
 			if packageQualifierInExpr(stmt.Condition, packageName, cursor) || packageQualifierInBlock(stmt.Body, packageName, cursor) {
+				return true
+			}
+			if stmt.Post != nil && packageQualifierInStmt(stmt.Post, packageName, cursor) {
 				return true
 			}
 		case *ast.ExprStmt:
@@ -606,6 +622,36 @@ func packageQualifierInBlock(block ast.Block, packageName string, cursor token.P
 	}
 
 	return false
+}
+
+func packageQualifierInStmt(stmt ast.Statement, packageName string, cursor token.Position) bool {
+	switch stmt := stmt.(type) {
+	case *ast.LetStmt:
+		return packageQualifierInExpr(stmt.Value, packageName, cursor)
+	case *ast.ReturnStmt:
+		return packageQualifierInExpr(stmt.Value, packageName, cursor)
+	case *ast.AssignStmt:
+		return packageQualifierInExpr(stmt.Value, packageName, cursor)
+	case *ast.IndexAssignStmt:
+		return packageQualifierInExpr(stmt.Target, packageName, cursor) || packageQualifierInExpr(stmt.Value, packageName, cursor)
+	case *ast.IfStmt:
+		if packageQualifierInExpr(stmt.Condition, packageName, cursor) || packageQualifierInBlock(stmt.Then, packageName, cursor) {
+			return true
+		}
+		return stmt.Else != nil && packageQualifierInBlock(*stmt.Else, packageName, cursor)
+	case *ast.ForStmt:
+		if stmt.Init != nil && packageQualifierInStmt(stmt.Init, packageName, cursor) {
+			return true
+		}
+		if packageQualifierInExpr(stmt.Condition, packageName, cursor) || packageQualifierInBlock(stmt.Body, packageName, cursor) {
+			return true
+		}
+		return stmt.Post != nil && packageQualifierInStmt(stmt.Post, packageName, cursor)
+	case *ast.ExprStmt:
+		return packageQualifierInExpr(stmt.Expr, packageName, cursor)
+	default:
+		return false
+	}
 }
 
 func packageQualifierInExpr(expr ast.Expression, packageName string, cursor token.Position) bool {
@@ -704,14 +750,24 @@ func visibleLocalsInBlock(block ast.Block, scope map[string]localDefinition, cur
 			if stmt.Else != nil && containsPosition(stmt.Else.Start, stmt.Else.End, cursor) {
 				return visibleLocalsInBlock(*stmt.Else, locals, cursor)
 			}
-		case *ast.WhileStmt:
+		case *ast.ForStmt:
+			loopLocals := cloneLocalScope(locals)
+			addForInitLocal(stmt.Init, loopLocals, "")
 			if containsPosition(stmt.Body.Start, stmt.Body.End, cursor) {
-				return visibleLocalsInBlock(stmt.Body, locals, cursor)
+				return visibleLocalsInBlock(stmt.Body, loopLocals, cursor)
 			}
 		}
 	}
 
 	return locals
+}
+
+func addForInitLocal(stmt ast.Statement, locals map[string]localDefinition, uri string) {
+	letStmt, ok := stmt.(*ast.LetStmt)
+	if !ok {
+		return
+	}
+	locals[letStmt.Name] = localDefinition{Name: letStmt.Name, URI: uri, Pos: letStmt.NamePos}
 }
 
 func completionLabels(items []CompletionItem) map[string]struct{} {
@@ -1718,9 +1774,19 @@ func findLocalDefinitionInBlock(uri string, block ast.Block, scope map[string]lo
 			if stmt.Else != nil && containsPosition(stmt.Else.Start, stmt.Else.End, cursor) {
 				return findLocalDefinitionInBlock(uri, *stmt.Else, locals, word, cursor)
 			}
-		case *ast.WhileStmt:
+		case *ast.ForStmt:
+			loopLocals := cloneLocalScope(locals)
+			if letStmt, ok := stmt.Init.(*ast.LetStmt); ok {
+				if containsName(cursor, letStmt.NamePos, letStmt.Name) && word == letStmt.Name {
+					return localDefinition{Name: letStmt.Name, URI: uri, Pos: letStmt.NamePos}, true
+				}
+				if positionBefore(cursor, letStmt.NamePos) {
+					return locals[word], locals[word].Name != ""
+				}
+				loopLocals[letStmt.Name] = localDefinition{Name: letStmt.Name, URI: uri, Pos: letStmt.NamePos}
+			}
 			if containsPosition(stmt.Body.Start, stmt.Body.End, cursor) {
-				return findLocalDefinitionInBlock(uri, stmt.Body, locals, word, cursor)
+				return findLocalDefinitionInBlock(uri, stmt.Body, loopLocals, word, cursor)
 			}
 		}
 	}
@@ -1889,9 +1955,15 @@ func collectFunctionReferencesInStmt(uri string, stmt ast.Statement, name string
 		if stmt.Else != nil {
 			collectFunctionReferencesInBlock(uri, *stmt.Else, name, locations)
 		}
-	case *ast.WhileStmt:
+	case *ast.ForStmt:
+		if stmt.Init != nil {
+			collectFunctionReferencesInStmt(uri, stmt.Init, name, locations)
+		}
 		collectFunctionReferencesInExpr(uri, stmt.Condition, name, locations)
 		collectFunctionReferencesInBlock(uri, stmt.Body, name, locations)
+		if stmt.Post != nil {
+			collectFunctionReferencesInStmt(uri, stmt.Post, name, locations)
+		}
 	case *ast.ExprStmt:
 		collectFunctionReferencesInExpr(uri, stmt.Expr, name, locations)
 	}
@@ -1997,12 +2069,52 @@ func collectLocalReferencesInBlock(uri string, block ast.Block, name string, loc
 			if stmt.Else != nil {
 				collectLocalReferencesInBlock(uri, *stmt.Else, name, locations)
 			}
-		case *ast.WhileStmt:
+		case *ast.ForStmt:
+			if stmt.Init != nil {
+				collectLocalReferencesInStmt(uri, stmt.Init, name, locations)
+			}
 			collectLocalReferencesInExpr(uri, stmt.Condition, name, locations)
 			collectLocalReferencesInBlock(uri, stmt.Body, name, locations)
+			if stmt.Post != nil {
+				collectLocalReferencesInStmt(uri, stmt.Post, name, locations)
+			}
 		case *ast.ExprStmt:
 			collectLocalReferencesInExpr(uri, stmt.Expr, name, locations)
 		}
+	}
+}
+
+func collectLocalReferencesInStmt(uri string, stmt ast.Statement, name string, locations *[]Location) {
+	switch stmt := stmt.(type) {
+	case *ast.LetStmt:
+		collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
+	case *ast.ReturnStmt:
+		collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
+	case *ast.AssignStmt:
+		if stmt.Name == name {
+			*locations = append(*locations, locationFor(uri, stmt.Start, stmt.Name))
+		}
+		collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
+	case *ast.IndexAssignStmt:
+		collectLocalReferencesInExpr(uri, stmt.Target, name, locations)
+		collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
+	case *ast.IfStmt:
+		collectLocalReferencesInExpr(uri, stmt.Condition, name, locations)
+		collectLocalReferencesInBlock(uri, stmt.Then, name, locations)
+		if stmt.Else != nil {
+			collectLocalReferencesInBlock(uri, *stmt.Else, name, locations)
+		}
+	case *ast.ForStmt:
+		if stmt.Init != nil {
+			collectLocalReferencesInStmt(uri, stmt.Init, name, locations)
+		}
+		collectLocalReferencesInExpr(uri, stmt.Condition, name, locations)
+		collectLocalReferencesInBlock(uri, stmt.Body, name, locations)
+		if stmt.Post != nil {
+			collectLocalReferencesInStmt(uri, stmt.Post, name, locations)
+		}
+	case *ast.ExprStmt:
+		collectLocalReferencesInExpr(uri, stmt.Expr, name, locations)
 	}
 }
 

@@ -215,7 +215,7 @@ func (c *checker) checkFunc(fn *ast.FuncDecl) error {
 func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement) error {
 	switch stmt := stmt.(type) {
 	case *ast.LetStmt:
-		if _, exists := c.info.Locals[fn][stmt.Name]; exists {
+		if _, exists := locals.locals[stmt.Name]; exists {
 			return typeError(stmt.Start, "duplicate local variable %q", stmt.Name)
 		}
 		if err := validateType(stmt.Start, stmt.Type); err != nil {
@@ -230,7 +230,9 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, stmt.Type)
 		}
 
-		c.info.Locals[fn][stmt.Name] = stmt.Type
+		if _, exists := c.info.Locals[fn][stmt.Name]; !exists {
+			c.info.Locals[fn][stmt.Name] = stmt.Type
+		}
 		locals.locals[stmt.Name] = localInfo{
 			typ:    stmt.Type,
 			origin: c.exprOrigin(stmt.Value),
@@ -314,17 +316,30 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 			}
 		}
 		return nil
-	case *ast.WhileStmt:
-		conditionType, err := c.checkExpr(locals, stmt.Condition, false)
-		if err != nil {
-			return err
+	case *ast.ForStmt:
+		loopScope := newScope(locals)
+		if stmt.Init != nil {
+			if err := c.checkStmt(fn, loopScope, stmt.Init); err != nil {
+				return err
+			}
 		}
-		if !ast.TypeEqual(conditionType, ast.BoolType) {
-			return typeError(stmt.Condition.Pos(), "while condition must be bool, got %s", conditionType)
+		if stmt.Condition != nil {
+			conditionType, err := c.checkExpr(loopScope, stmt.Condition, false)
+			if err != nil {
+				return err
+			}
+			if !ast.TypeEqual(conditionType, ast.BoolType) {
+				return typeError(stmt.Condition.Pos(), "for condition must be bool, got %s", conditionType)
+			}
 		}
-		bodyScope := newScope(locals)
+		bodyScope := newScope(loopScope)
 		for _, inner := range stmt.Body.Statements {
 			if err := c.checkStmt(fn, bodyScope, inner); err != nil {
+				return err
+			}
+		}
+		if stmt.Post != nil {
+			if err := c.checkStmt(fn, loopScope, stmt.Post); err != nil {
 				return err
 			}
 		}

@@ -138,6 +138,10 @@ func TestRunFileCompilesAndExecutesControlAndStringExamples(t *testing.T) {
 			want: "iterative\n0\n1\n1\n2\n3\n5\n8\n13\n21\n34\nrecursive\n0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n",
 		},
 		{
+			path: "../../examples/loops.tx",
+			want: "16 10\n16 10\n",
+		},
+		{
 			path: "../../examples/strings.tx",
 			want: "trux compiler\nhello, trux compiler\ntrux compiler!\nempty\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\n",
 		},

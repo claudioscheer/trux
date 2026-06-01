@@ -1,0 +1,24 @@
+package main
+
+func main() int {
+  let doubled int = 1
+
+  for doubled < 16 {
+    doubled = doubled * 2
+  }
+
+  let sum int = 0
+  for let i int = 0; i < 5; i = i + 1 {
+    sum = sum + i
+  }
+
+  let once bool = true
+  for {
+    print(doubled, " ", sum)
+    if once {
+      once = false
+    } else {
+      return 0
+    }
+  }
+}

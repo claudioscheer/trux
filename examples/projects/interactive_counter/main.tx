@@ -5,12 +5,10 @@ import "io"
 func main() int {
   let name string = io.readLine()
   let start int = io.readInt()
-  let i int = 0
 
   print("counter for ", name)
-  while i < 3 {
+  for let i int = 0; i < 3; i = i + 1 {
     print(start + i)
-    i = i + 1
   }
 
   return 0

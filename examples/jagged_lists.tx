@@ -4,7 +4,7 @@ func sum(row list[int]) int {
   let total int = 0
   let i int = 0
 
-  while i < len(row) {
+  for i < len(row) {
     total = total + row[i]
     i = i + 1
   }

@@ -28,7 +28,7 @@ The compiler currently supports:
 - `int`, `float`, `string`, and `bool`
 - integer and float arithmetic with `+`, `-`, `*`, and `/`
 - comparison operators with `==`, `!=`, `<`, `<=`, `>`, and `>=`
-- `if`, `else if`, `else`, and `while`
+- `if`, `else if`, `else`, and `for`
 - assignment to existing variables
 - string and boolean literals
 - string containment with `needle in haystack`
@@ -121,7 +121,7 @@ trux false
 2
 ```
 
-More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/control_flow.tx](examples/control_flow.tx), [examples/else_if.tx](examples/else_if.tx), [examples/collections.tx](examples/collections.tx), and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current control-flow, collection, and ownership model. Module examples live under [examples/modules/](examples/modules/).
+More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/control_flow.tx](examples/control_flow.tx), [examples/loops.tx](examples/loops.tx), [examples/else_if.tx](examples/else_if.tx), [examples/collections.tx](examples/collections.tx), and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current control-flow, collection, and ownership model. Module examples live under [examples/modules/](examples/modules/).
 
 The IO basics project reads a name and number from stdin, reads/writes text files, and reads/writes flat row-major CSV:
 

@@ -19,7 +19,7 @@ const (
 	Let        Type = "LET"
 	If         Type = "IF"
 	Else       Type = "ELSE"
-	While      Type = "WHILE"
+	For        Type = "FOR"
 	IntType    Type = "INT_TYPE"
 	FloatType  Type = "FLOAT_TYPE"
 	StringType Type = "STRING_TYPE"
@@ -41,9 +41,10 @@ const (
 	Asterisk     Type = "*"
 	Slash        Type = "/"
 
-	Comma Type = ","
-	Colon Type = ":"
-	Dot   Type = "."
+	Comma     Type = ","
+	Colon     Type = ":"
+	Dot       Type = "."
+	Semicolon Type = ";"
 
 	LParen   Type = "("
 	RParen   Type = ")"
@@ -75,7 +76,7 @@ var keywords = map[string]Type{
 	"let":     Let,
 	"if":      If,
 	"else":    Else,
-	"while":   While,
+	"for":     For,
 	"int":     IntType,
 	"float":   FloatType,
 	"string":  StringType,

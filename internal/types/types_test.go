@@ -101,6 +101,8 @@ func main() int {
 
     if ok {
         total = total * 2.0
+    } else if i == 0 {
+        total = total + 1.0
     } else {
         total = 0.0
     }

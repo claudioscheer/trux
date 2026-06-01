@@ -1,0 +1,17 @@
+package main
+
+func main() int {
+  let score int = 82
+
+  if score >= 90 {
+    print("grade A")
+  } else if score >= 80 {
+    print("grade B")
+  } else if score >= 70 {
+    print("grade C")
+  } else {
+    print("needs practice")
+  }
+
+  return 0
+}

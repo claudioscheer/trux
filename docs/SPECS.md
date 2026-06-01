@@ -190,7 +190,7 @@ let
 assignment
 indexed assignment
 return
-if / else
+if / else if / else
 while
 print(...)
 append(list, value)
@@ -203,6 +203,8 @@ csv.write(path, cells, columns)
 ```trux
 if x > 5 {
   print("big")
+} else if x == 5 {
+  print("exact")
 } else {
   print("small")
 }

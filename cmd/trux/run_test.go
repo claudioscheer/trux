@@ -126,6 +126,10 @@ func TestRunFileCompilesAndExecutesControlAndStringExamples(t *testing.T) {
 			want: "big\n0\n1\n2\ndone\n",
 		},
 		{
+			path: "../../examples/else_if.tx",
+			want: "grade B\n",
+		},
+		{
 			path: "../../examples/primitives.tx",
 			want: "trux 3 false\n2\nline\nquote: \"\n",
 		},

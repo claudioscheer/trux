@@ -96,6 +96,13 @@ func TestPrintIsIdentifier(t *testing.T) {
 	})
 }
 
+func TestElifIsIdentifier(t *testing.T) {
+	assertTokens(t, Lex("elif"), []expectedToken{
+		{token.Ident, "elif"},
+		{token.EOF, ""},
+	})
+}
+
 func TestLexesImportAndPubTokens(t *testing.T) {
 	assertTokens(t, Lex(`import "math.tx" pub func add math.add`), []expectedToken{
 		{token.Import, "import"},
@@ -128,7 +135,7 @@ func TestLexesPrimitiveLiteralsAndTypes(t *testing.T) {
 }
 
 func TestLexesControlFlowAndComparisonTokens(t *testing.T) {
-	assertTokens(t, Lex(`if x <= 10 { y = 1.5 } else { while "x" in name != false { y = y + 1.0 } }`), []expectedToken{
+	assertTokens(t, Lex(`if x <= 10 { y = 1.5 } else if x > 5 { y = 2.0 } else { while "x" in name != false { y = y + 1.0 } }`), []expectedToken{
 		{token.If, "if"},
 		{token.Ident, "x"},
 		{token.LessEqual, "<="},
@@ -137,6 +144,16 @@ func TestLexesControlFlowAndComparisonTokens(t *testing.T) {
 		{token.Ident, "y"},
 		{token.Assign, "="},
 		{token.Float, "1.5"},
+		{token.RBrace, "}"},
+		{token.Else, "else"},
+		{token.If, "if"},
+		{token.Ident, "x"},
+		{token.Greater, ">"},
+		{token.Int, "5"},
+		{token.LBrace, "{"},
+		{token.Ident, "y"},
+		{token.Assign, "="},
+		{token.Float, "2.0"},
 		{token.RBrace, "}"},
 		{token.Else, "else"},
 		{token.LBrace, "{"},

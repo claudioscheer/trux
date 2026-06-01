@@ -261,6 +261,97 @@ func main() int {
 	}
 }
 
+func TestParsesElseIfAsNestedElseBlock(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let x int = 2
+    if x > 2 {
+        print("big")
+    } else if x == 2 {
+        print("exact")
+    } else {
+        print("small")
+    }
+    return 0
+}`)
+
+	mainFn := program.Functions[0]
+	ifStmt, ok := mainFn.Body.Statements[1].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("statement = %T, want ast.IfStmt", mainFn.Body.Statements[1])
+	}
+	if ifStmt.Else == nil || len(ifStmt.Else.Statements) != 1 {
+		t.Fatalf("else block = %#v, want one nested if statement", ifStmt.Else)
+	}
+	elseIf, ok := ifStmt.Else.Statements[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("else statement = %T, want ast.IfStmt", ifStmt.Else.Statements[0])
+	}
+	if elseIf.Else == nil || len(elseIf.Else.Statements) != 1 {
+		t.Fatalf("nested else block = %#v, want final else statement", elseIf.Else)
+	}
+}
+
+func TestRejectsSameLineBareIfAfterBlock(t *testing.T) {
+	_, err := Parse(`package main
+func main() int {
+    if true {
+        print("one")
+    } if true {
+        print("two")
+    }
+    return 0
+}`)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `unexpected "if" after block on the same line`) {
+		t.Fatalf("error = %q, want same-line if error", err.Error())
+	}
+}
+
+func TestAllowsNextLineIfAfterBlock(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    if true {
+        print("one")
+    }
+    if true {
+        print("two")
+    }
+    return 0
+}`)
+
+	mainFn := program.Functions[0]
+	if len(mainFn.Body.Statements) != 3 {
+		t.Fatalf("statement count = %d, want 3", len(mainFn.Body.Statements))
+	}
+	if _, ok := mainFn.Body.Statements[0].(*ast.IfStmt); !ok {
+		t.Fatalf("first statement = %T, want ast.IfStmt", mainFn.Body.Statements[0])
+	}
+	if _, ok := mainFn.Body.Statements[1].(*ast.IfStmt); !ok {
+		t.Fatalf("second statement = %T, want ast.IfStmt", mainFn.Body.Statements[1])
+	}
+}
+
+func TestRejectsElseElif(t *testing.T) {
+	_, err := Parse(`package main
+func main() int {
+    if true {
+        print("one")
+    } else elif true {
+        print("two")
+    }
+    return 0
+}`)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `expected "{", got "elif"`) {
+		t.Fatalf("error = %q, want elif to remain unsupported", err.Error())
+	}
+}
+
 func TestParsesCollections(t *testing.T) {
 	program := mustParse(t, `package main
 func head(xs []int) int {

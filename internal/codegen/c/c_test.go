@@ -148,7 +148,9 @@ func TestGenerateCreatesCForControlFlowProgram(t *testing.T) {
 func main() int {
     let text string = "trux"
     let x float = 1.5
-    if "ru" in text {
+    if x > 10.0 {
+        x = 10.0
+    } else if "ru" in text {
         x = x + 1.0
     } else {
         x = 0.0
@@ -181,6 +183,9 @@ func main() int {
 		"static RT_UNUSED bool rt_string_contains(rt_string needle, rt_string haystack)",
 		"static RT_UNUSED bool rt_string_equal(rt_string left, rt_string right)",
 		"double trux_v_1_x = 1.5;",
+		"if (trux_v_1_x > 10.0) {",
+		"trux_v_1_x = 10.0;",
+		"} else {",
 		"if (rt_string_contains((rt_string){(const uint8_t*)\"ru\", 2}, trux_v_4_text)) {",
 		"trux_v_1_x = (trux_v_1_x + 1.0);",
 		"} else {",

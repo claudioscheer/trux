@@ -13,6 +13,8 @@ pub   func add( a   int,b int)int{
 let x int= a+b
 if x>2{
 print( "big" , x)
+}else if x==2{
+print("exact")
 }else{
 while x<10{
 x=x+1
@@ -34,6 +36,8 @@ pub func add(a int, b int) int {
   let x int = a + b
   if x > 2 {
     print("big", x)
+  } else if x == 2 {
+    print("exact")
   } else {
     while x < 10 {
       x = x + 1

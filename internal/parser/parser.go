@@ -329,14 +329,47 @@ func (p *Parser) parseIfStmt() (ast.Statement, error) {
 
 	var elseBlock *ast.Block
 	if p.match(token.Else) {
-		block, err := p.parseBlock()
-		if err != nil {
-			return nil, err
+		if p.check(token.If) {
+			elseIf, err := p.parseIfStmt()
+			if err != nil {
+				return nil, err
+			}
+			elseBlock = &ast.Block{
+				Start:      elseIf.Pos(),
+				End:        statementEnd(elseIf),
+				Statements: []ast.Statement{elseIf},
+			}
+		} else {
+			block, err := p.parseBlock()
+			if err != nil {
+				return nil, err
+			}
+			elseBlock = &block
 		}
-		elseBlock = &block
+	}
+	if p.check(token.If) && p.current().Pos.Line == ifEnd(thenBlock, elseBlock).Line {
+		return nil, p.errorf(p.current(), `unexpected "if" after block on the same line; use "else if" for chained conditionals or put the next if on a new line`)
 	}
 
 	return &ast.IfStmt{Start: start.Pos, Condition: condition, Then: thenBlock, Else: elseBlock}, nil
+}
+
+func ifEnd(thenBlock ast.Block, elseBlock *ast.Block) token.Position {
+	if elseBlock != nil {
+		return elseBlock.End
+	}
+	return thenBlock.End
+}
+
+func statementEnd(stmt ast.Statement) token.Position {
+	switch stmt := stmt.(type) {
+	case *ast.IfStmt:
+		return ifEnd(stmt.Then, stmt.Else)
+	case *ast.WhileStmt:
+		return stmt.Body.End
+	default:
+		return stmt.Pos()
+	}
 }
 
 func (p *Parser) parseWhileStmt() (ast.Statement, error) {
@@ -353,6 +386,9 @@ func (p *Parser) parseWhileStmt() (ast.Statement, error) {
 	body, err := p.parseBlock()
 	if err != nil {
 		return nil, err
+	}
+	if p.check(token.If) && p.current().Pos.Line == body.End.Line {
+		return nil, p.errorf(p.current(), `unexpected "if" after block on the same line; put the next if on a new line`)
 	}
 
 	return &ast.WhileStmt{Start: start.Pos, Condition: condition, Body: body}, nil

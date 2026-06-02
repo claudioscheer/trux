@@ -83,6 +83,13 @@ type PrintStmt struct {
 
 func (*PrintStmt) stmtNode() {}
 
+type AssertStmt struct {
+	Condition Expr
+	Message   Expr
+}
+
+func (*AssertStmt) stmtNode() {}
+
 type AppendStmt struct {
 	List     Expr
 	Value    Expr
@@ -588,6 +595,13 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 		return &ForStmt{Init: init, Condition: condition, Post: post, Body: body}, nil
 	case *ast.ExprStmt:
 		if call, ok := stmt.Expr.(*ast.CallExpr); ok {
+			if _, ok := b.info.AssertCalls[call]; ok {
+				args, err := b.buildExprs(call.Args)
+				if err != nil {
+					return nil, err
+				}
+				return &AssertStmt{Condition: args[0], Message: args[1]}, nil
+			}
 			if printTypes, ok := b.info.PrintCalls[call]; ok {
 				args, err := b.buildExprs(call.Args)
 				if err != nil {

@@ -41,6 +41,7 @@ The compiler currently supports:
 - typed IR
 - C code generation and execution through `cc` or `$CC`
 - `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
+- `assert(condition, message)` runtime checks that crash the app when false
 - standard `io` and `csv` packages for stdin, file, and CSV IO
 - standard `image` package for first P3 PPM image reads/writes
 - standard `time` package for wall-clock timestamps, monotonic timing, and sleeping
@@ -124,7 +125,7 @@ trux false
 2
 ```
 
-More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/control_flow.tx](examples/control_flow.tx), [examples/loops.tx](examples/loops.tx), [examples/else_if.tx](examples/else_if.tx), [examples/collections.tx](examples/collections.tx), and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current control-flow, collection, and ownership model. Module examples live under [examples/modules/](examples/modules/).
+More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/control_flow.tx](examples/control_flow.tx), [examples/loops.tx](examples/loops.tx), [examples/else_if.tx](examples/else_if.tx), [examples/assertions.tx](examples/assertions.tx), [examples/collections.tx](examples/collections.tx), and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current control-flow, assertion, collection, and ownership model. Module examples live under [examples/modules/](examples/modules/).
 
 The IO basics project reads a name and number from stdin, reads/writes text files, and reads/writes flat row-major CSV:
 

@@ -773,6 +773,7 @@ pub func add(a int, b int) int {
 		"for":      completionKindKeyword,
 		"mut":      completionKindKeyword,
 		"print":    completionKindFunction,
+		"assert":   completionKindFunction,
 		"total":    completionKindVariable,
 		"helper":   completionKindFunction,
 		"math":     completionKindModule,
@@ -1715,7 +1716,7 @@ pub func add(a int, b int) int {
 func TestHoverReturnsKnownSymbolDocumentation(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	uri := "file:///tmp/main.tx"
-	server.documents[uri] = "package main\nfunc main() int {\n\tprint(1)\n\treturn 0\n}\n"
+	server.documents[uri] = "package main\nfunc main() int {\n\tassert(true, \"ok\")\n\treturn 0\n}\n"
 
 	result, err := server.handleHover(mustJSON(t, map[string]any{
 		"textDocument": map[string]any{"uri": uri},
@@ -1726,8 +1727,8 @@ func TestHoverReturnsKnownSymbolDocumentation(t *testing.T) {
 	}
 
 	hover := result.(Hover)
-	if !strings.Contains(hover.Contents.Value, "print") {
-		t.Fatalf("hover = %#v, want print documentation", hover)
+	if !strings.Contains(hover.Contents.Value, "assert") {
+		t.Fatalf("hover = %#v, want assert documentation", hover)
 	}
 }
 

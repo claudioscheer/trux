@@ -31,6 +31,7 @@ type Info struct {
 	ExprOrigins   map[ast.Expression]Origin
 	ResolvedCalls map[*ast.CallExpr]FuncSig
 	PrintCalls    map[*ast.CallExpr][]ast.Type
+	AssertCalls   map[*ast.CallExpr]struct{}
 	LenCalls      map[*ast.CallExpr]ast.Type
 	AppendCalls   map[*ast.CallExpr]AppendSig
 	CloneCalls    map[*ast.CallExpr]CloneSig
@@ -163,6 +164,7 @@ func Check(program *ast.Program) (*Info, error) {
 			ExprOrigins:   map[ast.Expression]Origin{},
 			ResolvedCalls: map[*ast.CallExpr]FuncSig{},
 			PrintCalls:    map[*ast.CallExpr][]ast.Type{},
+			AssertCalls:   map[*ast.CallExpr]struct{}{},
 			LenCalls:      map[*ast.CallExpr]ast.Type{},
 			AppendCalls:   map[*ast.CallExpr]AppendSig{},
 			CloneCalls:    map[*ast.CallExpr]CloneSig{},
@@ -863,6 +865,23 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		c.info.PrintCalls[expr] = argTypes
 		c.setExpr(expr, argTypes[len(argTypes)-1], OriginUnknown)
 		return argTypes[len(argTypes)-1], nil
+	}
+	if expr.Package == "" && expr.Callee == "assert" {
+		if !allowPrint {
+			return nil, typeError(expr.Start, "assert can only be used as a statement")
+		}
+		if len(argTypes) != 2 {
+			return nil, typeError(expr.Start, "assert expects 2 arguments, got %d", len(argTypes))
+		}
+		if !ast.TypeEqual(argTypes[0], ast.BoolType) {
+			return nil, typeError(expr.Args[0].Pos(), "assert condition has type %s, want bool", argTypes[0])
+		}
+		if !ast.TypeEqual(argTypes[1], ast.StringType) {
+			return nil, typeError(expr.Args[1].Pos(), "assert message has type %s, want string", argTypes[1])
+		}
+		c.info.AssertCalls[expr] = struct{}{}
+		c.setExpr(expr, ast.StringType, OriginUnknown)
+		return ast.StringType, nil
 	}
 	if expr.Package == "" && expr.Callee == "len" {
 		if len(argTypes) != 1 {

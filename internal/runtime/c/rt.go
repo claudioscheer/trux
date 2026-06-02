@@ -262,6 +262,16 @@ static RT_UNUSED void rt_check_string(rt_string value) {
     }
 }
 
+static RT_UNUSED void rt_assert_fail(rt_string message) {
+    rt_check_string(message);
+    fprintf(stderr, "trux runtime error: assertion failed: ");
+    if (message.len > 0 && fwrite(message.data, 1, message.len, stderr) != message.len) {
+        rt_runtime_fail("write failed");
+    }
+    fputc('\n', stderr);
+    exit(1);
+}
+
 static RT_UNUSED void rt_check_array_like(const void* data, size_t len, const char* what) {
     if (len > 0 && data == NULL) {
         fprintf(stderr, "trux runtime error: invalid %s: non-zero length with NULL data\n", what);

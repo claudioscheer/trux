@@ -145,6 +145,10 @@ func TestRunFileCompilesAndExecutesControlAndStringExamples(t *testing.T) {
 			path: "../../examples/strings.tx",
 			want: "trux compiler\nhello, trux compiler\ntrux compiler!\nempty\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\n",
 		},
+		{
+			path: "../../examples/assertions.tx",
+			want: "mean 9\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -480,6 +484,55 @@ func main() int {
 	}
 	if !strings.Contains(err.Error(), "trux runtime error: index 1 out of bounds for length 1") {
 		t.Fatalf("error = %q, want bounds error", err.Error())
+	}
+}
+
+func TestRunFileAssertTrueContinuesWithoutEvaluatingMessage(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func message() string {
+    print("message evaluated")
+    return "bad"
+}
+
+func main() int {
+    assert(1 == 1, message())
+    print("after")
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "after\n" {
+		t.Fatalf("output = %q, want after\\n", out.String())
+	}
+}
+
+func TestRunFileAssertFalseCrashesApp(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func main() int {
+    print("before")
+    assert(1 == 2, "numbers should match")
+    print("after")
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if out.String() != "before\n" {
+		t.Fatalf("output = %q, want before\\n", out.String())
+	}
+	if !strings.Contains(err.Error(), "trux runtime error: assertion failed: numbers should match") {
+		t.Fatalf("error = %q, want assertion failure", err.Error())
 	}
 }
 

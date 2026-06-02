@@ -1,0 +1,23 @@
+package main
+
+func average(total int, count int) int {
+  assert(count > 0, "count must be positive")
+  return total / count
+}
+
+func main() int {
+  let scores list[int] = list[int]{8, 9, 10}
+  assert(len(scores) == 3, "expected three scores")
+
+  let total int = 0
+  for let i int = 0; i < len(scores); i = i + 1 {
+    assert(scores[i] >= 0, "score must be non-negative")
+    total = total + scores[i]
+  }
+
+  let mean int = average(total, len(scores))
+  assert(mean == 9, "mean should be 9")
+
+  print("mean ", mean)
+  return 0
+}

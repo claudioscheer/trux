@@ -67,6 +67,36 @@ func main() int {
 	}
 }
 
+func TestBuildCreatesTypedIRForAssert(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let x int = 1
+    assert(x > 0, "x must be positive")
+    return x
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainFn := irProgram.Functions[0]
+	assertStmt, ok := mainFn.Body[1].(*AssertStmt)
+	if !ok {
+		t.Fatalf("second statement = %T, want AssertStmt", mainFn.Body[1])
+	}
+	if !ast.TypeEqual(assertStmt.Condition.Type(), ast.BoolType) {
+		t.Fatalf("assert condition type = %s, want bool", assertStmt.Condition.Type())
+	}
+	if !ast.TypeEqual(assertStmt.Message.Type(), ast.StringType) {
+		t.Fatalf("assert message type = %s, want string", assertStmt.Message.Type())
+	}
+}
+
 func TestBuildCreatesTypedIRForPrimitiveProgram(t *testing.T) {
 	program := mustParse(t, `package main
 func label() string {

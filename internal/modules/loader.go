@@ -672,7 +672,7 @@ func (l *loader) directExportingPackage(unit *fileUnit, name string, ctx resolut
 
 func isBuiltin(name string) bool {
 	switch name {
-	case "print", "len", "clone", "append":
+	case "print", "assert", "len", "clone", "append":
 		return true
 	default:
 		return false

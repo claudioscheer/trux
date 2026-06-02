@@ -420,6 +420,7 @@ func baseCompletionItems() []CompletionItem {
 		{Label: "bool", Kind: completionKindType, Detail: "boolean type"},
 		{Label: "list", Kind: completionKindType, Detail: "mutable list type"},
 		{Label: "print", Kind: completionKindFunction, Detail: "print one or more scalar values"},
+		{Label: "assert", Kind: completionKindFunction, Detail: "crash if a condition is false"},
 		{Label: "len", Kind: completionKindFunction, Detail: "length of a string or collection"},
 		{Label: "clone", Kind: completionKindFunction, Detail: "owned copy of a dynamic value"},
 		{Label: "append", Kind: completionKindFunction, Detail: "append a value to a list"},
@@ -689,6 +690,7 @@ var hoverText = map[string]string{
 	"bool":    "`bool` is either `true` or `false`.",
 	"list":    "`list[T]` is a mutable growable list for scalar element types.",
 	"print":   "`print(value, ...)` writes one or more scalar values followed by a newline.",
+	"assert":  "`assert(condition, message)` exits with a runtime error when condition is false.",
 	"len":     "`len(value) int` returns the length of a string, array, slice, or list.",
 	"clone":   "`clone(value) T` creates an owned copy of a string, array, slice, or list.",
 	"append":  "`append(list, value)` mutates a list by adding one value.",
@@ -697,6 +699,7 @@ var hoverText = map[string]string{
 
 var builtinFunctionHoverText = map[string]string{
 	"print":  "`print(value, ...)`",
+	"assert": "`assert(condition bool, message string)`",
 	"len":    "`len(value) int`",
 	"clone":  "`clone(value) T`",
 	"append": "`append(list, value)`",

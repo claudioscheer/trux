@@ -87,6 +87,82 @@ func main() int {
 	}
 }
 
+func TestCheckAllowsAssertStatement(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let x int = 2
+    assert(x > 0, "x must be positive")
+    return x
+}`)
+
+	info, err := Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertCall := program.Functions[0].Body.Statements[1].(*ast.ExprStmt).Expr.(*ast.CallExpr)
+	if _, ok := info.AssertCalls[assertCall]; !ok {
+		t.Fatalf("assert call was not recorded")
+	}
+}
+
+func TestCheckRejectsInvalidAssertCalls(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "expression position",
+			src: `package main
+func main() int {
+    return assert(true, "ok")
+}`,
+			want: "assert can only be used as a statement",
+		},
+		{
+			name: "wrong arity",
+			src: `package main
+func main() int {
+    assert(true)
+    return 0
+}`,
+			want: "assert expects 2 arguments, got 1",
+		},
+		{
+			name: "non bool condition",
+			src: `package main
+func main() int {
+    assert(1, "bad")
+    return 0
+}`,
+			want: "assert condition has type int, want bool",
+		},
+		{
+			name: "non string message",
+			src: `package main
+func main() int {
+    assert(true, 1)
+    return 0
+}`,
+			want: "assert message has type int, want string",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			program := mustParse(t, tt.src)
+			_, err := Check(program)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want it to contain %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
 func TestCheckValidControlFlowProgram(t *testing.T) {
 	program := mustParse(t, `package main
 func more(value float) float {

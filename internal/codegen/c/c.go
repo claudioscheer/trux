@@ -384,6 +384,18 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) erro
 			}
 		}
 		fmt.Fprintf(out, "%srt_print_newline();\n", indent)
+	case *ir.AssertStmt:
+		condition, err := emitCondition(stmt.Condition, usage)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%sif (!(%s)) {\n", indent, condition)
+		message, err := emitExpr(stmt.Message, frameArena, usage)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s    rt_assert_fail(%s);\n", indent, message)
+		fmt.Fprintf(out, "%s}\n", indent)
 	case *ir.AppendStmt:
 		list, err := emitExpr(stmt.List, frameArena, usage)
 		if err != nil {
@@ -1252,6 +1264,11 @@ func collectStmtNestedCollectionFamilies(stmt ir.Stmt, seen map[string]bool, fam
 				return err
 			}
 		}
+	case *ir.AssertStmt:
+		if err := collectExprNestedCollectionFamilies(stmt.Condition, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(stmt.Message, seen, families)
 	case *ir.AppendStmt:
 		if err := collectNestedCollectionFamilies(stmt.ListType, seen, families); err != nil {
 			return err

@@ -231,6 +231,7 @@ return
 if / else if / else
 for
 print(...)
+assert(condition, message)
 append(list, value)
 io.writeFile(path, contents)
 csv.write(path, cells, columns)
@@ -279,6 +280,12 @@ print(int)    -> rt_print_int
 print(float)  -> rt_print_float
 print(string) -> rt_print_string
 print(bool)   -> rt_print_bool
+```
+
+`assert` is statement-only. It requires a `bool` condition and a `string` message. If the condition is false at runtime, the generated app writes a runtime assertion error to stderr and exits with status `1`:
+
+```trux
+assert(len(items) > 0, "items must not be empty")
 ```
 
 `append` is statement-only and mutates a list:
@@ -530,6 +537,8 @@ string index assignment
 append outside statement position
 append with a non-list first argument
 append values with the wrong element type
+assert outside statement position
+assert with wrong arity or non-bool/non-string arguments
 mutation of non-`mut` parameter-owned collections or aliases/views of them
 `mut` parameters with non-collection types
 borrowed or unknown-owned arguments passed to `mut` parameters

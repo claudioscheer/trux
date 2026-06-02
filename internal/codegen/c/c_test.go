@@ -664,6 +664,26 @@ func main() int {
 	}
 }
 
+func TestGenerateCreatesCForAssert(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func main() int {
+    let x int = 1
+    assert(x > 0, "x must be positive")
+    return x
+}`)
+
+	wantParts := []string{
+		"static RT_UNUSED void rt_assert_fail(rt_string message)",
+		"if (!(trux_v_1_x > 0)) {",
+		"rt_assert_fail((rt_string){(const uint8_t*)\"x must be positive\", 18});",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
 func mustGenerateC(t *testing.T, src string) string {
 	t.Helper()
 

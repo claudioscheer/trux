@@ -126,6 +126,27 @@ trux false
 2
 ```
 
+Unit tests live in `.test.tx` files and run with `trux test`. Test functions
+start with `test`, take no parameters, omit the return type, and use
+`assert(condition, message)` for checks:
+
+```go trux
+package math
+
+import "math.tx"
+
+func testAdd() {
+  assert(add(2, 3) == 5, "add should sum integers")
+}
+```
+
+Run tests recursively or run a single test file:
+
+```bash
+./bin/trux test
+./bin/trux test examples/projects/scorebook/scores.test.tx
+```
+
 More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/control_flow.tx](examples/control_flow.tx), [examples/loops.tx](examples/loops.tx), [examples/else_if.tx](examples/else_if.tx), [examples/assertions.tx](examples/assertions.tx), [examples/collections.tx](examples/collections.tx), and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current control-flow, assertion, collection, and ownership model. Module examples live under [examples/modules/](examples/modules/).
 
 The IO basics project reads a name and number from stdin, reads/writes text files, and reads/writes flat row-major CSV:

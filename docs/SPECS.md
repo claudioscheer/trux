@@ -288,6 +288,29 @@ print(bool)   -> rt_print_bool
 assert(len(items) > 0, "items must not be empty")
 ```
 
+## Unit Tests
+
+Unit tests live in files ending with `.test.tx` and run through:
+
+```bash
+trux test
+trux test path/to/file.test.tx
+```
+
+The first form recursively discovers `.test.tx` files from the current directory. The second runs one file. Test functions are no-argument functions whose names start with `test` and that omit the return type:
+
+```trux
+package math
+
+import "math.tx"
+
+func testDouble() {
+  assert(double(4) == 8, "double should multiply by two")
+}
+```
+
+Tests pass by returning normally. Failed `assert` calls, runtime errors, compile errors, or invalid test declarations fail the test run. `trux test --fail-fast` stops after the first failure. Normal program loading skips `.test.tx` files.
+
 `append` is statement-only and mutates a list:
 
 ```trux

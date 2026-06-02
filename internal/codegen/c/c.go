@@ -394,7 +394,13 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) erro
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s    rt_assert_fail(%s);\n", indent, message)
+		fmt.Fprintf(out, "%s    rt_assert_fail_at(%s, %s, %d, %d);\n",
+			indent,
+			message,
+			cStringLiteral(stmt.Pos.File),
+			stmt.Pos.Line,
+			stmt.Pos.Column,
+		)
 		fmt.Fprintf(out, "%s}\n", indent)
 	case *ir.AppendStmt:
 		list, err := emitExpr(stmt.List, frameArena, usage)

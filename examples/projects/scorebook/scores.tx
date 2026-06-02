@@ -1,0 +1,71 @@
+package scores
+
+pub func total(values list[int]) int {
+  let sum int = 0
+  for let i int = 0; i < len(values); i = i + 1 {
+    sum = sum + values[i]
+  }
+  return sum
+}
+
+pub func average(values list[int]) int {
+  assert(len(values) > 0, "scores required")
+  return total(values) / len(values)
+}
+
+pub func best(values list[int]) int {
+  assert(len(values) > 0, "scores required")
+  let high int = values[0]
+  for let i int = 1; i < len(values); i = i + 1 {
+    if values[i] > high {
+      high = values[i]
+    }
+  }
+  return high
+}
+
+pub func passingCount(values list[int]) int {
+  let count int = 0
+  for let i int = 0; i < len(values); i = i + 1 {
+    if isPassing(values[i]) {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+pub func letter(score int) string {
+  let capped int = capScore(score)
+  if capped >= 90 {
+    return "A"
+  } else if capped >= 80 {
+    return "B"
+  } else if capped >= 70 {
+    return "C"
+  } else if capped >= 60 {
+    return "D"
+  }
+  return "F"
+}
+
+pub func curve(values list[int], points int) list[int] {
+  let curved list[int] = list[int]{}
+  for let i int = 0; i < len(values); i = i + 1 {
+    append(curved, capScore(values[i] + points))
+  }
+  return curved
+}
+
+func isPassing(score int) bool {
+  return capScore(score) >= 60
+}
+
+func capScore(score int) int {
+  if score > 100 {
+    return 100
+  }
+  if score < 0 {
+    return 0
+  }
+  return score
+}

@@ -673,9 +673,10 @@ func main() int {
 }`)
 
 	wantParts := []string{
-		"static RT_UNUSED void rt_assert_fail(rt_string message)",
+		"static RT_UNUSED void rt_assert_fail_at(rt_string message, const char* file, int line, int column)",
 		"if (!(trux_v_1_x > 0)) {",
-		"rt_assert_fail((rt_string){(const uint8_t*)\"x must be positive\", 18});",
+		"rt_assert_fail_at((rt_string){(const uint8_t*)\"x must be positive\", 18},",
+		", 4, 5);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {

@@ -42,6 +42,7 @@ The compiler currently supports:
 - C code generation and execution through `cc` or `$CC`
 - `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
 - `assert(condition, message)` runtime checks that crash the app when false
+- `.test.tx` unit tests through `trux test`
 - standard `io` and `csv` packages for stdin, file, and CSV IO
 - standard `image` package for first P3 PPM image reads/writes
 - standard `time` package for wall-clock timestamps, monotonic timing, and sleeping
@@ -149,6 +150,8 @@ make emit-c FILE=examples/hello.tx
 make build-bin FILE=examples/hello.tx OUT=bin/hello
 ./bin/trux fmt examples/hello.tx
 ./bin/trux fmt -r
+./bin/trux test
+./bin/trux test examples/projects/scorebook/scores.test.tx
 make lsp
 ```
 

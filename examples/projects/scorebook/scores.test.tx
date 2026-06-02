@@ -1,0 +1,44 @@
+package scores
+
+import "scores.tx"
+
+func testTotalAndAverage() {
+  let values list[int] = list[int]{80, 90, 100}
+  assert(total(values) == 270, "total should add all scores")
+  assert(average(values) == 90, "average should use integer division")
+}
+
+func testBestAndPassingCount() {
+  let values list[int] = list[int]{59, 60, 72, 100}
+  assert(best(values) == 100, "best should find highest score")
+  assert(passingCount(values) == 3, "passing count should include scores at 60")
+}
+
+func testLetterBoundaries() {
+  assert(letter(100) == "A", "100 should be A")
+  assert(letter(90) == "A", "90 should be A")
+  assert(letter(89) == "B", "89 should be B")
+  assert(letter(80) == "B", "80 should be B")
+  assert(letter(79) == "C", "79 should be C")
+  assert(letter(70) == "C", "70 should be C")
+  assert(letter(69) == "D", "69 should be D")
+  assert(letter(60) == "D", "60 should be D")
+  assert(letter(59) == "F", "59 should be F")
+}
+
+func testCurveCapsScores() {
+  let values list[int] = list[int]{0, 58, 96}
+  let curved list[int] = curve(values, 7)
+  assert(len(curved) == 3, "curve should keep length")
+  assert(curved[0] == 7, "curve should add points to low score")
+  assert(curved[1] == 65, "curve should add points to middle score")
+  assert(curved[2] == 100, "curve should cap scores at 100")
+}
+
+func testPrivateHelpers() {
+  assert(capScore(120) == 100, "capScore should cap high values")
+  assert(capScore(0 - 5) == 0, "capScore should floor negative values")
+  assert(capScore(77) == 77, "capScore should keep valid values")
+  assert(isPassing(59) == false, "59 should fail")
+  assert(isPassing(60) == true, "60 should pass")
+}

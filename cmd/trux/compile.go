@@ -31,12 +31,16 @@ func compileFile(path string, opts compileOptions) (*compileResult, error) {
 	if err != nil {
 		return nil, formatSourceError(path, "", nil, err)
 	}
+	return compileLoaded(path, loaded, opts)
+}
 
+func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*compileResult, error) {
 	src := loaded.Sources[loaded.EntryPath]
 	if src == "" {
 		return nil, fmt.Errorf("missing loaded source for %s", loaded.EntryPath)
 	}
 
+	var err error
 	var debug *debugWriter
 	if opts.Debug {
 		debug, err = newDebugWriter(path)

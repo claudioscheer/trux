@@ -75,30 +75,39 @@ type importSet struct {
 }
 
 type loader struct {
-	loaded   map[string]*fileUnit
-	sources  map[string]string
-	overlays map[string]string
-	order    []*fileUnit
+	loaded             map[string]*fileUnit
+	sources            map[string]string
+	overlays           map[string]string
+	order              []*fileUnit
+	includeTestEntries bool
 }
 
 func Load(entryPath string) (*Result, error) {
-	return load(entryPath, nil)
+	return load(entryPath, nil, false)
 }
 
 func LoadWithSources(entryPath string, sources map[string]string) (*Result, error) {
-	return load(entryPath, normalizeSources(sources))
+	return load(entryPath, normalizeSources(sources), false)
 }
 
-func load(entryPath string, sources map[string]string) (*Result, error) {
+func LoadTest(entryPath string) (*Result, error) {
+	return load(entryPath, nil, true)
+}
+
+func load(entryPath string, sources map[string]string, includeTestEntries bool) (*Result, error) {
 	path, err := canonicalEntryPath(entryPath, sources)
 	if err != nil {
 		return nil, err
 	}
+	if isTestFile(path) && !includeTestEntries {
+		return nil, fmt.Errorf("read %s: .test.tx files must be run with trux test", entryPath)
+	}
 
 	l := &loader{
-		loaded:   map[string]*fileUnit{},
-		sources:  map[string]string{},
-		overlays: sources,
+		loaded:             map[string]*fileUnit{},
+		sources:            map[string]string{},
+		overlays:           sources,
+		includeTestEntries: includeTestEntries,
 	}
 	entry, err := l.loadFile(path, token.Position{}, nil, false)
 	if err != nil {
@@ -175,6 +184,9 @@ func canonicalEntryPath(path string, sources map[string]string) (string, error) 
 func (l *loader) loadFile(path string, importPos token.Position, stack []string, includeSiblings bool) (*fileUnit, error) {
 	if cycleStart := indexPath(stack, path); cycleStart >= 0 {
 		return nil, l.errorAt(importPos, "import cycle detected: %s", strings.Join(append(stack[cycleStart:], path), " -> "))
+	}
+	if isTestFile(path) && !l.includeTestEntries {
+		return nil, l.errorAt(importPos, ".test.tx files must be run with trux test")
 	}
 	if unit, ok := l.loaded[path]; ok {
 		return unit, nil
@@ -261,6 +273,9 @@ func (l *loader) samePackageSiblingPaths(unit *fileUnit) []string {
 			if entry.IsDir() || filepath.Ext(entry.Name()) != ".tx" {
 				continue
 			}
+			if isTestFile(entry.Name()) {
+				continue
+			}
 			path := filepath.Clean(filepath.Join(dir, entry.Name()))
 			if real, err := filepath.EvalSymlinks(path); err == nil {
 				path = filepath.Clean(real)
@@ -270,7 +285,7 @@ func (l *loader) samePackageSiblingPaths(unit *fileUnit) []string {
 	}
 
 	for path := range l.overlays {
-		if filepath.Dir(path) == dir && filepath.Ext(path) == ".tx" {
+		if filepath.Dir(path) == dir && filepath.Ext(path) == ".tx" && !isTestFile(path) {
 			candidates[path] = struct{}{}
 		}
 	}
@@ -734,6 +749,10 @@ func (unit *fileUnit) packageKey() packageKey {
 
 func isBareImport(path string) bool {
 	return filepath.Clean(path) == path && !strings.ContainsAny(path, `/\`) && filepath.Ext(path) == ""
+}
+
+func isTestFile(path string) bool {
+	return strings.HasSuffix(filepath.Base(path), ".test.tx")
 }
 
 func indexPath(paths []string, path string) int {

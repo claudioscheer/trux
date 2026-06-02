@@ -138,7 +138,7 @@ func (p *Parser) parseFuncDecl() (*ast.FuncDecl, error) {
 	}
 
 	var returnType ast.Type
-	if !kernel {
+	if !kernel && !p.check(token.LBrace) {
 		returnType, err = p.parseType()
 		if err != nil {
 			return nil, err

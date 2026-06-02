@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/claudioscheer/trux/internal/ast"
+	"github.com/claudioscheer/trux/internal/token"
 	"github.com/claudioscheer/trux/internal/types"
 )
 
@@ -86,6 +87,7 @@ func (*PrintStmt) stmtNode() {}
 type AssertStmt struct {
 	Condition Expr
 	Message   Expr
+	Pos       token.Position
 }
 
 func (*AssertStmt) stmtNode() {}
@@ -600,7 +602,7 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 				if err != nil {
 					return nil, err
 				}
-				return &AssertStmt{Condition: args[0], Message: args[1]}, nil
+				return &AssertStmt{Condition: args[0], Message: args[1], Pos: call.Start}, nil
 			}
 			if printTypes, ok := b.info.PrintCalls[call]; ok {
 				args, err := b.buildExprs(call.Args)

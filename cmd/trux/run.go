@@ -50,6 +50,10 @@ func runFileWithOptions(out io.Writer, path string, opts runOptions) error {
 		return err
 	}
 
+	return runCompiledResult(out, opts.Stdin, result)
+}
+
+func runCompiledResult(out io.Writer, in io.Reader, result *compileResult) error {
 	tmpDir, err := os.MkdirTemp("", "trux-run-*")
 	if err != nil {
 		return fmt.Errorf("create run temp dir: %w", err)
@@ -68,7 +72,7 @@ func runFileWithOptions(out io.Writer, path string, opts runOptions) error {
 		return err
 	}
 
-	return runExecutable(out, opts.Stdin, executablePath)
+	return runExecutable(out, in, executablePath)
 }
 
 func formatSourceError(path string, src string, sources map[string]string, err error) error {

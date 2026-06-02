@@ -1880,7 +1880,7 @@ func functionSignature(fn *ast.FuncDecl) string {
 		params = append(params, functionParamSignature(param))
 	}
 	signature := prefix + " " + fn.Name + "(" + strings.Join(params, ", ") + ")"
-	if fn.Kernel {
+	if fn.Kernel || fn.ReturnType == nil {
 		return signature
 	}
 	return signature + " " + fn.ReturnType.String()

@@ -204,6 +204,9 @@ func (c *checker) collectFunctions(program *ast.Program) error {
 			return typeError(fn.Pos, "duplicate function %q", fn.Name)
 		}
 		if !fn.Kernel {
+			if fn.ReturnType == nil {
+				return typeError(fn.Pos, "function %q must declare return type", fn.Name)
+			}
 			if err := validateType(fn.Pos, fn.ReturnType); err != nil {
 				return err
 			}

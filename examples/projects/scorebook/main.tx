@@ -1,0 +1,15 @@
+package main
+
+import "scores.tx"
+
+func main() int {
+  let values list[int] = list[int]{58, 72, 88, 104}
+  let curved list[int] = scores.curve(values, 5)
+
+  print("total ", scores.total(values))
+  print("average ", scores.average(values))
+  print("best ", scores.best(values))
+  print("passing ", scores.passingCount(values))
+  print("curved best ", scores.best(curved), " grade ", scores.letter(scores.best(curved)))
+  return 0
+}

@@ -5,6 +5,11 @@ pub func push(mut xs list[int], value int) int {
   return len(xs)
 }
 
+pub func setMiddle(mut xs [3]int, value int) int {
+  xs[1] = value
+  return xs[1]
+}
+
 pub func setFirst(mut xs []int, value int) int {
   xs[0] = value
   return xs[0]

@@ -1,30 +1,72 @@
 package main
 
+// A `mut` list parameter can grow the caller's list.
+// The call site stays ordinary: `push(items, 2)`, not `push(mut items, 2)`.
 func push(mut xs list[int], value int) int {
   append(xs, value)
   return len(xs)
 }
 
-func setFirst(mut xs []int, value int) int {
-  xs[0] = value
-  return xs[0]
-}
-
+// Dynamic string data appended through a `mut` list stays valid for the caller.
 func addGreeting(mut words list[string], name string) int {
   append(words, "hello " + name)
   return len(words)
 }
 
+// A `mut` array parameter can update the caller's fixed-size array storage.
+func setMiddle(mut xs [3]int, value int) int {
+  xs[1] = value
+  return xs[1]
+}
+
+// A `mut` slice parameter writes through the caller's view.
+// If the slice came from an array, the array observes the write too.
+func setFirst(mut xs []int, value int) int {
+  xs[0] = value
+  return xs[0]
+}
+
+// A simple queue can use a list for storage and a one-element array for the head.
+// Trux does not have list removal yet, so dequeue advances the head instead of compacting.
+func enqueue(mut values list[int], value int) int {
+  append(values, value)
+  return len(values)
+}
+
+func dequeue(values list[int], mut head [1]int) int {
+  let value int = values[head[0]]
+  head[0] = head[0] + 1
+  return value
+}
+
+func queued(values list[int], head [1]int) int {
+  return len(values) - head[0]
+}
+
 func main() int {
+  // Lists are shared handles, so append changes the caller-visible length.
   let items list[int] = list[int]{1}
   print(push(items, 2), " ", len(items), " ", items[1])
 
+  // Lists of strings also work when the appended value is built dynamically.
+  let words list[string] = list[string]{}
+  print(addGreeting(words, "trux"), " ", words[0])
+
+  // Arrays are fixed length, but indexed assignment can still mutate elements.
   let xs [3]int = [3]int{3, 4, 5}
+  print(setMiddle(xs, 8), " ", xs[1])
+
+  // Slices are views. Mutating the slice writes through to the array.
   let view []int = xs[:]
   print(setFirst(view, 9), " ", xs[0])
 
-  let words list[string] = list[string]{}
-  print(addGreeting(words, "trux"), " ", words[0])
+  // Queue state is split across the mutable list and mutable head index.
+  let queue list[int] = list[int]{}
+  let head [1]int = [1]int{0}
+  let firstSize int = enqueue(queue, 10)
+  let secondSize int = enqueue(queue, 20)
+  print(firstSize, " ", secondSize, " ", queued(queue, head))
+  print(dequeue(queue, head), " ", dequeue(queue, head), " ", queued(queue, head))
 
   return 0
 }

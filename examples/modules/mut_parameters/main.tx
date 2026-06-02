@@ -1,13 +1,24 @@
 package main
 
+import "queue.tx"
 import "stack.tx"
 
 func main() int {
+  // Imported functions can expose `mut` parameters too.
   let items list[int] = list[int]{10}
   print(stack.push(items, 20), " ", items[1])
 
-  let xs [2]int = [2]int{0, 0}
+  let xs [3]int = [3]int{0, 0, 0}
+  print(stack.setMiddle(xs, 4), " ", xs[1])
   print(stack.setFirst(xs[:], 7), " ", xs[0])
+
+  // Queue state uses a mutable list for storage and a mutable array head index.
+  let values list[int] = list[int]{}
+  let head [1]int = [1]int{0}
+  let firstSize int = queue.enqueue(values, 10)
+  let secondSize int = queue.enqueue(values, 20)
+  print(firstSize, " ", secondSize, " ", queue.queued(values, head))
+  print(queue.dequeue(values, head), " ", queue.dequeue(values, head), " ", queue.queued(values, head))
 
   return 0
 }

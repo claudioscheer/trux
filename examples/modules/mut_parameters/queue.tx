@@ -1,0 +1,19 @@
+package queue
+
+// Enqueue grows the caller-owned list.
+pub func enqueue(mut values list[int], value int) int {
+  append(values, value)
+  return len(values)
+}
+
+// Dequeue advances a caller-owned head index.
+// Consumed values stay in the list because Trux does not have list removal yet.
+pub func dequeue(values list[int], mut head [1]int) int {
+  let value int = values[head[0]]
+  head[0] = head[0] + 1
+  return value
+}
+
+pub func queued(values list[int], head [1]int) int {
+  return len(values) - head[0]
+}

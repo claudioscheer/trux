@@ -213,7 +213,10 @@ func (c *checker) collectFunctions(program *ast.Program) error {
 			return typeError(fn.Pos, "duplicate function %q", fn.Name)
 		}
 		for _, param := range fn.Params {
-			if err := validateType(fn.Pos, param.Type); err != nil {
+			if err := validateType(param.Pos, param.Type); err != nil {
+				return err
+			}
+			if err := validateMutableParam(fn, param); err != nil {
 				return err
 			}
 		}
@@ -279,7 +282,7 @@ func (c *checker) checkFunc(fn *ast.FuncDecl) error {
 		c.info.Locals[fn][param.Name] = param.Type
 		locals.locals[param.Name] = localInfo{
 			typ:    param.Type,
-			origin: originForParam(param.Type),
+			origin: originForParam(param),
 		}
 	}
 
@@ -923,6 +926,11 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		if !ast.TypeEqual(argType, want) {
 			return nil, typeError(expr.Args[i].Pos(), "argument %d to %s has type %s, want %s", i+1, displayName, argType, want)
 		}
+		if sig.Params[i].Mutable {
+			if err := c.checkMutableArgument(sig.Params[i], expr.Args[i]); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	c.info.ResolvedCalls[expr] = sig
@@ -1150,8 +1158,24 @@ func dynamicType(typ ast.Type) bool {
 	return ast.TypeEqual(typ, ast.StringType) || isMutableCollection(typ)
 }
 
-func originForParam(typ ast.Type) Origin {
-	if dynamicType(typ) {
+func validateMutableParam(fn *ast.FuncDecl, param ast.Param) error {
+	if !param.Mutable {
+		return nil
+	}
+	if fn.Kernel {
+		return typeError(param.Pos, "kernel parameter %q cannot be mut", param.Name)
+	}
+	if !isMutableCollection(param.Type) {
+		return typeError(param.Pos, "mut parameter %q must be array, slice, or list, got %s", param.Name, param.Type)
+	}
+	return nil
+}
+
+func originForParam(param ast.Param) Origin {
+	if param.Mutable {
+		return OriginOwned
+	}
+	if dynamicType(param.Type) {
 		return OriginBorrowed
 	}
 	return OriginOwned
@@ -1201,6 +1225,17 @@ func (c *checker) checkCanMutate(expr ast.Expression) error {
 		return typeError(expr.Pos(), "cannot mutate parameter-owned collection")
 	case OriginUnknown:
 		return typeError(expr.Pos(), "cannot mutate collection with unknown ownership")
+	default:
+		return nil
+	}
+}
+
+func (c *checker) checkMutableArgument(param ast.Param, arg ast.Expression) error {
+	switch c.exprOrigin(arg) {
+	case OriginBorrowed:
+		return typeError(arg.Pos(), "cannot pass borrowed collection to mut parameter %q", param.Name)
+	case OriginUnknown:
+		return typeError(arg.Pos(), "cannot pass collection with unknown ownership to mut parameter %q", param.Name)
 	default:
 		return nil
 	}

@@ -1877,13 +1877,21 @@ func functionSignature(fn *ast.FuncDecl) string {
 
 	params := make([]string, 0, len(fn.Params))
 	for _, param := range fn.Params {
-		params = append(params, param.Name+" "+param.Type.String())
+		params = append(params, functionParamSignature(param))
 	}
 	signature := prefix + " " + fn.Name + "(" + strings.Join(params, ", ") + ")"
 	if fn.Kernel {
 		return signature
 	}
 	return signature + " " + fn.ReturnType.String()
+}
+
+func functionParamSignature(param ast.Param) string {
+	prefix := ""
+	if param.Mutable {
+		prefix = "mut "
+	}
+	return prefix + param.Name + " " + param.Type.String()
 }
 
 func collectFunctionReferences(graph *sourceGraph, def symbolDefinition, includeDeclaration bool) []Location {

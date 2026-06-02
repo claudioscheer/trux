@@ -79,6 +79,30 @@ func main() int {
 	}
 }
 
+func TestFormatNormalizesMutableParameters(t *testing.T) {
+	src := `package main
+func push(mut   xs list[int],value int)int{
+append(xs,value)
+return len(xs)
+}`
+
+	got, err := Format("main.tx", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := `package main
+
+func push(mut xs list[int], value int) int {
+  append(xs, value)
+  return len(xs)
+}
+`
+	if got != want {
+		t.Fatalf("formatted source:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestFormatKeepsQualifiedCallsTight(t *testing.T) {
 	src := `package main
 import "math.tx"

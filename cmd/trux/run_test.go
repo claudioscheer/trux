@@ -177,6 +177,10 @@ func TestRunFileCompilesAndExecutesCollectionExamples(t *testing.T) {
 			want: "99 2\n20 30\n1 42\n7 9\nab cd 2\n",
 		},
 		{
+			path: "../../examples/mut_parameters.tx",
+			want: "2 2 2\n9 9\n1 hello trux\n",
+		},
+		{
 			path: "../../examples/matrix_multiply_2x2.tx",
 			want: "19 22\n43 50\n19 22\n43 50\n",
 		},
@@ -226,6 +230,10 @@ func TestRunFileCompilesAndExecutesModuleExamples(t *testing.T) {
 		{
 			path: "../../examples/modules/same_package_math/main.tx",
 			want: "7 25 12\n",
+		},
+		{
+			path: "../../examples/modules/mut_parameters/main.tx",
+			want: "2 20\n7 7\n",
 		},
 	}
 

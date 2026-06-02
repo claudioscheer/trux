@@ -132,6 +132,39 @@ func main() int {
 	}
 }
 
+func TestBuildPreservesMutableParameters(t *testing.T) {
+	program := mustParse(t, `package main
+func push(mut xs list[int], value int) int {
+    append(xs, value)
+    return len(xs)
+}
+
+func main() int {
+    let xs list[int] = list[int]{}
+    return push(xs, 1)
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	push := irProgram.Functions[0]
+	if len(push.Params) != 2 {
+		t.Fatalf("param count = %d, want 2", len(push.Params))
+	}
+	if !push.Params[0].Mutable {
+		t.Fatalf("first param = %#v, want mutable", push.Params[0])
+	}
+	if push.Params[1].Mutable {
+		t.Fatalf("second param = %#v, want non-mutable", push.Params[1])
+	}
+}
+
 func TestBuildCreatesTypedIRForControlFlowProgram(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

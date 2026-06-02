@@ -917,3 +917,58 @@ func main() int {
 		}
 	}
 }
+
+func TestGenerateUsesExistingHandlesForMutableParameters(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func push(mut xs list[int], value int) int {
+    append(xs, value)
+    return len(xs)
+}
+
+func setFirst(mut xs []int) int {
+    xs[0] = 42
+    return xs[0]
+}
+
+func main() int {
+    let xs list[int] = list[int]{}
+    let fixed [2]int = [2]int{0, 0}
+    print(push(xs, 1), " ", setFirst(fixed[:]))
+    return 0
+}`)
+
+	wantParts := []string{
+		"int64_t trux_push(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_list_int* trux_v_2_xs, int64_t trux_v_5_value);",
+		"int64_t trux_setFirst(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_slice_int trux_v_2_xs);",
+		"rt_list_int_append(trux_v_2_xs, trux_v_5_value);",
+		"trux_return_value = rt_checked_len_i64(trux_v_2_xs->len);",
+		"rt_slice_int_set(trux_v_2_xs, 0, 42);",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
+func TestGenerateAppendsMutableParameterStringValuesToDurableArena(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func addGreeting(mut words list[string], name string) int {
+    append(words, "hello " + name)
+    return len(words)
+}
+
+func main() int {
+    let words list[string] = list[string]{}
+    return addGreeting(words, "trux")
+}`)
+
+	addGreeting := generatedFunctionBody(t, cSource, "addGreeting")
+	want := `rt_list_string_append(trux_v_5_words, rt_string_concat(trux_ctx->arena, (rt_string){(const uint8_t*)"hello ", 6}, trux_v_4_name));`
+	if !strings.Contains(addGreeting, want) {
+		t.Fatalf("generated C missing durable append %q:\n%s", want, addGreeting)
+	}
+	if strings.Contains(addGreeting, "rt_string_concat(&trux_frame") {
+		t.Fatalf("addGreeting should not append frame-owned string data:\n%s", addGreeting)
+	}
+}

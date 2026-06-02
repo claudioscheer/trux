@@ -79,7 +79,7 @@ func formatTypeInfo(program *ast.Program, info *semtypes.Info) string {
 			if i > 0 {
 				fmt.Fprint(&out, ", ")
 			}
-			fmt.Fprintf(&out, "%s %s", param.Name, param.Type)
+			fmt.Fprint(&out, formatParam(param))
 		}
 		fmt.Fprintf(&out, ") %s\n", sig.ReturnType)
 	}
@@ -105,6 +105,14 @@ func formatTypeInfo(program *ast.Program, info *semtypes.Info) string {
 	}
 
 	return out.String()
+}
+
+func formatParam(param ast.Param) string {
+	prefix := ""
+	if param.Mutable {
+		prefix = "mut "
+	}
+	return fmt.Sprintf("%s%s %s", prefix, param.Name, param.Type)
 }
 
 func formatResolvedCalls(out *bytes.Buffer, statements []ast.Statement, info *semtypes.Info) {

@@ -771,6 +771,7 @@ pub func add(a int, b int) int {
 	want := map[string]int{
 		"return":   completionKindKeyword,
 		"for":      completionKindKeyword,
+		"mut":      completionKindKeyword,
 		"print":    completionKindFunction,
 		"total":    completionKindVariable,
 		"helper":   completionKindFunction,
@@ -1769,6 +1770,49 @@ pub func add(a int, b int) int {
 		t.Fatalf("hover = %#v, want imported function signature", hover)
 	}
 	assertRange(t, hover.Range, positionOfAfter(t, mainSrc, "math.", "add"), "add")
+}
+
+func TestHoverReturnsMutableParameterFunctionSignature(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	libPath := filepath.Join(dir, "stack.tx")
+	mainSrc := `package main
+import "stack.tx"
+
+func main() int {
+    let xs list[int] = list[int]{}
+    return stack.push(xs, 1)
+}
+`
+	libSrc := `package stack
+pub func push(mut xs list[int], value int) int {
+    append(xs, value)
+    return len(xs)
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(libPath, []byte(libSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = mainSrc
+
+	result, err := server.handleHover(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, mainSrc, "stack.", "push"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hover := result.(Hover)
+	if hover.Contents.Value != "`pub func push(mut xs list[int], value int) int`" {
+		t.Fatalf("hover = %#v, want mutable parameter function signature", hover)
+	}
+	assertRange(t, hover.Range, positionOfAfter(t, mainSrc, "stack.", "push"), "push")
 }
 
 func TestHoverReturnsSamePackagePrivateFunctionSignature(t *testing.T) {

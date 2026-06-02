@@ -80,6 +80,32 @@ func main() int {
 	}
 }
 
+func TestParsesMutableParameters(t *testing.T) {
+	program := mustParse(t, `package main
+func push(mut xs list[int], value int) int {
+    append(xs, value)
+    return len(xs)
+}
+
+func main() int {
+    return 0
+}`)
+
+	push := program.Functions[0]
+	if len(push.Params) != 2 {
+		t.Fatalf("param count = %d, want 2", len(push.Params))
+	}
+	if !push.Params[0].Mutable {
+		t.Fatalf("first param = %#v, want mutable", push.Params[0])
+	}
+	if push.Params[0].Name != "xs" || !ast.TypeEqual(push.Params[0].Type, &ast.ListType{Elem: ast.IntType}) {
+		t.Fatalf("first param = %#v, want mut xs list[int]", push.Params[0])
+	}
+	if push.Params[1].Mutable {
+		t.Fatalf("second param = %#v, want non-mutable", push.Params[1])
+	}
+}
+
 func TestRejectsImportAfterFunctionDeclaration(t *testing.T) {
 	_, err := Parse(`package main
 func main() int {

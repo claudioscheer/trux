@@ -325,6 +325,158 @@ func main() int {
 	}
 }
 
+func TestCheckAllowsMutableParameterMutation(t *testing.T) {
+	program := mustParse(t, `package main
+func push(mut xs list[int], value int) int {
+    append(xs, value)
+    let alias list[int] = xs
+    append(alias, value + 1)
+    return len(xs)
+}
+
+func write(mut xs []int) int {
+    xs[0] = 1
+    let view []int = xs[:]
+    view[1] = 2
+    return view[1]
+}
+
+func pushNested(mut rows list[list[int]], value int) int {
+    append(rows[0], value)
+    return len(rows[0])
+}
+
+func main() int {
+    let items list[int] = list[int]{}
+    let rows list[list[int]] = list[list[int]]{list[int]{}}
+    let xs [2]int = [2]int{0, 0}
+    print(push(items, 1), " ", write(xs[:]), " ", pushNested(rows, 3))
+    return 0
+}`)
+
+	if _, err := Check(program); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckRejectsInvalidMutableParameters(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "scalar",
+			src: `package main
+func write(mut value int) int {
+    return value
+}
+func main() int {
+    return 0
+}`,
+			want: `mut parameter "value" must be array, slice, or list, got int`,
+		},
+		{
+			name: "string",
+			src: `package main
+func write(mut value string) string {
+    return value
+}
+func main() int {
+    return 0
+}`,
+			want: `mut parameter "value" must be array, slice, or list, got string`,
+		},
+		{
+			name: "kernel",
+			src: `package main
+import "gpu"
+
+kernel func fill(mut out gpu.Buffer[int], n int) {
+    let i int = gpu.globalX()
+    if i < n {
+        out[i] = 1
+    }
+}
+
+func main() int {
+    return 0
+}`,
+			want: `kernel parameter "out" cannot be mut`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			program := mustParse(t, tt.src)
+			_, err := Check(program)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckRejectsNonMutableArgumentsForMutableParameters(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "borrowed parameter",
+			src: `package main
+func push(mut xs list[int], value int) int {
+    append(xs, value)
+    return len(xs)
+}
+
+func outer(xs list[int]) int {
+    return push(xs, 1)
+}
+
+func main() int {
+    return 0
+}`,
+			want: `cannot pass borrowed collection to mut parameter "xs"`,
+		},
+		{
+			name: "unknown call result",
+			src: `package main
+func push(mut xs list[int], value int) int {
+    append(xs, value)
+    return len(xs)
+}
+
+func build() list[int] {
+    let xs list[int] = list[int]{}
+    return xs
+}
+
+func main() int {
+    return push(build(), 1)
+}`,
+			want: `cannot pass collection with unknown ownership to mut parameter "xs"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			program := mustParse(t, tt.src)
+			_, err := Check(program)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
 func TestCheckAllowsLocalCollectionMutationInFunction(t *testing.T) {
 	program := mustParse(t, `package main
 func build(value int) int {

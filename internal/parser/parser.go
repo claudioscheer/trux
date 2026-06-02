@@ -169,6 +169,7 @@ func (p *Parser) parseParams() ([]ast.Param, error) {
 
 	params := []ast.Param{}
 	for {
+		mutable := p.match(token.Mut)
 		name, err := p.expect(token.Ident)
 		if err != nil {
 			return nil, err
@@ -179,7 +180,7 @@ func (p *Parser) parseParams() ([]ast.Param, error) {
 			return nil, err
 		}
 
-		params = append(params, ast.Param{Pos: name.Pos, Name: name.Lexeme, Type: typ})
+		params = append(params, ast.Param{Pos: name.Pos, Name: name.Lexeme, Type: typ, Mutable: mutable})
 
 		if !p.match(token.Comma) {
 			return params, nil

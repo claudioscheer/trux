@@ -104,6 +104,17 @@ func add(a int, b int) int {
 }
 ```
 
+Collection parameters are read-only unless the parameter is marked `mut`:
+
+```trux
+func push(mut xs list[int], value int) int {
+  append(xs, value)
+  return len(xs)
+}
+```
+
+`mut` is valid only on array, slice, and list parameters in ordinary functions. Calls do not repeat `mut`; the type checker enforces that the argument has mutable ownership.
+
 Variables use `let` and require explicit types:
 
 ```trux
@@ -463,7 +474,7 @@ func frameOwnedLocal() []int {
 
 For collections containing strings, `clone` deep-copies each string element.
 
-Inside a function, collection parameters are borrowed. The function may read them and return values derived from them, but it may not mutate the parameter-owned collection or an alias/view of it:
+Inside a function, ordinary collection parameters are borrowed. The function may read them and return values derived from them, but it may not mutate the parameter-owned collection or an alias/view of it:
 
 ```trux
 func bad(xs list[int]) int {
@@ -472,7 +483,18 @@ func bad(xs list[int]) int {
 }
 ```
 
-See [ARENAS.md](ARENAS.md) for the full memory model rationale. See [../examples/ownership_clone.tx](../examples/ownership_clone.tx) for an executable walkthrough.
+Use `mut` when a function is allowed to mutate the caller-owned collection:
+
+```trux
+func good(mut xs list[int]) int {
+  append(xs, 1)
+  return len(xs)
+}
+```
+
+Values appended through a `mut` list parameter allocate dynamic element data in the durable arena when needed, so caller-visible list elements remain valid after the callee returns.
+
+See [ARENAS.md](ARENAS.md) for the full memory model rationale. See [../examples/ownership_clone.tx](../examples/ownership_clone.tx) and [../examples/mut_parameters.tx](../examples/mut_parameters.tx) for executable walkthroughs.
 
 ## Compiler Checks
 
@@ -508,7 +530,9 @@ string index assignment
 append outside statement position
 append with a non-list first argument
 append values with the wrong element type
-mutation of parameter-owned collections or aliases/views of them
+mutation of non-`mut` parameter-owned collections or aliases/views of them
+`mut` parameters with non-collection types
+borrowed or unknown-owned arguments passed to `mut` parameters
 make with a non-slice type or non-int length
 clone with the wrong arity or unsupported type
 qualified calls to private package functions

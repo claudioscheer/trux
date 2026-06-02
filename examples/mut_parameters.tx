@@ -1,0 +1,30 @@
+package main
+
+func push(mut xs list[int], value int) int {
+  append(xs, value)
+  return len(xs)
+}
+
+func setFirst(mut xs []int, value int) int {
+  xs[0] = value
+  return xs[0]
+}
+
+func addGreeting(mut words list[string], name string) int {
+  append(words, "hello " + name)
+  return len(words)
+}
+
+func main() int {
+  let items list[int] = list[int]{1}
+  print(push(items, 2), " ", len(items), " ", items[1])
+
+  let xs [3]int = [3]int{3, 4, 5}
+  let view []int = xs[:]
+  print(setFirst(view, 9), " ", xs[0])
+
+  let words list[string] = list[string]{}
+  print(addGreeting(words, "trux"), " ", words[0])
+
+  return 0
+}

@@ -29,9 +29,10 @@ type FuncDecl struct {
 }
 
 type Param struct {
-	Pos  token.Position
-	Name string
-	Type Type
+	Pos     token.Position
+	Name    string
+	Type    Type
+	Mutable bool
 }
 
 type Type interface {

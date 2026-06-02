@@ -1,0 +1,11 @@
+package stack
+
+pub func push(mut xs list[int], value int) int {
+  append(xs, value)
+  return len(xs)
+}
+
+pub func setFirst(mut xs []int, value int) int {
+  xs[0] = value
+  return xs[0]
+}

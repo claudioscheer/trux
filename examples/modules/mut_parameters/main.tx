@@ -1,0 +1,13 @@
+package main
+
+import "stack.tx"
+
+func main() int {
+  let items list[int] = list[int]{10}
+  print(stack.push(items, 20), " ", items[1])
+
+  let xs [2]int = [2]int{0, 0}
+  print(stack.setFirst(xs[:], 7), " ", xs[0])
+
+  return 0
+}

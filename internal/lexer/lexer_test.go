@@ -96,6 +96,18 @@ func TestPrintIsIdentifier(t *testing.T) {
 	})
 }
 
+func TestMutIsKeyword(t *testing.T) {
+	assertTokens(t, Lex("mut xs list[int]"), []expectedToken{
+		{token.Mut, "mut"},
+		{token.Ident, "xs"},
+		{token.List, "list"},
+		{token.LBracket, "["},
+		{token.IntType, "int"},
+		{token.RBracket, "]"},
+		{token.EOF, ""},
+	})
+}
+
 func TestElifIsIdentifier(t *testing.T) {
 	assertTokens(t, Lex("elif"), []expectedToken{
 		{token.Ident, "elif"},

@@ -168,7 +168,7 @@
         },
         {
           "name": "keyword.declaration.trux",
-          "match": "\\b(package|import|pub|kernel|let)\\b"
+          "match": "\\b(package|import|pub|kernel|let|mut)\\b"
         },
         {
           "name": "keyword.operator.word.trux",

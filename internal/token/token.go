@@ -18,6 +18,7 @@ const (
 	Func       Type = "FUNC"
 	Return     Type = "RETURN"
 	Let        Type = "LET"
+	Mut        Type = "MUT"
 	If         Type = "IF"
 	Else       Type = "ELSE"
 	For        Type = "FOR"
@@ -76,6 +77,7 @@ var keywords = map[string]Type{
 	"func":    Func,
 	"return":  Return,
 	"let":     Let,
+	"mut":     Mut,
 	"if":      If,
 	"else":    Else,
 	"for":     For,

@@ -22,8 +22,9 @@ type Func struct {
 }
 
 type Param struct {
-	Name string
-	Type ast.Type
+	Name    string
+	Type    ast.Type
+	Mutable bool
 }
 
 type Stmt interface {
@@ -496,7 +497,7 @@ func (b builder) buildFunc(fn *ast.FuncDecl) (*Func, error) {
 		ReturnType: fn.ReturnType,
 	}
 	for _, param := range fn.Params {
-		out.Params = append(out.Params, Param{Name: param.Name, Type: param.Type})
+		out.Params = append(out.Params, Param{Name: param.Name, Type: param.Type, Mutable: param.Mutable})
 	}
 	for _, stmt := range fn.Body.Statements {
 		irStmt, err := b.buildStmt(stmt)

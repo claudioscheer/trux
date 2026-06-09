@@ -176,6 +176,8 @@ make build-bin FILE=examples/hello.tx OUT=bin/hello
 make lsp
 ```
 
+`trux emit-c main.tx` writes generated source plus `trux_runtime.h` to `out/main/` by default. Use `trux emit-c --out-dir DIR main.tx` to choose a different directory.
+
 ## Documentation
 
 See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including naming, arenas, IO, image, time, modules, and GPU support.

@@ -13,6 +13,7 @@ import (
 	"github.com/claudioscheer/trux/internal/ir"
 	"github.com/claudioscheer/trux/internal/lexer"
 	"github.com/claudioscheer/trux/internal/modules"
+	runtimec "github.com/claudioscheer/trux/internal/runtime/c"
 	semtypes "github.com/claudioscheer/trux/internal/types"
 )
 
@@ -22,8 +23,10 @@ type compileOptions struct {
 }
 
 type compileResult struct {
-	CSource  string
-	UsesCUDA bool
+	CSource           string
+	RuntimeHeaderName string
+	RuntimeHeader     string
+	UsesCUDA          bool
 }
 
 func compileFile(path string, opts compileOptions) (*compileResult, error) {
@@ -86,7 +89,9 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 		}
 	}
 
-	cSource, err := codegenc.Generate(typedIR)
+	cSource, err := codegenc.GenerateWithOptions(typedIR, codegenc.Options{
+		SourceRoot: filepath.Dir(loaded.EntryPath),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +101,12 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 		}
 	}
 
-	return &compileResult{CSource: cSource, UsesCUDA: len(typedIR.Kernels) > 0}, nil
+	return &compileResult{
+		CSource:           cSource,
+		RuntimeHeaderName: runtimec.HeaderName,
+		RuntimeHeader:     runtimec.Source,
+		UsesCUDA:          len(typedIR.Kernels) > 0,
+	}, nil
 }
 
 func buildFile(sourcePath string, outputPath string) error {
@@ -111,12 +121,9 @@ func buildFile(sourcePath string, outputPath string) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	cPath := filepath.Join(tmpDir, "main.c")
-	if result.UsesCUDA {
-		cPath = filepath.Join(tmpDir, "main.cu")
-	}
-	if err := os.WriteFile(cPath, []byte(result.CSource), 0o644); err != nil {
-		return fmt.Errorf("write generated source: %w", err)
+	cPath, err := writeGeneratedFiles(tmpDir, "main", result)
+	if err != nil {
+		return err
 	}
 
 	return compileGenerated(cPath, outputPath, result.UsesCUDA)
@@ -124,6 +131,28 @@ func buildFile(sourcePath string, outputPath string) error {
 
 func compileC(sourcePath string, outputPath string) error {
 	return compileGenerated(sourcePath, outputPath, false)
+}
+
+func writeGeneratedFiles(dir string, stem string, result *compileResult) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create output dir: %w", err)
+	}
+	if result.RuntimeHeaderName != "" {
+		headerPath := filepath.Join(dir, result.RuntimeHeaderName)
+		if err := os.WriteFile(headerPath, []byte(result.RuntimeHeader), 0o644); err != nil {
+			return "", fmt.Errorf("write runtime header: %w", err)
+		}
+	}
+
+	ext := ".c"
+	if result.UsesCUDA {
+		ext = ".cu"
+	}
+	sourcePath := filepath.Join(dir, stem+ext)
+	if err := os.WriteFile(sourcePath, []byte(result.CSource), 0o644); err != nil {
+		return "", fmt.Errorf("write generated source: %w", err)
+	}
+	return sourcePath, nil
 }
 
 func compileGenerated(sourcePath string, outputPath string, usesCUDA bool) error {

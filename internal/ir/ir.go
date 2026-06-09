@@ -16,6 +16,7 @@ type Program struct {
 
 type Func struct {
 	Name       string
+	Pos        token.Position
 	Kernel     bool
 	Params     []Param
 	ReturnType ast.Type
@@ -34,6 +35,7 @@ type Stmt interface {
 
 type LetStmt struct {
 	Name  string
+	Pos   token.Position
 	Type  ast.Type
 	Value Expr
 }
@@ -41,6 +43,7 @@ type LetStmt struct {
 func (*LetStmt) stmtNode() {}
 
 type ReturnStmt struct {
+	Pos   token.Position
 	Value Expr
 }
 
@@ -48,6 +51,7 @@ func (*ReturnStmt) stmtNode() {}
 
 type AssignStmt struct {
 	Name  string
+	Pos   token.Position
 	Value Expr
 }
 
@@ -55,12 +59,14 @@ func (*AssignStmt) stmtNode() {}
 
 type IndexAssignStmt struct {
 	Target *IndexExpr
+	Pos    token.Position
 	Value  Expr
 }
 
 func (*IndexAssignStmt) stmtNode() {}
 
 type IfStmt struct {
+	Pos       token.Position
 	Condition Expr
 	Then      []Stmt
 	Else      []Stmt
@@ -69,6 +75,7 @@ type IfStmt struct {
 func (*IfStmt) stmtNode() {}
 
 type ForStmt struct {
+	Pos       token.Position
 	Init      Stmt
 	Condition Expr
 	Post      Stmt
@@ -79,6 +86,7 @@ func (*ForStmt) stmtNode() {}
 
 type PrintStmt struct {
 	Args  []Expr
+	Pos   token.Position
 	Types []ast.Type
 }
 
@@ -94,6 +102,7 @@ func (*AssertStmt) stmtNode() {}
 
 type AppendStmt struct {
 	List     Expr
+	Pos      token.Position
 	Value    Expr
 	ListType ast.Type
 	ElemType ast.Type
@@ -102,6 +111,7 @@ type AppendStmt struct {
 func (*AppendStmt) stmtNode() {}
 
 type WriteFileStmt struct {
+	Pos      token.Position
 	Path     Expr
 	Contents Expr
 }
@@ -109,6 +119,7 @@ type WriteFileStmt struct {
 func (*WriteFileStmt) stmtNode() {}
 
 type WriteCSVStmt struct {
+	Pos     token.Position
 	Path    Expr
 	Cells   Expr
 	Columns Expr
@@ -117,6 +128,7 @@ type WriteCSVStmt struct {
 func (*WriteCSVStmt) stmtNode() {}
 
 type WritePPMStmt struct {
+	Pos    token.Position
 	Path   Expr
 	Pixels Expr
 	Width  Expr
@@ -127,6 +139,7 @@ func (*WritePPMStmt) stmtNode() {}
 
 type GPUCopyStmt struct {
 	Kind   types.GPUCallKind
+	Pos    token.Position
 	First  Expr
 	Second Expr
 }
@@ -134,16 +147,20 @@ type GPUCopyStmt struct {
 func (*GPUCopyStmt) stmtNode() {}
 
 type GPUFreeStmt struct {
+	Pos    token.Position
 	Buffer Expr
 }
 
 func (*GPUFreeStmt) stmtNode() {}
 
-type GPUSyncStmt struct{}
+type GPUSyncStmt struct {
+	Pos token.Position
+}
 
 func (*GPUSyncStmt) stmtNode() {}
 
 type GPULaunchStmt struct {
+	Pos        token.Position
 	KernelName string
 	Dims       []Expr
 	Args       []Expr
@@ -152,12 +169,14 @@ type GPULaunchStmt struct {
 func (*GPULaunchStmt) stmtNode() {}
 
 type TimeSleepStmt struct {
+	Pos    token.Position
 	Millis Expr
 }
 
 func (*TimeSleepStmt) stmtNode() {}
 
 type ExprStmt struct {
+	Pos  token.Position
 	Expr Expr
 }
 
@@ -502,6 +521,7 @@ func (b builder) buildProgram(program *ast.Program) (*Program, error) {
 func (b builder) buildFunc(fn *ast.FuncDecl) (*Func, error) {
 	out := &Func{
 		Name:       fn.Name,
+		Pos:        fn.Pos,
 		Kernel:     fn.Kernel,
 		ReturnType: fn.ReturnType,
 	}
@@ -526,19 +546,19 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &LetStmt{Name: stmt.Name, Type: stmt.Type, Value: value}, nil
+		return &LetStmt{Name: stmt.Name, Pos: stmt.Pos(), Type: stmt.Type, Value: value}, nil
 	case *ast.ReturnStmt:
 		value, err := b.buildExpr(stmt.Value)
 		if err != nil {
 			return nil, err
 		}
-		return &ReturnStmt{Value: value}, nil
+		return &ReturnStmt{Pos: stmt.Pos(), Value: value}, nil
 	case *ast.AssignStmt:
 		value, err := b.buildExpr(stmt.Value)
 		if err != nil {
 			return nil, err
 		}
-		return &AssignStmt{Name: stmt.Name, Value: value}, nil
+		return &AssignStmt{Name: stmt.Name, Pos: stmt.Pos(), Value: value}, nil
 	case *ast.IndexAssignStmt:
 		target, err := b.buildExpr(stmt.Target)
 		if err != nil {
@@ -548,7 +568,7 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &IndexAssignStmt{Target: target.(*IndexExpr), Value: value}, nil
+		return &IndexAssignStmt{Target: target.(*IndexExpr), Pos: stmt.Pos(), Value: value}, nil
 	case *ast.IfStmt:
 		condition, err := b.buildExpr(stmt.Condition)
 		if err != nil {
@@ -565,7 +585,7 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 				return nil, err
 			}
 		}
-		return &IfStmt{Condition: condition, Then: thenStmts, Else: elseStmts}, nil
+		return &IfStmt{Pos: stmt.Pos(), Condition: condition, Then: thenStmts, Else: elseStmts}, nil
 	case *ast.ForStmt:
 		var init Stmt
 		if stmt.Init != nil {
@@ -594,7 +614,7 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 				return nil, err
 			}
 		}
-		return &ForStmt{Init: init, Condition: condition, Post: post, Body: body}, nil
+		return &ForStmt{Pos: stmt.Pos(), Init: init, Condition: condition, Post: post, Body: body}, nil
 	case *ast.ExprStmt:
 		if call, ok := stmt.Expr.(*ast.CallExpr); ok {
 			if _, ok := b.info.AssertCalls[call]; ok {
@@ -609,14 +629,14 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 				if err != nil {
 					return nil, err
 				}
-				return &PrintStmt{Args: args, Types: printTypes}, nil
+				return &PrintStmt{Args: args, Pos: stmt.Pos(), Types: printTypes}, nil
 			}
 			if appendSig, ok := b.info.AppendCalls[call]; ok {
 				args, err := b.buildExprs(call.Args)
 				if err != nil {
 					return nil, err
 				}
-				return &AppendStmt{List: args[0], Value: args[1], ListType: appendSig.ListType, ElemType: appendSig.ElemType}, nil
+				return &AppendStmt{List: args[0], Pos: stmt.Pos(), Value: args[1], ListType: appendSig.ListType, ElemType: appendSig.ElemType}, nil
 			}
 			if ioSig, ok := b.info.IOCalls[call]; ok {
 				switch ioSig.Kind {
@@ -625,25 +645,25 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 					if err != nil {
 						return nil, err
 					}
-					return &WriteFileStmt{Path: args[0], Contents: args[1]}, nil
+					return &WriteFileStmt{Pos: stmt.Pos(), Path: args[0], Contents: args[1]}, nil
 				case types.IOCallWriteCSV:
 					args, err := b.buildExprs(call.Args)
 					if err != nil {
 						return nil, err
 					}
-					return &WriteCSVStmt{Path: args[0], Cells: args[1], Columns: args[2]}, nil
+					return &WriteCSVStmt{Pos: stmt.Pos(), Path: args[0], Cells: args[1], Columns: args[2]}, nil
 				case types.IOCallWritePPM:
 					args, err := b.buildExprs(call.Args)
 					if err != nil {
 						return nil, err
 					}
-					return &WritePPMStmt{Path: args[0], Pixels: args[1], Width: args[2], Height: args[3]}, nil
+					return &WritePPMStmt{Pos: stmt.Pos(), Path: args[0], Pixels: args[1], Width: args[2], Height: args[3]}, nil
 				case types.IOCallTimeSleepMillis:
 					args, err := b.buildExprs(call.Args)
 					if err != nil {
 						return nil, err
 					}
-					return &TimeSleepStmt{Millis: args[0]}, nil
+					return &TimeSleepStmt{Pos: stmt.Pos(), Millis: args[0]}, nil
 				}
 			}
 			if gpuSig, ok := b.info.GPUCalls[call]; ok {
@@ -656,7 +676,7 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 					if err != nil {
 						return nil, err
 					}
-					return &GPULaunchStmt{KernelName: gpuSig.KernelName, Dims: dims, Args: kernelArgs}, nil
+					return &GPULaunchStmt{Pos: stmt.Pos(), KernelName: gpuSig.KernelName, Dims: dims, Args: kernelArgs}, nil
 				}
 				args, err := b.buildExprs(call.Args)
 				if err != nil {
@@ -664,11 +684,11 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 				}
 				switch gpuSig.Kind {
 				case types.GPUCallCopyToDevice, types.GPUCallCopyToHost:
-					return &GPUCopyStmt{Kind: gpuSig.Kind, First: args[0], Second: args[1]}, nil
+					return &GPUCopyStmt{Kind: gpuSig.Kind, Pos: stmt.Pos(), First: args[0], Second: args[1]}, nil
 				case types.GPUCallFree:
-					return &GPUFreeStmt{Buffer: args[0]}, nil
+					return &GPUFreeStmt{Pos: stmt.Pos(), Buffer: args[0]}, nil
 				case types.GPUCallSync:
-					return &GPUSyncStmt{}, nil
+					return &GPUSyncStmt{Pos: stmt.Pos()}, nil
 				}
 			}
 		}
@@ -677,7 +697,7 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ExprStmt{Expr: expr}, nil
+		return &ExprStmt{Pos: stmt.Pos(), Expr: expr}, nil
 	default:
 		return nil, fmt.Errorf("unsupported AST statement %T", stmt)
 	}

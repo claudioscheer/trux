@@ -3,11 +3,13 @@ package c
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/claudioscheer/trux/internal/ast"
 	"github.com/claudioscheer/trux/internal/ir"
 	runtimec "github.com/claudioscheer/trux/internal/runtime/c"
+	"github.com/claudioscheer/trux/internal/token"
 	semtypes "github.com/claudioscheer/trux/internal/types"
 )
 
@@ -28,6 +30,10 @@ type collectionFamily struct {
 	cloneFn string
 }
 
+type Options struct {
+	SourceRoot string
+}
+
 func (u *funcUsage) noteArena(arena string) {
 	switch arena {
 	case durableArena:
@@ -38,17 +44,17 @@ func (u *funcUsage) noteArena(arena string) {
 }
 
 func Generate(program *ir.Program) (string, error) {
+	return GenerateWithOptions(program, Options{})
+}
+
+func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	var out bytes.Buffer
 
 	if len(program.Kernels) > 0 {
-		out.WriteString("#include <cuda_runtime.h>\n")
+		out.WriteString("#define TRUX_RUNTIME_CUDA 1\n")
 	}
-	out.WriteString(runtimec.Source)
+	fmt.Fprintf(&out, "#include %s\n", cStringLiteral(runtimec.HeaderName))
 	fmt.Fprintln(&out)
-	if len(program.Kernels) > 0 {
-		emitGPURuntime(&out)
-		fmt.Fprintln(&out)
-	}
 
 	families, err := nestedCollectionFamilies(program)
 	if err != nil {
@@ -77,14 +83,14 @@ func Generate(program *ir.Program) (string, error) {
 	fmt.Fprintln(&out)
 
 	for _, kernel := range program.Kernels {
-		if err := emitKernelFunc(&out, kernel); err != nil {
+		if err := emitKernelFunc(&out, kernel, opts); err != nil {
 			return "", err
 		}
 		fmt.Fprintln(&out)
 	}
 
 	for _, fn := range program.Functions {
-		if err := emitFunc(&out, fn); err != nil {
+		if err := emitFunc(&out, fn, opts); err != nil {
 			return "", err
 		}
 		fmt.Fprintln(&out)
@@ -102,70 +108,12 @@ func Generate(program *ir.Program) (string, error) {
 	return out.String(), nil
 }
 
-func emitGPURuntime(out *bytes.Buffer) {
-	out.WriteString(`typedef struct { int64_t* data; size_t len; } rt_gpu_buffer_int;
-typedef struct { double* data; size_t len; } rt_gpu_buffer_float;
-
-static RT_UNUSED void rt_cuda_check(cudaError_t err, const char* operation) {
-    if (err != cudaSuccess) {
-        fprintf(stderr, "trux runtime error: CUDA %s failed: %s\n", operation, cudaGetErrorString(err));
-        exit(1);
-    }
-}
-
-static RT_UNUSED rt_gpu_buffer_int rt_gpu_alloc_int(int64_t count) {
-    size_t len = rt_checked_count(count, "gpu buffer length");
-    int64_t* data = NULL;
-    rt_cuda_check(cudaMalloc((void**)&data, rt_checked_bytes(len, sizeof(int64_t))), "alloc");
-    return (rt_gpu_buffer_int){data, len};
-}
-
-static RT_UNUSED rt_gpu_buffer_float rt_gpu_alloc_float(int64_t count) {
-    size_t len = rt_checked_count(count, "gpu buffer length");
-    double* data = NULL;
-    rt_cuda_check(cudaMalloc((void**)&data, rt_checked_bytes(len, sizeof(double))), "alloc");
-    return (rt_gpu_buffer_float){data, len};
-}
-
-static RT_UNUSED void rt_gpu_copy_to_device_int(rt_slice_int host, rt_gpu_buffer_int device) {
-    if (host.len > device.len) rt_runtime_fail("gpu copyToDevice host slice is larger than device buffer");
-    rt_cuda_check(cudaMemcpy(device.data, host.data, host.len * sizeof(int64_t), cudaMemcpyHostToDevice), "copyToDevice");
-}
-
-static RT_UNUSED void rt_gpu_copy_to_device_float(rt_slice_float host, rt_gpu_buffer_float device) {
-    if (host.len > device.len) rt_runtime_fail("gpu copyToDevice host slice is larger than device buffer");
-    rt_cuda_check(cudaMemcpy(device.data, host.data, host.len * sizeof(double), cudaMemcpyHostToDevice), "copyToDevice");
-}
-
-static RT_UNUSED void rt_gpu_copy_to_host_int(rt_gpu_buffer_int device, rt_slice_int host) {
-    if (host.len > device.len) rt_runtime_fail("gpu copyToHost host slice is larger than device buffer");
-    rt_cuda_check(cudaMemcpy(host.data, device.data, host.len * sizeof(int64_t), cudaMemcpyDeviceToHost), "copyToHost");
-}
-
-static RT_UNUSED void rt_gpu_copy_to_host_float(rt_gpu_buffer_float device, rt_slice_float host) {
-    if (host.len > device.len) rt_runtime_fail("gpu copyToHost host slice is larger than device buffer");
-    rt_cuda_check(cudaMemcpy(host.data, device.data, host.len * sizeof(double), cudaMemcpyDeviceToHost), "copyToHost");
-}
-
-static RT_UNUSED void rt_gpu_free_int(rt_gpu_buffer_int buffer) {
-    rt_cuda_check(cudaFree(buffer.data), "free");
-}
-
-static RT_UNUSED void rt_gpu_free_float(rt_gpu_buffer_float buffer) {
-    rt_cuda_check(cudaFree(buffer.data), "free");
-}
-
-static RT_UNUSED void rt_gpu_sync(void) {
-    rt_cuda_check(cudaDeviceSynchronize(), "sync");
-}
-`)
-}
-
 func emitPrototype(out *bytes.Buffer, fn *ir.Func) error {
 	return emitSignature(out, fn, true)
 }
 
-func emitFunc(out *bytes.Buffer, fn *ir.Func) error {
+func emitFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
+	emitLine(out, "", fn.Pos, opts.SourceRoot)
 	if err := emitSignature(out, fn, false); err != nil {
 		return err
 	}
@@ -181,7 +129,7 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func) error {
 	fmt.Fprintln(&body, "    rt_arena_init(&trux_frame);")
 	fmt.Fprintf(&body, "    %s trux_return_value;\n", returnType)
 	for _, stmt := range fn.Body {
-		if err := emitStmt(&body, stmt, 1, usage); err != nil {
+		if err := emitStmt(&body, stmt, 1, usage, opts); err != nil {
 			return err
 		}
 	}
@@ -215,7 +163,8 @@ func emitKernelPrototype(out *bytes.Buffer, fn *ir.Func) error {
 	return nil
 }
 
-func emitKernelFunc(out *bytes.Buffer, fn *ir.Func) error {
+func emitKernelFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
+	emitLine(out, "", fn.Pos, opts.SourceRoot)
 	fmt.Fprintf(out, "__global__ void %s(", mangleKernel(fn.Name))
 	for i, param := range fn.Params {
 		if i > 0 {
@@ -228,7 +177,7 @@ func emitKernelFunc(out *bytes.Buffer, fn *ir.Func) error {
 		fmt.Fprintf(out, "%s %s", paramType, mangleIdent(param.Name))
 	}
 	fmt.Fprintln(out, ") {")
-	if err := emitKernelStmts(out, fn.Body, 1); err != nil {
+	if err := emitKernelStmts(out, fn.Body, 1, opts); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "}")
@@ -259,8 +208,9 @@ func emitSignature(out *bytes.Buffer, fn *ir.Func, prototype bool) error {
 	return nil
 }
 
-func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) error {
+func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage, opts Options) error {
 	indent := strings.Repeat("    ", level)
+	emitLine(out, indent, stmtPos(stmt), opts.SourceRoot)
 	switch stmt := stmt.(type) {
 	case *ir.LetStmt:
 		typ, err := emitType(stmt.Type)
@@ -323,7 +273,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) erro
 			return err
 		}
 		fmt.Fprintf(out, "%sif (%s) {\n", indent, condition)
-		if err := emitStmts(out, stmt.Then, level+1, usage); err != nil {
+		if err := emitStmts(out, stmt.Then, level+1, usage, opts); err != nil {
 			return err
 		}
 		if len(stmt.Else) == 0 {
@@ -331,14 +281,14 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) erro
 			break
 		}
 		fmt.Fprintf(out, "%s} else {\n", indent)
-		if err := emitStmts(out, stmt.Else, level+1, usage); err != nil {
+		if err := emitStmts(out, stmt.Else, level+1, usage, opts); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%s}\n", indent)
 	case *ir.ForStmt:
 		fmt.Fprintf(out, "%s{\n", indent)
 		if stmt.Init != nil {
-			if err := emitStmt(out, stmt.Init, level+1, usage); err != nil {
+			if err := emitStmt(out, stmt.Init, level+1, usage, opts); err != nil {
 				return err
 			}
 		}
@@ -351,11 +301,11 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) erro
 			}
 			fmt.Fprintf(out, "%s    for (; %s;) {\n", indent, condition)
 		}
-		if err := emitStmts(out, stmt.Body, level+2, usage); err != nil {
+		if err := emitStmts(out, stmt.Body, level+2, usage, opts); err != nil {
 			return err
 		}
 		if stmt.Post != nil {
-			if err := emitStmt(out, stmt.Post, level+2, usage); err != nil {
+			if err := emitStmt(out, stmt.Post, level+2, usage, opts); err != nil {
 				return err
 			}
 		}
@@ -397,7 +347,7 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) erro
 		fmt.Fprintf(out, "%s    rt_assert_fail_at(%s, %s, %d, %d);\n",
 			indent,
 			message,
-			cStringLiteral(stmt.Pos.File),
+			cStringLiteral(sourcePath(stmt.Pos.File, opts.SourceRoot)),
 			stmt.Pos.Line,
 			stmt.Pos.Column,
 		)
@@ -533,9 +483,9 @@ func emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, usage *funcUsage) erro
 	return nil
 }
 
-func emitStmts(out *bytes.Buffer, stmts []ir.Stmt, level int, usage *funcUsage) error {
+func emitStmts(out *bytes.Buffer, stmts []ir.Stmt, level int, usage *funcUsage, opts Options) error {
 	for _, stmt := range stmts {
-		if err := emitStmt(out, stmt, level, usage); err != nil {
+		if err := emitStmt(out, stmt, level, usage, opts); err != nil {
 			return err
 		}
 	}
@@ -748,6 +698,11 @@ func emitExpr(expr ir.Expr, targetArena string, usage *funcUsage) (string, error
 			}
 			return equal, nil
 		}
+		if ast.TypeEqual(expr.Type(), ast.IntType) {
+			if helper, ok := checkedArithmeticHelper(expr.Operator); ok {
+				return fmt.Sprintf("%s(%s, %s)", helper, left, right), nil
+			}
+		}
 		return fmt.Sprintf("(%s %s %s)", left, expr.Operator, right), nil
 	case *ir.LenExpr:
 		value, err := emitExpr(expr.Value, frameArena, usage)
@@ -902,17 +857,18 @@ func emitOptionalBound(expr ir.Expr, usage *funcUsage) (string, string, error) {
 	return "true", value, nil
 }
 
-func emitKernelStmts(out *bytes.Buffer, stmts []ir.Stmt, level int) error {
+func emitKernelStmts(out *bytes.Buffer, stmts []ir.Stmt, level int, opts Options) error {
 	for _, stmt := range stmts {
-		if err := emitKernelStmt(out, stmt, level); err != nil {
+		if err := emitKernelStmt(out, stmt, level, opts); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
+func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts Options) error {
 	indent := strings.Repeat("    ", level)
+	emitLine(out, indent, stmtPos(stmt), opts.SourceRoot)
 	switch stmt := stmt.(type) {
 	case *ir.LetStmt:
 		typ, err := emitKernelType(stmt.Type)
@@ -946,7 +902,7 @@ func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 			return err
 		}
 		fmt.Fprintf(out, "%sif (%s) {\n", indent, trimParens(condition))
-		if err := emitKernelStmts(out, stmt.Then, level+1); err != nil {
+		if err := emitKernelStmts(out, stmt.Then, level+1, opts); err != nil {
 			return err
 		}
 		if len(stmt.Else) == 0 {
@@ -954,14 +910,14 @@ func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 			break
 		}
 		fmt.Fprintf(out, "%s} else {\n", indent)
-		if err := emitKernelStmts(out, stmt.Else, level+1); err != nil {
+		if err := emitKernelStmts(out, stmt.Else, level+1, opts); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%s}\n", indent)
 	case *ir.ForStmt:
 		fmt.Fprintf(out, "%s{\n", indent)
 		if stmt.Init != nil {
-			if err := emitKernelStmt(out, stmt.Init, level+1); err != nil {
+			if err := emitKernelStmt(out, stmt.Init, level+1, opts); err != nil {
 				return err
 			}
 		}
@@ -974,11 +930,11 @@ func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int) error {
 			}
 			fmt.Fprintf(out, "%s    for (; %s;) {\n", indent, trimParens(condition))
 		}
-		if err := emitKernelStmts(out, stmt.Body, level+2); err != nil {
+		if err := emitKernelStmts(out, stmt.Body, level+2, opts); err != nil {
 			return err
 		}
 		if stmt.Post != nil {
-			if err := emitKernelStmt(out, stmt.Post, level+2); err != nil {
+			if err := emitKernelStmt(out, stmt.Post, level+2, opts); err != nil {
 				return err
 			}
 		}
@@ -1011,6 +967,11 @@ func emitKernelExpr(expr ir.Expr) (string, error) {
 		right, err := emitKernelExpr(expr.Right)
 		if err != nil {
 			return "", err
+		}
+		if ast.TypeEqual(expr.Type(), ast.IntType) {
+			if helper, ok := checkedArithmeticHelper(expr.Operator); ok {
+				return fmt.Sprintf("%s(%s, %s)", helper, left, right), nil
+			}
 		}
 		return fmt.Sprintf("(%s %s %s)", left, expr.Operator, right), nil
 	case *ir.IndexExpr:
@@ -1446,6 +1407,82 @@ func mangleKernel(name string) string {
 
 func mangleIdent(name string) string {
 	return fmt.Sprintf("trux_v_%d_%s", len(name), name)
+}
+
+func stmtPos(stmt ir.Stmt) token.Position {
+	switch stmt := stmt.(type) {
+	case *ir.LetStmt:
+		return stmt.Pos
+	case *ir.ReturnStmt:
+		return stmt.Pos
+	case *ir.AssignStmt:
+		return stmt.Pos
+	case *ir.IndexAssignStmt:
+		return stmt.Pos
+	case *ir.IfStmt:
+		return stmt.Pos
+	case *ir.ForStmt:
+		return stmt.Pos
+	case *ir.PrintStmt:
+		return stmt.Pos
+	case *ir.AssertStmt:
+		return stmt.Pos
+	case *ir.AppendStmt:
+		return stmt.Pos
+	case *ir.WriteFileStmt:
+		return stmt.Pos
+	case *ir.WriteCSVStmt:
+		return stmt.Pos
+	case *ir.WritePPMStmt:
+		return stmt.Pos
+	case *ir.GPUCopyStmt:
+		return stmt.Pos
+	case *ir.GPUFreeStmt:
+		return stmt.Pos
+	case *ir.GPUSyncStmt:
+		return stmt.Pos
+	case *ir.GPULaunchStmt:
+		return stmt.Pos
+	case *ir.TimeSleepStmt:
+		return stmt.Pos
+	case *ir.ExprStmt:
+		return stmt.Pos
+	default:
+		return token.Position{}
+	}
+}
+
+func emitLine(out *bytes.Buffer, indent string, pos token.Position, sourceRoot string) {
+	if pos.Line <= 0 || pos.File == "" {
+		return
+	}
+	fmt.Fprintf(out, "%s#line %d %s\n", indent, pos.Line, cStringLiteral(sourcePath(pos.File, sourceRoot)))
+}
+
+func sourcePath(path string, sourceRoot string) string {
+	if path == "" || sourceRoot == "" {
+		return path
+	}
+	rel, err := filepath.Rel(sourceRoot, path)
+	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return path
+	}
+	return filepath.ToSlash(rel)
+}
+
+func checkedArithmeticHelper(operator string) (string, bool) {
+	switch operator {
+	case "+":
+		return "rt_add_i64", true
+	case "-":
+		return "rt_sub_i64", true
+	case "*":
+		return "rt_mul_i64", true
+	case "/":
+		return "rt_div_i64", true
+	default:
+		return "", false
+	}
 }
 
 func gpuElemName(typ ast.Type) (string, error) {

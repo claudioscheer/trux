@@ -60,12 +60,9 @@ func runCompiledResult(out io.Writer, in io.Reader, result *compileResult) error
 	}
 	defer os.RemoveAll(tmpDir)
 
-	cPath := filepath.Join(tmpDir, "main.c")
-	if result.UsesCUDA {
-		cPath = filepath.Join(tmpDir, "main.cu")
-	}
-	if err := os.WriteFile(cPath, []byte(result.CSource), 0o644); err != nil {
-		return fmt.Errorf("write generated source: %w", err)
+	cPath, err := writeGeneratedFiles(tmpDir, "main", result)
+	if err != nil {
+		return err
 	}
 	executablePath := filepath.Join(tmpDir, "main")
 	if err := compileGenerated(cPath, executablePath, result.UsesCUDA); err != nil {

@@ -40,23 +40,14 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"#include <stdint.h>",
-		"typedef struct {",
-		"rt_arena_chunk* chunks;",
-		"} rt_arena;",
-		"static RT_UNUSED void rt_arena_init(rt_arena* arena)",
-		"static RT_UNUSED void rt_arena_reset(rt_arena* arena)",
-		"static RT_UNUSED void rt_arena_deinit(rt_arena* arena)",
-		"static RT_UNUSED rt_arena_mark rt_arena_mark_current(rt_arena* arena)",
-		"static RT_UNUSED void rt_arena_rewind(rt_arena* arena, rt_arena_mark mark)",
-		"static RT_UNUSED void rt_print_int(int64_t value)",
+		"#include \"trux_runtime.h\"",
 		"int64_t trux_add(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_1_a, int64_t trux_v_1_b);",
 		"int64_t trux_main(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"int64_t trux_add(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_1_a, int64_t trux_v_1_b) {",
 		"rt_arena trux_frame;",
 		"rt_arena_init(&trux_frame);",
 		"int64_t trux_return_value;",
-		"trux_return_value = (trux_v_1_a + trux_v_1_b);",
+		"trux_return_value = rt_add_i64(trux_v_1_a, trux_v_1_b);",
 		"goto trux_return;",
 		"trux_return:",
 		"rt_arena_deinit(&trux_frame);",
@@ -70,6 +61,29 @@ func main() int {
 		"int64_t trux_exit_code = trux_main(&trux_ctx, &trux_arena);",
 		"rt_arena_deinit(&trux_arena);",
 		"return (int)trux_exit_code;",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
+func TestGenerateUsesCheckedIntegerArithmetic(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func main() int {
+    let a int = 7 + 3
+    let b int = a - 2
+    let c int = b * 4
+    let d int = c / 5
+    return d
+}`)
+
+	wantParts := []string{
+		"int64_t trux_v_1_a = rt_add_i64(7, 3);",
+		"int64_t trux_v_1_b = rt_sub_i64(trux_v_1_a, 2);",
+		"int64_t trux_v_1_c = rt_mul_i64(trux_v_1_b, 4);",
+		"int64_t trux_v_1_d = rt_div_i64(trux_v_1_c, 5);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -114,13 +128,7 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"#include <stdbool.h>",
-		"typedef struct {",
-		"const uint8_t* data;",
-		"size_t len;",
-		"} rt_string;",
-		"static RT_UNUSED void rt_print_string(rt_string value)",
-		"static RT_UNUSED void rt_print_bool(bool value)",
+		"#include \"trux_runtime.h\"",
 		"rt_string trux_label(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"bool trux_ready(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"rt_string trux_return_value;",
@@ -135,6 +143,34 @@ func main() int {
 		"rt_print_newline();",
 		"rt_print_bool(trux_v_2_ok);",
 		"rt_print_string((rt_string){(const uint8_t*)\"quote: \\\"\", 8});",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
+func TestGenerateUsesCheckedIntegerArithmeticInKernels(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "gpu"
+
+kernel func fill(out gpu.Buffer[int], n int) {
+    let i int = gpu.globalX()
+    if i < n {
+        out[i] = (i + 1) * 2
+    }
+}
+
+func main() int {
+    return 0
+}`)
+
+	wantParts := []string{
+		"#define TRUX_RUNTIME_CUDA 1",
+		"#include \"trux_runtime.h\"",
+		"__global__ void trux_kernel_fill(int64_t* trux_v_3_out, int64_t trux_v_1_n)",
+		"trux_v_3_out[trux_v_1_i] = rt_mul_i64(rt_add_i64(trux_v_1_i, 1), 2);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -179,9 +215,7 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"static RT_UNUSED void rt_print_float(double value)",
-		"static RT_UNUSED bool rt_string_contains(rt_string needle, rt_string haystack)",
-		"static RT_UNUSED bool rt_string_equal(rt_string left, rt_string right)",
+		"#include \"trux_runtime.h\"",
 		"double trux_v_1_x = 1.5;",
 		"if (trux_v_1_x > 10.0) {",
 		"trux_v_1_x = 10.0;",
@@ -233,8 +267,8 @@ func main() int {
 		"{",
 		"int64_t trux_v_1_i = 0;",
 		"for (; trux_v_1_i < 3;) {",
-		"trux_v_3_sum = (trux_v_3_sum + trux_v_1_i);",
-		"trux_v_1_i = (trux_v_1_i + 1);",
+		"trux_v_3_sum = rt_add_i64(trux_v_3_sum, trux_v_1_i);",
+		"trux_v_1_i = rt_add_i64(trux_v_1_i, 1);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -272,7 +306,7 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"static RT_UNUSED rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_string right)",
+		"#include \"trux_runtime.h\"",
 		"rt_string trux_greet(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
 		"trux_return_value = rt_string_clone(trux_result_arena, rt_string_concat(&trux_frame, (rt_string){(const uint8_t*)\"hello \", 6}, trux_v_4_name));",
 		"rt_string trux_v_4_name = trux_greet(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"trux\", 4});",
@@ -559,7 +593,7 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"RT_DEFINE_COLLECTIONS(int, int64_t)",
+		"#include \"trux_runtime.h\"",
 		"rt_array_int trux_v_2_xs = rt_array_int_from_values(&trux_frame, (int64_t[]){1, 2, 3}, 3);",
 		"rt_slice_int trux_v_4_view = rt_array_int_slice(trux_v_2_xs, true, 1, false, 0);",
 		"rt_slice_int_set(trux_v_4_view, 0, 9);",
@@ -673,10 +707,10 @@ func main() int {
 }`)
 
 	wantParts := []string{
-		"static RT_UNUSED void rt_assert_fail_at(rt_string message, const char* file, int line, int column)",
+		"#line 2 \"main.tx\"",
+		"#line 4 \"main.tx\"",
 		"if (!(trux_v_1_x > 0)) {",
-		"rt_assert_fail_at((rt_string){(const uint8_t*)\"x must be positive\", 18},",
-		", 4, 5);",
+		"rt_assert_fail_at((rt_string){(const uint8_t*)\"x must be positive\", 18}, \"main.tx\", 4, 5);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -702,7 +736,7 @@ func mustGenerateC(t *testing.T, src string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cSource, err := Generate(typedIR)
+	cSource, err := GenerateWithOptions(typedIR, Options{SourceRoot: filepath.Dir(path)})
 	if err != nil {
 		t.Fatal(err)
 	}

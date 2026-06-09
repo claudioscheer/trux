@@ -2,39 +2,39 @@
 
 ## Current State
 
-Trux now has initial module support. Programs can load multiple `.tx` source files through relative imports, while the backend still compiles the loaded program into a single generated `.c` file.
+Trux now has initial module support. Programs can load multiple `.tx` source files through relative imports, while the backend still compiles the loaded program into one generated program source (`.c` or `.cu`) plus the shared `trux_runtime.h` header.
 
 The implemented stage supports `import "relative/path.tx"`, standard package imports such as `import "io"` and `import "csv"`, `pub func`, package-qualified calls such as `math.add(...)`, package-private functions across same-directory files that declare the same package, private-name hygiene, import de-duplication, different package names per loaded file, multiple direct imports that share one package name, and cycle detection. Recursive directory-based packages, reusable package artifacts, and separate C compilation are still deferred.
 
 ## Generated C Code and Modules
 
-The C backend currently emits everything into a single `.c` file: runtime helpers plus user code. This remains acceptable for the initial module stage because the loader merges modules before type checking, IR building, and C generation.
+The C backend currently emits one program source file for all loaded Trux modules and a companion runtime header. This remains acceptable for the initial module stage because the loader merges modules before type checking, IR building, and C generation.
 
-### Why Single-File Works Today
+### Why One Program Source Works Today
 
 - The project is small.
-- The runtime is compact.
-- Codegen is much simpler with one output buffer.
+- The runtime is shared through a header instead of being copied into the generated program source.
+- Codegen is much simpler with one program output buffer.
 - Compile times are fast for small programs.
 
-### Why Single-File Becomes a Problem With Modules
+### Why One Program Source Becomes a Problem With Modules
 
-The initial module implementation deliberately stays with single-file C output (using a loader + hygiene pass). However, even this limited form of modules makes the long-term limitations of single-file generation clearer:
+The initial module implementation deliberately stays with one generated program source (using a loader + hygiene pass). However, even this limited form of modules makes the long-term limitations of that generation model clearer:
 
-- Every module's code gets combined into one giant file.
+- Every module's code gets combined into one generated program source.
 - No separate compilation: the entire program must be recompiled together.
 - Poor scalability as programs grow.
 - Difficult support for incremental builds or partial recompilation.
 - Harder integration with existing C codebases and build systems.
 - Debug information and compilation speed degrade.
 
-A proper module system will eventually require the C backend to emit multiple `.c` files: one per module, plus runtime separation.
+A proper module system will eventually require the C backend to emit multiple `.c` files: one per module, plus the shared runtime header.
 
 ## Recommended Evolution Path
 
 | Stage | Module Support | Generated C Output | Recommendation |
 |-------|----------------|--------------------|----------------|
-| Current / initial modules | Multiple `.tx` source files through relative imports (`import "foo.tx"`) + package-qualified `pub` visibility. Imported source files load same-directory siblings that declare the same package. Private functions are package-private within that group and may share names only across different package groups. Public names may overlap across packages. Cycle detection. | Single `.c` file (via loader + private name hygiene merge into existing pipeline) | Keep for simplicity. Preserves the existing type checker, IR, and codegen with minimal changes. |
+| Current / initial modules | Multiple `.tx` source files through relative imports (`import "foo.tx"`) + package-qualified `pub` visibility. Imported source files load same-directory siblings that declare the same package. Private functions are package-private within that group and may share names only across different package groups. Public names may overlap across packages. Cycle detection. | One generated program source plus `trux_runtime.h` (via loader + private name hygiene merge into existing pipeline) | Keep for simplicity. Preserves the existing type checker, IR, and codegen with minimal changes. |
 | Real modules | Module-aware compilation, proper boundaries | One `.c` file per module plus runtime files | Switch here |
 | Full package system | Package exports and reusable artifacts | Proper multi-file output with headers | Required |
 
@@ -42,7 +42,7 @@ A proper module system will eventually require the C backend to emit multiple `.
 
 The first cut of module support uses the following concrete design:
 
-- **Source model**: Multiple `.tx` source files are supported, but the backend still emits exactly one `.c` file for the whole loaded program.
+- **Source model**: Multiple `.tx` source files are supported, but the backend still emits exactly one program source file for the whole loaded program.
 - **Import syntax**: `import "relative/path/to/mod.tx"` for source modules, plus bare standard package imports such as `import "io"` and `import "csv"`. Source paths are resolved relative to the directory of the file containing the `import` statement. The `.tx` extension is required and explicit for source modules.
 - **Package loading**: Importing a source file also loads same-directory sibling `.tx` files that declare the same package. Entry files do not auto-load siblings.
 - **Import placement**: Imports are top-level declarations after `package` and before any `func` declarations. Grouped imports and imports inside functions are not part of the initial implementation.
@@ -53,12 +53,12 @@ The first cut of module support uses the following concrete design:
   - A file may directly import multiple files that declare the same package name when their public function names are unique across the shared package qualifier.
   - Private functions may have the same name in different package groups.
 - **Implementation technique**: A loader parses the entry file and all transitive imports, detects cycles, and performs a small hygiene/merge pass. Private functions receive compiler-unique internal names only for the duration of type checking and code generation. The result is a single flat `Program` fed to the existing type checker, IR builder, and code generator. This keeps changes to the existing type checker and codegen small.
-- **Output**: Still one concatenated `.c` file containing the runtime plus all functions from all modules.
+- **Output**: One generated `.c` or `.cu` file containing all functions from all loaded modules, plus `trux_runtime.h`.
 - **Error reporting**: Parse and type errors carry the originating file path so diagnostics from imported modules are clear.
 - **Package clause**: Loaded files may use different package names. An imported file's package name is the qualifier used by direct importers.
 - **Entrypoint**: Exactly one `main` function is allowed, and it must be declared in the entry file. It is the compiler entrypoint, not a module export. Imported files must not define `main`.
 
-This approach deliberately stays inside the "controlled change, not a rewrite" constraint. The existing single-file `Parse` → `Check` → `ir.Build` → `Generate` pipeline continues to work for both single-file programs and the merged multi-file case.
+This approach deliberately stays inside the "controlled change, not a rewrite" constraint. The existing flat `Parse` → `Check` → `ir.Build` → `Generate` pipeline continues to work for both single-source programs and the merged multi-file case.
 
 Directory-based packages and separate C compilation are deferred to later stages.
 
@@ -115,7 +115,7 @@ The private-name rewrite is a temporary compatibility layer for the current flat
 3. Add a loader package that parses the entry file, resolves imports, canonicalizes paths, de-duplicates files, and detects cycles.
 4. Add name and visibility validation before merging files.
 5. Add private-name hygiene and call rewriting.
-6. Wire the loader into `compileFile` while preserving the existing single-file path.
+6. Wire the loader into `compileFile` while preserving the existing single-program-source path.
 7. Add integration tests through `trux run` and `trux emit-c`.
 
 The main tradeoff is doing diagnostics early. It adds plumbing before visible module behavior exists, but it avoids a more expensive rework once imported-file errors and rewritten names start flowing through the compiler.
@@ -166,22 +166,22 @@ Before treating module support as complete, add focused tests for:
 
 ## Key Principle
 
-Design codegen so moving from single-file to multi-file output is a controlled change, not a rewrite.
+Design codegen so moving from one generated program source to multi-file output is a controlled change, not a rewrite.
 
 For the initial modules stage we are additionally using a **private name hygiene** technique (plus a thin loader + merge pass) so that the existing type checker, IR builder, and code generator can continue to operate on a single flat `Program`. This keeps the blast radius small while still delivering real `import` + `pub` semantics.
 
-Even while staying single-file, the code generator should:
+Even while staying with one generated program source, the code generator should:
 
-- Keep runtime code clearly separated from user code, even if concatenated.
+- Keep runtime code clearly separated from user code.
 - Avoid hard assumptions that only one file will ever be emitted.
 - Preserve a path to per-module files and proper `#include` relationships.
 
 ## Design Considerations
 
-- **Runtime separation**: The runtime should eventually live in its own `.c`/`.h` pair rather than being inlined into every generated program.
+- **Runtime separation**: The runtime currently lives in `trux_runtime.h`; a future `.c`/`.h` split may still be useful if the runtime stops being header-only.
 - **Module boundaries (initial cut)**: For the first implementation, each imported `.tx` file anchors a same-directory package group. Private name hygiene lets us support package-private calls without changing the flat checker/codegen. Real per-module C files come later.
 - **Public vs private**: `pub func` controls external visibility through direct package-qualified calls. Private functions are package-private within their same-directory package group. The initial implementation uses compiler-internal renaming to avoid name clashes while preserving one merged compiler pipeline.
-- **Build model**: The `trux` driver will eventually need to coordinate compilation and linking of multiple generated C files. In the initial modules stage the driver grows a relative-import loader and hygiene pass but still emits one `.c`.
+- **Build model**: The `trux` driver will eventually need to coordinate compilation and linking of multiple generated C files. In the initial modules stage the driver grows a relative-import loader and hygiene pass but still emits one program source plus `trux_runtime.h`.
 - **Error provenance**: Parse and type errors must carry originating file paths (not just line/column) so diagnostics from imported modules are actionable.
 
 ## Relationship to Other Decisions
@@ -192,8 +192,8 @@ Even while staying single-file, the code generator should:
 
 ## Summary
 
-Single-file C output (augmented with a loader + private name hygiene) is the right strategy for the initial module implementation. It delivers useful `import "..."`, `pub`, and package-private same-directory functionality with minimal disruption to the existing type checker, IR, and code generator.
+One generated program source (augmented with a loader + private name hygiene) is the right strategy for the initial module implementation. It delivers useful `import "..."`, `pub`, and package-private same-directory functionality with minimal disruption to the existing type checker, IR, and code generator.
 
 It must not become a permanent architectural assumption. The code generator and driver must keep a clear, low-friction migration path toward one-file-per-module output and proper separate compilation.
 
-This decision (and the hygiene technique) should be revisited once real modules are in use and the pain of single-file C becomes concrete.
+This decision (and the hygiene technique) should be revisited once real modules are in use and the pain of one generated program source becomes concrete.

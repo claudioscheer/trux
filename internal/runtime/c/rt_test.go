@@ -36,6 +36,43 @@ int main(void) {
 `)
 }
 
+func TestCheckedIntegerArithmeticSucceedsForValidEdges(t *testing.T) {
+	compileAndRunRuntimeC(t, Source+`
+int main(void) {
+    if (rt_add_i64(INT64_MAX - 1, 1) != INT64_MAX) return 1;
+    if (rt_sub_i64(INT64_MIN + 1, 1) != INT64_MIN) return 1;
+    if (rt_mul_i64(INT64_MIN, 1) != INT64_MIN) return 1;
+    if (rt_mul_i64(INT64_MAX, 1) != INT64_MAX) return 1;
+    if (rt_div_i64(INT64_MIN, 1) != INT64_MIN) return 1;
+    return 0;
+}
+`)
+}
+
+func TestCheckedIntegerArithmeticFailsOnOverflow(t *testing.T) {
+	tests := []struct {
+		name string
+		stmt string
+		want string
+	}{
+		{name: "add", stmt: "(void)rt_add_i64(INT64_MAX, 1);", want: "integer overflow in +"},
+		{name: "sub", stmt: "(void)rt_sub_i64(INT64_MIN, 1);", want: "integer overflow in -"},
+		{name: "mul", stmt: "(void)rt_mul_i64(INT64_MAX, 2);", want: "integer overflow in *"},
+		{name: "div_overflow", stmt: "(void)rt_div_i64(INT64_MIN, -1);", want: "integer overflow in /"},
+		{name: "div_zero", stmt: "(void)rt_div_i64(1, 0);", want: "integer division by zero"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compileAndRunRuntimeCExpectFailure(t, Source+`
+int main(void) {
+    `+tt.stmt+`
+    return 0;
+}
+`, tt.want)
+		})
+	}
+}
+
 func TestArenaResetReusesChunks(t *testing.T) {
 	compileAndRunRuntimeC(t, countingRuntimeSource()+`
 int main(void) {

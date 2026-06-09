@@ -854,6 +854,40 @@ func main() int {
 	}
 }
 
+func TestEmitCCommandWritesSourceAndRuntimeHeader(t *testing.T) {
+	path := writeTempSource(t, `package main
+func main() int {
+    return 0
+}`)
+	outDir := t.TempDir()
+	var out bytes.Buffer
+
+	oldOutDir := emitCOutDir
+	t.Cleanup(func() {
+		emitCOutDir = oldOutDir
+		emitCCmd.SetOut(nil)
+	})
+	emitCOutDir = outDir
+	emitCCmd.SetOut(&out)
+
+	if err := emitCCmd.RunE(emitCCmd, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+
+	sourcePath := filepath.Join(outDir, filepath.Base(strings.TrimSuffix(path, filepath.Ext(path)))+".c")
+	headerPath := filepath.Join(outDir, "trux_runtime.h")
+	if _, err := os.Stat(sourcePath); err != nil {
+		t.Fatalf("expected generated source: %v", err)
+	}
+	if _, err := os.Stat(headerPath); err != nil {
+		t.Fatalf("expected runtime header: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, sourcePath) || !strings.Contains(got, headerPath) {
+		t.Fatalf("output = %q, want written source and header paths", got)
+	}
+}
+
 func TestEmitCFileSupportsModuleProgram(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := writeTempFile(t, dir, "main.tx", `package main
@@ -943,8 +977,8 @@ func TestGeneratedExamplesCompileWithStrictCWarnings(t *testing.T) {
 			}
 
 			dir := t.TempDir()
-			cPath := filepath.Join(dir, "main.c")
-			if err := os.WriteFile(cPath, []byte(result.CSource), 0o644); err != nil {
+			cPath, err := writeGeneratedFiles(dir, "main", result)
+			if err != nil {
 				t.Fatal(err)
 			}
 

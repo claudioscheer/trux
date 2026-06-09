@@ -1,6 +1,11 @@
 package c
 
-const Source = `#define _POSIX_C_SOURCE 200809L
+const HeaderName = "trux_runtime.h"
+
+const Source = `#ifndef TRUX_RUNTIME_H
+#define TRUX_RUNTIME_H
+
+#define _POSIX_C_SOURCE 200809L
 #include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -11,6 +16,10 @@ const Source = `#define _POSIX_C_SOURCE 200809L
 #include <string.h>
 #include <inttypes.h>
 #include <time.h>
+
+#ifdef TRUX_RUNTIME_CUDA
+#include <cuda_runtime.h>
+#endif
 
 #if defined(__GNUC__) || defined(__clang__)
 #define RT_UNUSED __attribute__((unused))
@@ -74,6 +83,109 @@ static RT_UNUSED void rt_runtime_fail(const char* message) {
     fprintf(stderr, "trux runtime error: %s\n", message);
     exit(1);
 }
+
+static RT_UNUSED void rt_arithmetic_fail(const char* operation, const char* file, int line) {
+    fprintf(stderr, "trux runtime error: integer %s\n  at %s:%d\n", operation, file, line);
+    exit(1);
+}
+
+static RT_UNUSED int64_t rt_add_i64_at(int64_t left, int64_t right, const char* file, int line) {
+    if ((right > 0 && left > INT64_MAX - right) || (right < 0 && left < INT64_MIN - right)) {
+        rt_arithmetic_fail("overflow in +", file, line);
+    }
+    return left + right;
+}
+
+static RT_UNUSED int64_t rt_sub_i64_at(int64_t left, int64_t right, const char* file, int line) {
+    if ((right < 0 && left > INT64_MAX + right) || (right > 0 && left < INT64_MIN + right)) {
+        rt_arithmetic_fail("overflow in -", file, line);
+    }
+    return left - right;
+}
+
+static RT_UNUSED int64_t rt_mul_i64_at(int64_t left, int64_t right, const char* file, int line) {
+    if (left != 0 && right != 0) {
+        if (left == INT64_MIN && right == -1) {
+            rt_arithmetic_fail("overflow in *", file, line);
+        }
+        if (right == INT64_MIN && left == -1) {
+            rt_arithmetic_fail("overflow in *", file, line);
+        }
+        if (left > 0) {
+            if ((right > 0 && left > INT64_MAX / right) || (right < 0 && right < INT64_MIN / left)) {
+                rt_arithmetic_fail("overflow in *", file, line);
+            }
+        } else {
+            if ((right > 0 && left < INT64_MIN / right) || (right < 0 && left < INT64_MAX / right)) {
+                rt_arithmetic_fail("overflow in *", file, line);
+            }
+        }
+    }
+    return left * right;
+}
+
+static RT_UNUSED int64_t rt_div_i64_at(int64_t left, int64_t right, const char* file, int line) {
+    if (right == 0) {
+        rt_arithmetic_fail("division by zero", file, line);
+    }
+    if (left == INT64_MIN && right == -1) {
+        rt_arithmetic_fail("overflow in /", file, line);
+    }
+    return left / right;
+}
+
+#ifdef TRUX_RUNTIME_CUDA
+__device__ static int64_t rt_add_i64_device(int64_t left, int64_t right) {
+    if ((right > 0 && left > INT64_MAX - right) || (right < 0 && left < INT64_MIN - right)) {
+        asm("trap;");
+    }
+    return left + right;
+}
+
+__device__ static int64_t rt_sub_i64_device(int64_t left, int64_t right) {
+    if ((right < 0 && left > INT64_MAX + right) || (right > 0 && left < INT64_MIN + right)) {
+        asm("trap;");
+    }
+    return left - right;
+}
+
+__device__ static int64_t rt_mul_i64_device(int64_t left, int64_t right) {
+    if (left != 0 && right != 0) {
+        if ((left == INT64_MIN && right == -1) || (right == INT64_MIN && left == -1)) {
+            asm("trap;");
+        }
+        if (left > 0) {
+            if ((right > 0 && left > INT64_MAX / right) || (right < 0 && right < INT64_MIN / left)) {
+                asm("trap;");
+            }
+        } else {
+            if ((right > 0 && left < INT64_MIN / right) || (right < 0 && left < INT64_MAX / right)) {
+                asm("trap;");
+            }
+        }
+    }
+    return left * right;
+}
+
+__device__ static int64_t rt_div_i64_device(int64_t left, int64_t right) {
+    if (right == 0 || (left == INT64_MIN && right == -1)) {
+        asm("trap;");
+    }
+    return left / right;
+}
+#endif
+
+#if defined(TRUX_RUNTIME_CUDA) && defined(__CUDA_ARCH__)
+#define rt_add_i64(LEFT, RIGHT) rt_add_i64_device((LEFT), (RIGHT))
+#define rt_sub_i64(LEFT, RIGHT) rt_sub_i64_device((LEFT), (RIGHT))
+#define rt_mul_i64(LEFT, RIGHT) rt_mul_i64_device((LEFT), (RIGHT))
+#define rt_div_i64(LEFT, RIGHT) rt_div_i64_device((LEFT), (RIGHT))
+#else
+#define rt_add_i64(LEFT, RIGHT) rt_add_i64_at((LEFT), (RIGHT), __FILE__, __LINE__)
+#define rt_sub_i64(LEFT, RIGHT) rt_sub_i64_at((LEFT), (RIGHT), __FILE__, __LINE__)
+#define rt_mul_i64(LEFT, RIGHT) rt_mul_i64_at((LEFT), (RIGHT), __FILE__, __LINE__)
+#define rt_div_i64(LEFT, RIGHT) rt_div_i64_at((LEFT), (RIGHT), __FILE__, __LINE__)
+#endif
 
 static RT_UNUSED size_t rt_arena_align_up(size_t size) {
     size_t align = RT_ALIGNOF(max_align_t);
@@ -830,6 +942,64 @@ RT_DEFINE_COLLECTIONS(float, double)
 RT_DEFINE_COLLECTIONS(bool, bool)
 RT_DEFINE_COLLECTIONS(string, rt_string)
 
+#ifdef TRUX_RUNTIME_CUDA
+typedef struct { int64_t* data; size_t len; } rt_gpu_buffer_int;
+typedef struct { double* data; size_t len; } rt_gpu_buffer_float;
+
+static RT_UNUSED void rt_cuda_check(cudaError_t err, const char* operation) {
+    if (err != cudaSuccess) {
+        fprintf(stderr, "trux runtime error: CUDA %s failed: %s\n", operation, cudaGetErrorString(err));
+        exit(1);
+    }
+}
+
+static RT_UNUSED rt_gpu_buffer_int rt_gpu_alloc_int(int64_t count) {
+    size_t len = rt_checked_count(count, "gpu buffer length");
+    int64_t* data = NULL;
+    rt_cuda_check(cudaMalloc((void**)&data, rt_checked_bytes(len, sizeof(int64_t))), "alloc");
+    return (rt_gpu_buffer_int){data, len};
+}
+
+static RT_UNUSED rt_gpu_buffer_float rt_gpu_alloc_float(int64_t count) {
+    size_t len = rt_checked_count(count, "gpu buffer length");
+    double* data = NULL;
+    rt_cuda_check(cudaMalloc((void**)&data, rt_checked_bytes(len, sizeof(double))), "alloc");
+    return (rt_gpu_buffer_float){data, len};
+}
+
+static RT_UNUSED void rt_gpu_copy_to_device_int(rt_slice_int host, rt_gpu_buffer_int device) {
+    if (host.len > device.len) rt_runtime_fail("gpu copyToDevice host slice is larger than device buffer");
+    rt_cuda_check(cudaMemcpy(device.data, host.data, host.len * sizeof(int64_t), cudaMemcpyHostToDevice), "copyToDevice");
+}
+
+static RT_UNUSED void rt_gpu_copy_to_device_float(rt_slice_float host, rt_gpu_buffer_float device) {
+    if (host.len > device.len) rt_runtime_fail("gpu copyToDevice host slice is larger than device buffer");
+    rt_cuda_check(cudaMemcpy(device.data, host.data, host.len * sizeof(double), cudaMemcpyHostToDevice), "copyToDevice");
+}
+
+static RT_UNUSED void rt_gpu_copy_to_host_int(rt_gpu_buffer_int device, rt_slice_int host) {
+    if (host.len > device.len) rt_runtime_fail("gpu copyToHost host slice is larger than device buffer");
+    rt_cuda_check(cudaMemcpy(host.data, device.data, host.len * sizeof(int64_t), cudaMemcpyDeviceToHost), "copyToHost");
+}
+
+static RT_UNUSED void rt_gpu_copy_to_host_float(rt_gpu_buffer_float device, rt_slice_float host) {
+    if (host.len > device.len) rt_runtime_fail("gpu copyToHost host slice is larger than device buffer");
+    rt_cuda_check(cudaMemcpy(host.data, device.data, host.len * sizeof(double), cudaMemcpyDeviceToHost), "copyToHost");
+}
+
+static RT_UNUSED void rt_gpu_free_int(rt_gpu_buffer_int buffer) {
+    rt_cuda_check(cudaFree(buffer.data), "free");
+}
+
+static RT_UNUSED void rt_gpu_free_float(rt_gpu_buffer_float buffer) {
+    rt_cuda_check(cudaFree(buffer.data), "free");
+}
+
+static RT_UNUSED void rt_gpu_sync(void) {
+    rt_cuda_check(cudaDeviceSynchronize(), "sync");
+}
+#endif
+
 typedef struct {
     int64_t width;
     int64_t height;
@@ -1142,4 +1312,6 @@ static RT_UNUSED void rt_write_csv(rt_string path, rt_list_string* cells, int64_
     }
     free(c_path);
 }
+
+#endif
 `

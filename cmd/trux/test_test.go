@@ -61,7 +61,7 @@ func testPasses() {
 		"failures:",
 		"trace:",
 		"at testFails (" + path + ")",
-		"at " + path + ":4:5",
+		"at main.test.tx:4:5",
 		"stdout:\nbefore failure\n",
 	} {
 		if !strings.Contains(got, want) {

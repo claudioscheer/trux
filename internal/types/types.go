@@ -296,8 +296,32 @@ func (c *checker) checkFunc(fn *ast.FuncDecl) error {
 			return err
 		}
 	}
+	if !blockTerminates(fn.Body) {
+		return typeError(fn.Pos, "function %q must return on all paths", fn.Name)
+	}
 
 	return nil
+}
+
+func blockTerminates(block ast.Block) bool {
+	for _, stmt := range block.Statements {
+		if stmtTerminates(stmt) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func stmtTerminates(stmt ast.Statement) bool {
+	switch stmt := stmt.(type) {
+	case *ast.ReturnStmt:
+		return true
+	case *ast.IfStmt:
+		return stmt.Else != nil && blockTerminates(stmt.Then) && blockTerminates(*stmt.Else)
+	default:
+		return false
+	}
 }
 
 func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement) error {

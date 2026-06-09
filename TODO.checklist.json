@@ -1,0 +1,231 @@
+{
+  "source": "TODO.md",
+  "statusValues": ["todo", "in_progress", "done", "deferred"],
+  "items": [
+    {
+      "id": "reliability-missing-return-analysis",
+      "category": "reliability",
+      "priority": 1,
+      "status": "done",
+      "title": "Add return-path analysis for non-void functions",
+      "problem": "Non-void functions can fall through without returning, leaving trux_return_value uninitialized and producing undefined behavior.",
+      "evidence": "A function with an if-only return compiled and pick(false) printed stack garbage.",
+      "tasks": [
+        "Implement block termination analysis in types.Check.",
+        "Treat return statements as terminating.",
+        "Treat if statements as terminating only when both branches terminate and an else branch exists.",
+        "Emit a codegen backstop before the function return label that calls rt_runtime_fail(\"missing return\").",
+        "Add tests for missing returns, complete if/else returns, and valid void functions."
+      ]
+    },
+    {
+      "id": "reliability-function-name-mangling",
+      "category": "reliability",
+      "priority": 2,
+      "status": "todo",
+      "title": "Make function and kernel name mangling collision-proof",
+      "problem": "mangleFunc only prepends trux_, so user functions can collide with generated locals or kernel names.",
+      "evidence": "func frame(), func ctx(), and func kernel_scale() alongside kernel func scale can leak C compiler errors.",
+      "tasks": [
+        "Change function mangling to include a stable function namespace such as trux_f_<id>_<name>.",
+        "Change kernel mangling to include a separate kernel namespace such as trux_k_<id>_<name>.",
+        "Update all call sites, prototypes, declarations, and generated kernel references.",
+        "Add regression tests for frame, ctx, and kernel/user-function name collisions.",
+        "Grep all generated-name assumptions before committing the migration."
+      ]
+    },
+    {
+      "id": "reliability-integer-division-guards",
+      "category": "reliability",
+      "priority": 3,
+      "status": "todo",
+      "title": "Guard integer division and overflow",
+      "problem": "Integer division by zero currently raises a raw SIGFPE, and INT64_MIN / -1 is undefined behavior.",
+      "evidence": "10 / 0 died without a Trux runtime error even though indexing and allocation paths are checked.",
+      "tasks": [
+        "Add an rt_div_int helper in the C runtime.",
+        "Fail with rt_runtime_fail(\"integer division by zero\") when the divisor is zero.",
+        "Fail with rt_runtime_fail(\"integer division overflow\") for INT64_MIN / -1.",
+        "Route generated integer division expressions through the helper.",
+        "Add tests for normal division, division by zero, and INT64_MIN / -1."
+      ]
+    },
+    {
+      "id": "reliability-evaluation-order-lowering",
+      "category": "reliability",
+      "priority": 4,
+      "status": "todo",
+      "title": "Lower side-effecting subexpressions into ordered temporaries",
+      "problem": "Generated C inherits unspecified argument and operand evaluation order.",
+      "evidence": "print(sub(io.readInt(), io.readInt())) with input 10 then 3 printed -7 because gcc evaluated arguments right-to-left.",
+      "tasks": [
+        "Add an IR normalization pass, preferably in ir.Build, that hoists side-effecting calls and reads into ordered temporaries.",
+        "Lower f(g(), h()) into let t0 = g(); let t1 = h(); f(t0, t1).",
+        "Apply the same lowering to binary operands where side effects are possible.",
+        "Make kernels use the normalized IR path as well.",
+        "Remove or simplify trimParens and emitCondition string surgery after expression ordering is explicit.",
+        "Add tests that prove call arguments and binary operands evaluate left-to-right."
+      ]
+    },
+    {
+      "id": "performance-enable-o2",
+      "category": "performance",
+      "priority": 5,
+      "status": "todo",
+      "title": "Compile generated C with -O2 outside debug mode",
+      "problem": "compileGenerated currently passes only -std=c11, so generated programs run at -O0.",
+      "evidence": "The TODO benchmark reports an array-sum program improving from 198 ms at -O0 to 11 ms at -O2.",
+      "tasks": [
+        "Add -O2 to generated C compiler flags for normal builds.",
+        "Keep -O0 for the existing DEBUG=1 path if debuggable generated C is needed.",
+        "Run existing compiler/runtime tests after the flag change.",
+        "Add or document a small benchmark so the optimization flag does not regress silently."
+      ]
+    },
+    {
+      "id": "performance-frame-arena-chunk-pool",
+      "category": "performance",
+      "priority": 6,
+      "status": "todo",
+      "title": "Pool frame-arena chunks on rt_context",
+      "problem": "Functions that allocate dynamic memory malloc a 4 KB frame chunk on first allocation and free it on return.",
+      "evidence": "A hot string-returning benchmark dropped from 165 ms to 64 ms when generated C reused frame chunks.",
+      "tasks": [
+        "Add a frame chunk freelist to rt_context.",
+        "Make rt_arena_deinit donate eligible chunks to the freelist.",
+        "Make rt_arena_new_chunk check the freelist before malloc.",
+        "Preserve recursion safety by avoiding a static shared arena.",
+        "Add tests or stress programs covering nested calls and recursion with pooled chunks."
+      ]
+    },
+    {
+      "id": "performance-loop-arena-rewind",
+      "category": "performance",
+      "priority": 7,
+      "status": "todo",
+      "title": "Use arena marks and rewinds for non-escaping loop temporaries",
+      "problem": "Loop body temporaries can accumulate in the caller frame arena until the caller returns.",
+      "evidence": "A 2M-iteration string benchmark peaked at 33 MB RSS for roughly 2 bytes of live data.",
+      "tasks": [
+        "Use rt_arena_mark_current at the top of eligible loop bodies.",
+        "Use rt_arena_rewind at the bottom of eligible loop bodies.",
+        "Consult ownership information to skip rewinding when allocations escape the iteration.",
+        "Account for variables declared outside the loop that receive loop-created allocations.",
+        "Add tests or stress programs for escaping and non-escaping loop allocations."
+      ]
+    },
+    {
+      "id": "performance-smaller-runtime-allocations",
+      "category": "performance",
+      "priority": 8,
+      "status": "todo",
+      "title": "Reduce smaller runtime allocation overheads",
+      "problem": "Several runtime paths allocate more than needed or perform avoidable buffering.",
+      "evidence": "TODO.md notes three mallocs for list creation, double-buffered rt_read_file, and fixed 4 KB chunk growth.",
+      "tasks": [
+        "Evaluate placing list structs in the arena while only registering the data pointer.",
+        "Change rt_read_file to stat the file, allocate once in the arena, and read once.",
+        "Consider geometric arena chunk growth for large frames.",
+        "Benchmark each change separately before keeping it."
+      ]
+    },
+    {
+      "id": "cleanup-delete-funcusage",
+      "category": "cleanup",
+      "priority": 9,
+      "status": "todo",
+      "title": "Delete funcUsage tracking from C codegen",
+      "problem": "funcUsage exists only to decide whether to emit unused-parameter casts, forcing double buffering and extra plumbing.",
+      "evidence": "TODO.md says funcUsage threads usage through eight function signatures just to decide on trux_ctx and trux_result_arena casts.",
+      "tasks": [
+        "Emit (void)trux_ctx and (void)trux_result_arena unconditionally where those parameters exist.",
+        "Remove funcUsage, noteArena calls, and the body double-buffering used only for usage tracking.",
+        "Remove usage parameters from emit helpers.",
+        "Run codegen tests and generated C compiler checks."
+      ]
+    },
+    {
+      "id": "cleanup-replace-nested-collection-walker",
+      "category": "cleanup",
+      "priority": 10,
+      "status": "todo",
+      "title": "Replace collectNestedCollectionFamilies with used type tracking",
+      "problem": "The hand-rolled nested collection traversal must be updated for every new IR node.",
+      "evidence": "TODO.md calls out a 293-line collect*NestedCollectionFamilies walker and recommends recording used types during IR construction.",
+      "tasks": [
+        "Record used types into a set on ir.Program during ir.Build.",
+        "Make codegen read program.UsedTypes instead of traversing the full IR for nested collection families.",
+        "Alternatively, introduce a reusable ir.Walk helper if multiple passes need traversal.",
+        "Delete the obsolete collect*NestedCollectionFamilies walker.",
+        "Add coverage for nested list and slice element type emission."
+      ]
+    },
+    {
+      "id": "cleanup-codegen-impossible-state-errors",
+      "category": "cleanup",
+      "priority": 11,
+      "status": "todo",
+      "title": "Simplify codegen impossible-state error handling",
+      "problem": "C codegen returns errors for many states that should be impossible after type checking.",
+      "evidence": "TODO.md reports 99 if err != nil blocks in internal/codegen/c/c.go, mostly around unsupported post-typecheck states.",
+      "tasks": [
+        "Identify errors that represent compiler bugs rather than user-facing validation failures.",
+        "Replace impossible-state error returns with panics that include clear compiler bug messages.",
+        "Recover once in Generate if graceful CLI output is desired.",
+        "Keep real user-facing or environment errors as ordinary errors.",
+        "Run the full test suite after reducing error plumbing."
+      ]
+    },
+    {
+      "id": "cleanup-kernel-signature-duplication",
+      "category": "cleanup",
+      "priority": 12,
+      "status": "todo",
+      "title": "Deduplicate kernel signature emission",
+      "problem": "emitKernelPrototype and emitKernelFunc duplicate signature logic.",
+      "evidence": "TODO.md recommends giving kernels the same prototype bool treatment as emitSignature.",
+      "tasks": [
+        "Refactor kernel signature emission into one helper with a prototype flag.",
+        "Update prototype and function emission to use the shared helper.",
+        "Run generated C output tests to confirm declarations and definitions still match."
+      ]
+    },
+    {
+      "id": "cleanup-for-continue-label",
+      "category": "cleanup",
+      "priority": 13,
+      "status": "todo",
+      "title": "Prepare for correct for-loop continue semantics",
+      "problem": "For-loop post statements are emitted at the end of the body, which will break if continue is added later.",
+      "evidence": "TODO.md notes that the usual fix is a goto-able continue label before the post statement.",
+      "tasks": [
+        "Add a continue target label before the emitted post statement when the language grows continue support.",
+        "Keep this deferred until continue exists or loop lowering is otherwise being touched.",
+        "Add tests for continue running the post statement exactly once per continued iteration."
+      ]
+    },
+    {
+      "id": "verified-arena-ownership-model",
+      "category": "validated",
+      "priority": null,
+      "status": "done",
+      "title": "Arena ownership analysis survived dangling-pointer probes",
+      "problem": "No action requested by TODO.md for this area.",
+      "evidence": "Returning frame-backed slices, borrowed parameter views, and id(msg + \"!\") in return position copied out correctly.",
+      "tasks": []
+    },
+    {
+      "id": "toolchain-go-version",
+      "category": "maintenance",
+      "priority": null,
+      "status": "deferred",
+      "title": "Review go.mod toolchain version requirement",
+      "problem": "go.mod says go 1.26.3 while the project reportedly builds on Go 1.22.",
+      "evidence": "TODO.md notes the Go directive may demand a newer toolchain than the code uses.",
+      "tasks": [
+        "Decide whether the repository intentionally requires Go 1.26.3.",
+        "If not intentional, lower the go directive to the actual supported version and run the Go test suite."
+      ]
+    }
+  ]
+}

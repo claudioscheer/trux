@@ -140,6 +140,7 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
 		fmt.Fprintln(out, "    (void)trux_result_arena;")
 	}
 	out.Write(body.Bytes())
+	fmt.Fprintln(out, "    rt_runtime_fail(\"missing return\");")
 	fmt.Fprintln(out, "trux_return:")
 	fmt.Fprintln(out, "    rt_arena_deinit(&trux_frame);")
 	fmt.Fprintln(out, "    return trux_return_value;")

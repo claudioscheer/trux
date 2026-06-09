@@ -142,6 +142,10 @@ func TestRunFileCompilesAndExecutesControlAndStringExamples(t *testing.T) {
 			want: "16 10\n16 10\n",
 		},
 		{
+			path: "../../examples/return_paths.tx",
+			want: "42\n7\n4\n0\n",
+		},
+		{
 			path: "../../examples/strings.tx",
 			want: "trux compiler\nhello, trux compiler\ntrux compiler!\nempty\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\n",
 		},

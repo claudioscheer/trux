@@ -213,6 +213,110 @@ func main() int {
 	}
 }
 
+func TestCheckRequiresReturnOnAllFunctionPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "empty function body",
+			src: `package main
+func missing() int {
+}
+
+func main() int {
+    return 0
+}`,
+			want: `function "missing" must return on all paths`,
+		},
+		{
+			name: "main missing return",
+			src: `package main
+func main() int {
+    let x int = 1
+}`,
+			want: `function "main" must return on all paths`,
+		},
+		{
+			name: "if without else",
+			src: `package main
+func pick(flag bool) int {
+    if flag {
+        return 42
+    }
+}
+
+func main() int {
+    return 0
+}`,
+			want: `function "pick" must return on all paths`,
+		},
+		{
+			name: "else branch falls through",
+			src: `package main
+func pick(flag bool) int {
+    if flag {
+        return 42
+    } else {
+        print("no value")
+    }
+}
+
+func main() int {
+    return 0
+}`,
+			want: `function "pick" must return on all paths`,
+		},
+		{
+			name: "for loop body return does not prove termination",
+			src: `package main
+func pick() int {
+    for true {
+        return 42
+    }
+}
+
+func main() int {
+    return 0
+}`,
+			want: `function "pick" must return on all paths`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			program := mustParse(t, tt.src)
+			_, err := Check(program)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want it to contain %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckAllowsIfElseReturnOnAllPaths(t *testing.T) {
+	program := mustParse(t, `package main
+func pick(flag bool) int {
+    if flag {
+        return 42
+    } else {
+        return 7
+    }
+}
+
+func main() int {
+    return pick(true)
+}`)
+
+	if _, err := Check(program); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCheckAllowsCStyleForLoopScopedLocal(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

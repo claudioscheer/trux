@@ -92,6 +92,25 @@ func main() int {
 	}
 }
 
+func TestGenerateEmitsMissingReturnBackstop(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func pick(flag bool) int {
+    if flag {
+        return 42
+    } else {
+        return 7
+    }
+}
+
+func main() int {
+    return pick(true)
+}`)
+
+	if !strings.Contains(cSource, "rt_runtime_fail(\"missing return\");\ntrux_return:") {
+		t.Fatalf("generated C missing return backstop before return label:\n%s", cSource)
+	}
+}
+
 func TestGenerateCreatesCForPrimitiveProgram(t *testing.T) {
 	program, err := parser.Parse(`package main
 func label() string {

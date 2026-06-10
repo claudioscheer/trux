@@ -910,7 +910,7 @@ pub func add(a int, b int) int {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(result.CSource, "int64_t trux___trux_mod_1_add(") {
+	if !strings.Contains(result.CSource, "int64_t trux_f_16___trux_mod_1_add(") {
 		t.Fatalf("generated C = %q, want module function add", result.CSource)
 	}
 	if !strings.Contains(result.CSource, "int main(void)") {

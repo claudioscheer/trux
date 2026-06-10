@@ -22,13 +22,13 @@
       "id": "reliability-function-name-mangling",
       "category": "reliability",
       "priority": 2,
-      "status": "todo",
+      "status": "done",
       "title": "Make function and kernel name mangling collision-proof",
       "problem": "mangleFunc only prepends trux_, so user functions can collide with generated locals or kernel names.",
       "evidence": "func frame(), func ctx(), and func kernel_scale() alongside kernel func scale can leak C compiler errors.",
       "tasks": [
-        "Change function mangling to include a stable function namespace such as trux_f_<id>_<name>.",
-        "Change kernel mangling to include a separate kernel namespace such as trux_k_<id>_<name>.",
+        "Change function mangling to include a stable function namespace such as trux_f_<len>_<name>.",
+        "Change kernel mangling to include a separate kernel namespace such as trux_k_<len>_<name>.",
         "Update all call sites, prototypes, declarations, and generated kernel references.",
         "Add regression tests for frame, ctx, and kernel/user-function name collisions.",
         "Grep all generated-name assumptions before committing the migration."

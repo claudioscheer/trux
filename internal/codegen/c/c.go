@@ -100,7 +100,7 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	fmt.Fprintln(&out, "    rt_arena trux_arena;")
 	fmt.Fprintln(&out, "    rt_arena_init(&trux_arena);")
 	fmt.Fprintln(&out, "    rt_context trux_ctx = {&trux_arena};")
-	fmt.Fprintln(&out, "    int64_t trux_exit_code = trux_main(&trux_ctx, &trux_arena);")
+	fmt.Fprintf(&out, "    int64_t trux_exit_code = %s(&trux_ctx, &trux_arena);\n", mangleFunc("main"))
 	fmt.Fprintln(&out, "    rt_arena_deinit(&trux_arena);")
 	fmt.Fprintln(&out, "    return (int)trux_exit_code;")
 	fmt.Fprintln(&out, "}")
@@ -1399,11 +1399,11 @@ func collectNestedCollectionFamilies(typ ast.Type, seen map[string]bool, familie
 }
 
 func mangleFunc(name string) string {
-	return "trux_" + name
+	return fmt.Sprintf("trux_f_%d_%s", len(name), name)
 }
 
 func mangleKernel(name string) string {
-	return "trux_kernel_" + name
+	return fmt.Sprintf("trux_k_%d_%s", len(name), name)
 }
 
 func mangleIdent(name string) string {

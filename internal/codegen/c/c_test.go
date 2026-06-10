@@ -41,9 +41,9 @@ func main() int {
 
 	wantParts := []string{
 		"#include \"trux_runtime.h\"",
-		"int64_t trux_add(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_1_a, int64_t trux_v_1_b);",
-		"int64_t trux_main(rt_context* trux_ctx, rt_arena* trux_result_arena);",
-		"int64_t trux_add(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_1_a, int64_t trux_v_1_b) {",
+		"int64_t trux_f_3_add(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_1_a, int64_t trux_v_1_b);",
+		"int64_t trux_f_4_main(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"int64_t trux_f_3_add(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_1_a, int64_t trux_v_1_b) {",
 		"rt_arena trux_frame;",
 		"rt_arena_init(&trux_frame);",
 		"int64_t trux_return_value;",
@@ -52,13 +52,13 @@ func main() int {
 		"trux_return:",
 		"rt_arena_deinit(&trux_frame);",
 		"return trux_return_value;",
-		"int64_t trux_v_1_x = trux_add(trux_ctx, &trux_frame, 1, 2);",
+		"int64_t trux_v_1_x = trux_f_3_add(trux_ctx, &trux_frame, 1, 2);",
 		"rt_print_int(trux_v_1_x);",
 		"rt_print_newline();",
 		"int main(void) {",
 		"rt_arena_init(&trux_arena);",
 		"rt_context trux_ctx = {&trux_arena};",
-		"int64_t trux_exit_code = trux_main(&trux_ctx, &trux_arena);",
+		"int64_t trux_exit_code = trux_f_4_main(&trux_ctx, &trux_arena);",
 		"rt_arena_deinit(&trux_arena);",
 		"return (int)trux_exit_code;",
 	}
@@ -148,13 +148,13 @@ func main() int {
 
 	wantParts := []string{
 		"#include \"trux_runtime.h\"",
-		"rt_string trux_label(rt_context* trux_ctx, rt_arena* trux_result_arena);",
-		"bool trux_ready(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"rt_string trux_f_5_label(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"bool trux_f_5_ready(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"rt_string trux_return_value;",
 		"trux_return_value = (rt_string){(const uint8_t*)\"trux\", 4};",
 		"bool trux_return_value;",
 		"trux_return_value = true;",
-		"rt_string trux_v_4_name = trux_label(trux_ctx, &trux_frame);",
+		"rt_string trux_v_4_name = trux_f_5_label(trux_ctx, &trux_frame);",
 		"bool trux_v_2_ok = false;",
 		"rt_print_string(trux_v_4_name);",
 		"rt_print_string((rt_string){(const uint8_t*)\" \", 1});",
@@ -188,13 +188,76 @@ func main() int {
 	wantParts := []string{
 		"#define TRUX_RUNTIME_CUDA 1",
 		"#include \"trux_runtime.h\"",
-		"__global__ void trux_kernel_fill(int64_t* trux_v_3_out, int64_t trux_v_1_n)",
+		"__global__ void trux_k_4_fill(int64_t* trux_v_3_out, int64_t trux_v_1_n)",
 		"trux_v_3_out[trux_v_1_i] = rt_mul_i64(rt_add_i64(trux_v_1_i, 1), 2);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
+	}
+}
+
+func TestGenerateManglesFunctionsAwayFromRuntimeLocals(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func frame() int {
+    return 1
+}
+
+func ctx() int {
+    return 2
+}
+
+func main() int {
+    return frame() + ctx()
+}`)
+
+	wantParts := []string{
+		"int64_t trux_f_5_frame(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"int64_t trux_f_3_ctx(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"trux_return_value = rt_add_i64(trux_f_5_frame(trux_ctx, &trux_frame), trux_f_3_ctx(trux_ctx, &trux_frame));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	if strings.Contains(cSource, "trux_frame(") || strings.Contains(cSource, "trux_ctx(") {
+		t.Fatalf("generated C used collision-prone function names:\n%s", cSource)
+	}
+}
+
+func TestGenerateManglesKernelsAwayFromFunctions(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "gpu"
+
+kernel func scale(out gpu.Buffer[int], n int) {
+    let i int = gpu.globalX()
+    if i < n {
+        out[i] = i
+    }
+}
+
+func kernel_scale() int {
+    return 7
+}
+
+func main() int {
+    return kernel_scale()
+}`)
+
+	wantParts := []string{
+		"int64_t trux_f_12_kernel_scale(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"__global__ void trux_k_5_scale(int64_t* trux_v_3_out, int64_t trux_v_1_n);",
+		"trux_return_value = trux_f_12_kernel_scale(trux_ctx, &trux_frame);",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	if strings.Contains(cSource, "trux_kernel_scale(") {
+		t.Fatalf("generated C used collision-prone kernel/function name:\n%s", cSource)
 	}
 }
 
@@ -326,9 +389,9 @@ func main() int {
 
 	wantParts := []string{
 		"#include \"trux_runtime.h\"",
-		"rt_string trux_greet(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
+		"rt_string trux_f_5_greet(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
 		"trux_return_value = rt_string_clone(trux_result_arena, rt_string_concat(&trux_frame, (rt_string){(const uint8_t*)\"hello \", 6}, trux_v_4_name));",
-		"rt_string trux_v_4_name = trux_greet(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"trux\", 4});",
+		"rt_string trux_v_4_name = trux_f_5_greet(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"trux\", 4});",
 		"rt_print_string(rt_string_concat(&trux_frame, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1}));",
 	}
 	for _, part := range wantParts {
@@ -368,11 +431,11 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"rt_string trux_bang(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
+		"rt_string trux_f_4_bang(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
 		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
 		"trux_return_value = rt_string_clone(trux_result_arena, trux_v_1_s);",
-		"rt_print_string(trux_bang(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"a\", 1}));",
-		"rt_print_string(trux_bang(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"b\", 1}));",
+		"rt_print_string(trux_f_4_bang(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"a\", 1}));",
+		"rt_print_string(trux_f_4_bang(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"b\", 1}));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -410,7 +473,7 @@ func main() int {
 
 	wantParts := []string{
 		"trux_return_value = trux_v_1_s;",
-		"rt_print_string(trux_id(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"x\", 1}));",
+		"rt_print_string(trux_f_2_id(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"x\", 1}));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -453,7 +516,7 @@ func main() int {
 
 	wantParts := []string{
 		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
-		"trux_return_value = rt_string_clone(trux_result_arena, trux_id(trux_ctx, &trux_frame, trux_v_1_s));",
+		"trux_return_value = rt_string_clone(trux_result_arena, trux_f_2_id(trux_ctx, &trux_frame, trux_v_1_s));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -496,7 +559,7 @@ func main() int {
 		"rt_list_string* trux_v_5_items = rt_list_string_from_values(&trux_frame, NULL, 0);",
 		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
 		"rt_list_string_append(trux_v_5_items, trux_v_1_s);",
-		"rt_print_string(trux_stash(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"x\", 1}));",
+		"rt_print_string(trux_f_5_stash(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"x\", 1}));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -572,7 +635,7 @@ func main() int {
 
 	wantParts := []string{
 		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"!\", 1});",
-		"rt_list_string* trux_v_5_items = trux_wrap(trux_ctx, &trux_frame, trux_v_1_s);",
+		"rt_list_string* trux_v_5_items = trux_f_4_wrap(trux_ctx, &trux_frame, trux_v_1_s);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -659,11 +722,11 @@ func main() int {
 		"RT_DEFINE_COLLECTIONS(array_int, rt_array_int)",
 		"#define RT_CLONE_VALUE_slice_float(ARENA, VALUE) rt_slice_float_clone((ARENA), (VALUE))",
 		"RT_DEFINE_COLLECTIONS(slice_float, rt_slice_float)",
-		"rt_list_list_int* trux_build(rt_context* trux_ctx, rt_arena* trux_result_arena);",
+		"rt_list_list_int* trux_f_5_build(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"rt_list_list_int* trux_v_4_rows = rt_list_list_int_from_values(&trux_frame, (rt_list_int*[]){rt_list_int_from_values(&trux_frame, (int64_t[]){1, 2}, 2), rt_list_int_from_values(&trux_frame, (int64_t[]){3}, 1)}, 2);",
 		"rt_list_list_int_append(trux_v_4_rows, rt_list_int_from_values(&trux_frame, (int64_t[]){4, 5, 6}, 3));",
 		"trux_return_value = rt_list_list_int_clone(trux_result_arena, trux_v_4_rows);",
-		"rt_list_list_int* trux_v_4_rows = trux_build(trux_ctx, &trux_frame);",
+		"rt_list_list_int* trux_v_4_rows = trux_f_5_build(trux_ctx, &trux_frame);",
 		"rt_list_list_int* trux_v_6_copied = rt_list_list_int_clone(&trux_frame, trux_v_4_rows);",
 		"rt_list_int_append(rt_list_list_int_get(trux_v_6_copied, 0), 9);",
 		"rt_array_array_int trux_v_5_fixed = rt_array_array_int_from_values(&trux_frame, (rt_array_int[]){rt_array_int_from_values(&trux_frame, (int64_t[]){1, 2}, 2), rt_array_int_from_values(&trux_frame, (int64_t[]){3, 4}, 2)}, 2);",
@@ -765,7 +828,7 @@ func mustGenerateC(t *testing.T, src string) string {
 func generatedFunctionBody(t *testing.T, cSource string, name string) string {
 	t.Helper()
 
-	marker := "trux_" + name + "("
+	marker := mangleFunc(name) + "("
 	searchStart := 0
 	for {
 		idx := strings.Index(cSource[searchStart:], marker)
@@ -1012,8 +1075,8 @@ func main() int {
 }`)
 
 	wantParts := []string{
-		"int64_t trux_push(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_list_int* trux_v_2_xs, int64_t trux_v_5_value);",
-		"int64_t trux_setFirst(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_slice_int trux_v_2_xs);",
+		"int64_t trux_f_4_push(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_list_int* trux_v_2_xs, int64_t trux_v_5_value);",
+		"int64_t trux_f_8_setFirst(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_slice_int trux_v_2_xs);",
 		"rt_list_int_append(trux_v_2_xs, trux_v_5_value);",
 		"trux_return_value = rt_checked_len_i64(trux_v_2_xs->len);",
 		"rt_slice_int_set(trux_v_2_xs, 0, 42);",

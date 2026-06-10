@@ -9,7 +9,7 @@ Generated C currently creates and destroys `trux_frame` for every Trux function.
 Example target shape:
 
 ```c
-rt_slice_int trux_borrowedMiddle(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_slice_int trux_v_2_xs) {
+rt_slice_int trux_f_14_borrowedMiddle(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_slice_int trux_v_2_xs) {
     (void)trux_ctx;
     (void)trux_result_arena;
     return rt_slice_int_slice(trux_v_2_xs, true, 1, true, 3);

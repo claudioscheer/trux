@@ -92,6 +92,80 @@ func main() int {
 	}
 }
 
+func TestGenerateOrdersSideEffectingCallArguments(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "io"
+
+func sub(a int, b int) int {
+    return a - b
+}
+
+func main() int {
+    print(sub(io.readInt(), io.readInt()))
+    return 0
+}`)
+
+	wantParts := []string{
+		"int64_t trux_tmp_0 = rt_read_int(&trux_frame);",
+		"int64_t trux_tmp_1 = rt_read_int(&trux_frame);",
+		"rt_print_int(trux_f_3_sub(trux_ctx, &trux_frame, trux_tmp_0, trux_tmp_1));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	if strings.Contains(cSource, "trux_f_3_sub(trux_ctx, &trux_frame, rt_read_int(&trux_frame), rt_read_int(&trux_frame))") {
+		t.Fatalf("generated C still nests side-effecting call arguments:\n%s", cSource)
+	}
+}
+
+func TestGenerateOrdersSideEffectingBinaryOperands(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "io"
+
+func main() int {
+    print(io.readInt() - io.readInt())
+    return 0
+}`)
+
+	wantParts := []string{
+		"int64_t trux_tmp_0 = rt_read_int(&trux_frame);",
+		"int64_t trux_tmp_1 = rt_read_int(&trux_frame);",
+		"rt_print_int(rt_sub_i64(trux_tmp_0, trux_tmp_1));",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
+func TestGenerateOrdersSideEffectingForCondition(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "io"
+
+func main() int {
+    for io.readInt() < io.readInt() {
+        print("loop")
+    }
+    return 0
+}`)
+
+	wantParts := []string{
+		"for (;;) {",
+		"int64_t trux_tmp_0 = rt_read_int(&trux_frame);",
+		"int64_t trux_tmp_1 = rt_read_int(&trux_frame);",
+		"if (!(trux_tmp_0 < trux_tmp_1)) {",
+		"break;",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
 func TestGenerateEmitsMissingReturnBackstop(t *testing.T) {
 	cSource := mustGenerateC(t, `package main
 func pick(flag bool) int {
@@ -215,7 +289,9 @@ func main() int {
 	wantParts := []string{
 		"int64_t trux_f_5_frame(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"int64_t trux_f_3_ctx(rt_context* trux_ctx, rt_arena* trux_result_arena);",
-		"trux_return_value = rt_add_i64(trux_f_5_frame(trux_ctx, &trux_frame), trux_f_3_ctx(trux_ctx, &trux_frame));",
+		"int64_t trux_tmp_0 = trux_f_5_frame(trux_ctx, &trux_frame);",
+		"int64_t trux_tmp_1 = trux_f_3_ctx(trux_ctx, &trux_frame);",
+		"trux_return_value = rt_add_i64(trux_tmp_0, trux_tmp_1);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {

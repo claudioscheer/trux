@@ -27,6 +27,12 @@ type compileResult struct {
 	RuntimeHeaderName string
 	RuntimeHeader     string
 	UsesCUDA          bool
+	Debug             bool
+}
+
+type generatedCompileOptions struct {
+	UsesCUDA bool
+	Debug    bool
 }
 
 func compileFile(path string, opts compileOptions) (*compileResult, error) {
@@ -106,6 +112,7 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 		RuntimeHeaderName: runtimec.HeaderName,
 		RuntimeHeader:     runtimec.Source,
 		UsesCUDA:          len(typedIR.Kernels) > 0,
+		Debug:             opts.Debug,
 	}, nil
 }
 
@@ -126,11 +133,11 @@ func buildFile(sourcePath string, outputPath string) error {
 		return err
 	}
 
-	return compileGenerated(cPath, outputPath, result.UsesCUDA)
+	return compileGenerated(cPath, outputPath, generatedCompileOptions{UsesCUDA: result.UsesCUDA, Debug: result.Debug})
 }
 
 func compileC(sourcePath string, outputPath string) error {
-	return compileGenerated(sourcePath, outputPath, false)
+	return compileGenerated(sourcePath, outputPath, generatedCompileOptions{})
 }
 
 func writeGeneratedFiles(dir string, stem string, result *compileResult) (string, error) {
@@ -155,13 +162,18 @@ func writeGeneratedFiles(dir string, stem string, result *compileResult) (string
 	return sourcePath, nil
 }
 
-func compileGenerated(sourcePath string, outputPath string, usesCUDA bool) error {
+func compileGenerated(sourcePath string, outputPath string, opts generatedCompileOptions) error {
 	compiler := os.Getenv("CC")
 	if compiler == "" {
 		compiler = "cc"
 	}
 	args := []string{"-std=c11", sourcePath, "-o", outputPath}
-	if usesCUDA {
+	if opts.Debug {
+		args = []string{"-std=c11", "-O0", sourcePath, "-o", outputPath}
+	} else {
+		args = []string{"-std=c11", "-O2", sourcePath, "-o", outputPath}
+	}
+	if opts.UsesCUDA {
 		compiler = os.Getenv("NVCC")
 		if compiler == "" {
 			compiler = "nvcc"

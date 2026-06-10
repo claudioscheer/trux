@@ -1,0 +1,56 @@
+package main
+
+import "time"
+
+// Integer-only workload for comparing generated C optimization levels.
+//
+// Run normally to use the optimized compiler path:
+//
+//   make run FILE=examples/performance_integer.tx
+//
+// Run with debug output to force the generated C build to use -O0:
+//
+//   go run ./cmd/trux run --debug examples/performance_integer.tx
+func mix(value int, i int) int {
+  let next int = value + i
+
+  if next > 1000003 {
+    return next - 999983
+  }
+
+  if next < 500001 {
+    return next + 31
+  }
+
+  return next - 499979
+}
+
+func workload(rounds int, iterations int) int {
+  let checksum int = 1
+
+  for let round int = 0; round < rounds; round = round + 1 {
+    let value int = round + 1
+
+    for let i int = 0; i < iterations; i = i + 1 {
+      value = mix(value, i)
+    }
+
+    checksum = mix(checksum, value)
+  }
+
+  return checksum
+}
+
+func main() int {
+  let rounds int = 12
+  let iterations int = 1000000
+
+  let start int = time.monotonicNanos()
+  let checksum int = workload(rounds, iterations)
+  let end int = time.monotonicNanos()
+
+  print("workload checksum ", checksum)
+  print("elapsed nanos ", end - start)
+
+  return 0
+}

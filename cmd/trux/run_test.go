@@ -418,6 +418,35 @@ func main() int {
 	}
 }
 
+func TestRunFileCompilesAndExecutesPerformanceExample(t *testing.T) {
+	requireCC(t)
+
+	var out bytes.Buffer
+	err := runFile(&out, "../../examples/performance_integer.tx")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("output = %q, want checksum and elapsed lines", out.String())
+	}
+	if lines[0] != "workload checksum 496477" {
+		t.Fatalf("checksum line = %q, want stable checksum", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "elapsed nanos ") {
+		t.Fatalf("elapsed line = %q, want elapsed nanos prefix", lines[1])
+	}
+
+	elapsed, err := strconv.ParseInt(strings.TrimPrefix(lines[1], "elapsed nanos "), 10, 64)
+	if err != nil {
+		t.Fatalf("parse elapsed nanos: %v", err)
+	}
+	if elapsed <= 0 {
+		t.Fatalf("elapsed nanos = %d, want positive duration", elapsed)
+	}
+}
+
 func TestRunFileCompilesAndExecutesFileAndCSVIO(t *testing.T) {
 	requireCC(t)
 
@@ -488,6 +517,81 @@ func main() int {
 	}
 	if !strings.Contains(err.Error(), "trux runtime error: index 1 out of bounds for length 1") {
 		t.Fatalf("error = %q, want bounds error", err.Error())
+	}
+}
+
+func TestRunFileReturnsRuntimeIntegerDivisionErrors(t *testing.T) {
+	requireCC(t)
+
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "division by zero",
+			src: `package main
+func main() int {
+    print(10 / 0)
+    return 0
+}`,
+			want: "trux runtime error: integer division by zero",
+		},
+		{
+			name: "division overflow",
+			src: `package main
+func main() int {
+    let min int = (0 - 9223372036854775807) - 1
+    let minusOne int = 0 - 1
+    print(min / minusOne)
+    return 0
+}`,
+			want: "trux runtime error: integer overflow in /",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempSource(t, tt.src)
+
+			var out bytes.Buffer
+			err := runFile(&out, path)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if out.String() != "" {
+				t.Fatalf("output = %q, want empty output", out.String())
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestRunFileEvaluatesSideEffectingExpressionsLeftToRight(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+import "io"
+
+func sub(a int, b int) int {
+    return a - b
+}
+
+func main() int {
+    print(sub(io.readInt(), io.readInt()))
+    print(io.readInt() - io.readInt())
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFileWithOptions(&out, path, runOptions{Stdin: strings.NewReader("10\n3\n20\n8\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "7\n12\n" {
+		t.Fatalf("output = %q, want ordered reads", out.String())
 	}
 }
 
@@ -954,11 +1058,48 @@ func main() int {
 	if !strings.Contains(log, "-std=c11") {
 		t.Fatalf("compiler args = %q, want C11 standard flag", log)
 	}
+	if !strings.Contains(log, "-O2") {
+		t.Fatalf("compiler args = %q, want optimized build flag", log)
+	}
 	if !strings.Contains(log, "-o "+outputPath) {
 		t.Fatalf("compiler args = %q, want output path", log)
 	}
 	if _, err := os.Stat(outputPath); err != nil {
 		t.Fatalf("expected output executable: %v", err)
+	}
+}
+
+func TestCompileGeneratedUsesO0ForDebugGeneratedC(t *testing.T) {
+	path := writeTempSource(t, `package main
+func main() int {
+    return 0
+}`)
+	result, err := compileFile(path, compileOptions{Debug: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "cc.log")
+	fakeCC := filepath.Join(dir, "fake-cc")
+	writeFakeCompiler(t, fakeCC, logPath)
+	t.Setenv("CC", fakeCC)
+	cPath, err := writeGeneratedFiles(dir, "main", result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := compileGenerated(cPath, outputPath, generatedCompileOptions{Debug: result.Debug}); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	if !strings.Contains(log, "-O0") {
+		t.Fatalf("compiler args = %q, want debug build flag", log)
+	}
+	if strings.Contains(log, "-O2") {
+		t.Fatalf("compiler args = %q, did not expect optimized debug build", log)
 	}
 }
 

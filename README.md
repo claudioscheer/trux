@@ -147,7 +147,7 @@ Run tests recursively or run a single test file:
 ./bin/trux test examples/projects/scorebook/scores.test.tx
 ```
 
-More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/control_flow.tx](examples/control_flow.tx), [examples/loops.tx](examples/loops.tx), [examples/else_if.tx](examples/else_if.tx), [examples/assertions.tx](examples/assertions.tx), [examples/collections.tx](examples/collections.tx), and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current control-flow, assertion, collection, and ownership model. Module examples live under [examples/modules/](examples/modules/).
+More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/control_flow.tx](examples/control_flow.tx), [examples/loops.tx](examples/loops.tx), [examples/else_if.tx](examples/else_if.tx), [examples/assertions.tx](examples/assertions.tx), [examples/collections.tx](examples/collections.tx), and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current control-flow, assertion, collection, and ownership model. [examples/performance_integer.tx](examples/performance_integer.tx) is a CPU-bound integer workload for comparing optimized and debug generated C builds. Module examples live under [examples/modules/](examples/modules/).
 
 The IO basics project reads a name and number from stdin, reads/writes text files, and reads/writes flat row-major CSV:
 

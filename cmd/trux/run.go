@@ -65,7 +65,7 @@ func runCompiledResult(out io.Writer, in io.Reader, result *compileResult) error
 		return err
 	}
 	executablePath := filepath.Join(tmpDir, "main")
-	if err := compileGenerated(cPath, executablePath, result.UsesCUDA); err != nil {
+	if err := compileGenerated(cPath, executablePath, generatedCompileOptions{UsesCUDA: result.UsesCUDA, Debug: result.Debug}); err != nil {
 		return err
 	}
 

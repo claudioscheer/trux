@@ -25,6 +25,13 @@ const (
 	CallTimeNowUnixMillis  CallKind = "nowUnixMillis"
 	CallTimeMonotonicNanos CallKind = "monotonicNanos"
 	CallTimeSleepMillis    CallKind = "sleepMillis"
+	CallHTTPServe          CallKind = "serve"
+	CallHTTPMethod         CallKind = "method"
+	CallHTTPPath           CallKind = "path"
+	CallHTTPQuery          CallKind = "query"
+	CallHTTPHeader         CallKind = "header"
+	CallHTTPBody           CallKind = "body"
+	CallHTTPRespond        CallKind = "respond"
 	CallGPUAlloc           CallKind = "gpuAlloc"
 	CallGPUCopyToDevice    CallKind = "copyToDevice"
 	CallGPUCopyToHost      CallKind = "copyToHost"
@@ -182,6 +189,18 @@ var packages = []Package{
 			{Package: "time", Name: "nowUnixMillis", Kind: CallTimeNowUnixMillis, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "current Unix wall-clock time in milliseconds"},
 			{Package: "time", Name: "monotonicNanos", Kind: CallTimeMonotonicNanos, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "monotonic timestamp in nanoseconds for elapsed-time measurement"},
 			{Package: "time", Name: "sleepMillis", Kind: CallTimeSleepMillis, Params: []Param{{Name: "ms", Type: ast.IntType}}, ReturnType: ast.StringType, ResultOrigin: ResultUnknown, StatementOnly: true, Detail: "sleep for a number of milliseconds"},
+		},
+	},
+	{
+		Name: "http",
+		Members: []Member{
+			{Package: "http", Name: "serve", Kind: CallHTTPServe, StatementOnly: true, Detail: "serve HTTP requests with a worker pool", SignatureText: "http.serve(host string, port int, workers int, handler)"},
+			{Package: "http", Name: "method", Kind: CallHTTPMethod, Params: []Param{{Name: "request", Type: ast.IntType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "HTTP request method"},
+			{Package: "http", Name: "path", Kind: CallHTTPPath, Params: []Param{{Name: "request", Type: ast.IntType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "HTTP request path without query string"},
+			{Package: "http", Name: "query", Kind: CallHTTPQuery, Params: []Param{{Name: "request", Type: ast.IntType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "HTTP request raw query string without question mark"},
+			{Package: "http", Name: "header", Kind: CallHTTPHeader, Params: []Param{{Name: "request", Type: ast.IntType}, {Name: "name", Type: ast.StringType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "HTTP request header value by case-insensitive name"},
+			{Package: "http", Name: "body", Kind: CallHTTPBody, Params: []Param{{Name: "request", Type: ast.IntType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "HTTP request body"},
+			{Package: "http", Name: "respond", Kind: CallHTTPRespond, Params: []Param{{Name: "request", Type: ast.IntType}, {Name: "status", Type: ast.IntType}, {Name: "contentType", Type: ast.StringType}, {Name: "body", Type: ast.StringType}}, ReturnType: ast.StringType, ResultOrigin: ResultUnknown, StatementOnly: true, Detail: "write an HTTP response"},
 		},
 	},
 	{

@@ -12,6 +12,7 @@ type Program struct {
 	PackageName string
 	Functions   []*Func
 	Kernels     []*Func
+	UsesHTTP    bool
 }
 
 type Func struct {
@@ -174,6 +175,26 @@ type TimeSleepStmt struct {
 }
 
 func (*TimeSleepStmt) stmtNode() {}
+
+type HTTPServeStmt struct {
+	Pos         token.Position
+	Host        Expr
+	Port        Expr
+	Workers     Expr
+	HandlerName string
+}
+
+func (*HTTPServeStmt) stmtNode() {}
+
+type HTTPRespondStmt struct {
+	Pos         token.Position
+	Request     Expr
+	Status      Expr
+	ContentType Expr
+	Body        Expr
+}
+
+func (*HTTPRespondStmt) stmtNode() {}
 
 type ExprStmt struct {
 	Pos  token.Position
@@ -439,6 +460,20 @@ func (e *TimeNowExpr) Ownership() types.Origin { return e.Origin }
 
 func (*TimeNowExpr) exprNode() {}
 
+type HTTPRequestStringExpr struct {
+	Kind    types.HTTPCallKind
+	Request Expr
+	Name    Expr
+	Typ     ast.Type
+	Origin  types.Origin
+}
+
+func (e *HTTPRequestStringExpr) Type() ast.Type { return e.Typ }
+
+func (e *HTTPRequestStringExpr) Ownership() types.Origin { return e.Origin }
+
+func (*HTTPRequestStringExpr) exprNode() {}
+
 type BinaryExpr struct {
 	Left     Expr
 	Operator string
@@ -502,7 +537,7 @@ type builder struct {
 }
 
 func (b builder) buildProgram(program *ast.Program) (*Program, error) {
-	out := &Program{PackageName: program.PackageName}
+	out := &Program{PackageName: program.PackageName, UsesHTTP: len(b.info.HTTPCalls) > 0}
 	for _, fn := range program.Functions {
 		irFn, err := b.buildFunc(fn)
 		if err != nil {
@@ -666,6 +701,22 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 					return &TimeSleepStmt{Pos: stmt.Pos(), Millis: args[0]}, nil
 				}
 			}
+			if httpSig, ok := b.info.HTTPCalls[call]; ok {
+				switch httpSig.Kind {
+				case types.HTTPCallServe:
+					args, err := b.buildExprs(call.Args[:3])
+					if err != nil {
+						return nil, err
+					}
+					return &HTTPServeStmt{Pos: stmt.Pos(), Host: args[0], Port: args[1], Workers: args[2], HandlerName: httpSig.HandlerName}, nil
+				case types.HTTPCallRespond:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &HTTPRespondStmt{Pos: stmt.Pos(), Request: args[0], Status: args[1], ContentType: args[2], Body: args[3]}, nil
+				}
+			}
 			if gpuSig, ok := b.info.GPUCalls[call]; ok {
 				if gpuSig.Kind == types.GPUCallLaunch {
 					dims, err := b.buildExprs(call.Args[1:7])
@@ -757,6 +808,9 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		}
 		if ioSig, ok := b.info.IOCalls[expr]; ok {
 			return b.buildIOExpr(expr, ioSig, typ, origin)
+		}
+		if httpSig, ok := b.info.HTTPCalls[expr]; ok {
+			return b.buildHTTPExpr(expr, httpSig, typ, origin)
 		}
 		if _, ok := b.info.CloneCalls[expr]; ok {
 			arg, err := b.buildExpr(expr.Args[0])
@@ -866,6 +920,29 @@ func (b builder) buildIOExpr(expr *ast.CallExpr, sig types.IOCallSig, typ ast.Ty
 		return &ReadPPMExpr{Path: path, Typ: typ, Origin: origin}, nil
 	case types.IOCallTimeNowUnixMillis, types.IOCallTimeMonotonicNanos:
 		return &TimeNowExpr{Kind: sig.Kind, Typ: typ, Origin: origin}, nil
+	default:
+		return nil, fmt.Errorf("%s can only be used as a statement", sig.Kind)
+	}
+}
+
+func (b builder) buildHTTPExpr(expr *ast.CallExpr, sig types.HTTPCallSig, typ ast.Type, origin types.Origin) (Expr, error) {
+	switch sig.Kind {
+	case types.HTTPCallMethod, types.HTTPCallPath, types.HTTPCallQuery, types.HTTPCallBody:
+		request, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &HTTPRequestStringExpr{Kind: sig.Kind, Request: request, Typ: typ, Origin: origin}, nil
+	case types.HTTPCallHeader:
+		request, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		name, err := b.buildExpr(expr.Args[1])
+		if err != nil {
+			return nil, err
+		}
+		return &HTTPRequestStringExpr{Kind: sig.Kind, Request: request, Name: name, Typ: typ, Origin: origin}, nil
 	default:
 		return nil, fmt.Errorf("%s can only be used as a statement", sig.Kind)
 	}

@@ -26,12 +26,20 @@ type compileResult struct {
 	CSource           string
 	RuntimeHeaderName string
 	RuntimeHeader     string
+	RuntimeHeaders    []runtimeHeader
 	UsesCUDA          bool
+	UsesHTTP          bool
 	Debug             bool
+}
+
+type runtimeHeader struct {
+	Name   string
+	Source string
 }
 
 type generatedCompileOptions struct {
 	UsesCUDA bool
+	UsesHTTP bool
 	Debug    bool
 }
 
@@ -89,6 +97,9 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 	if err != nil {
 		return nil, err
 	}
+	if typedIR.UsesHTTP && len(typedIR.Kernels) > 0 {
+		return nil, fmt.Errorf("http and gpu cannot be used in the same program yet")
+	}
 	if debug != nil {
 		if err := debug.writeJSON("04-ir.json", typedIR); err != nil {
 			return nil, err
@@ -107,11 +118,18 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 		}
 	}
 
+	headers := []runtimeHeader{{Name: runtimec.HeaderName, Source: runtimec.Source}}
+	if typedIR.UsesHTTP {
+		headers = append(headers, runtimeHeader{Name: runtimec.HTTPHeaderName, Source: runtimec.HTTPSource})
+	}
+
 	return &compileResult{
 		CSource:           cSource,
 		RuntimeHeaderName: runtimec.HeaderName,
 		RuntimeHeader:     runtimec.Source,
+		RuntimeHeaders:    headers,
 		UsesCUDA:          len(typedIR.Kernels) > 0,
+		UsesHTTP:          typedIR.UsesHTTP,
 		Debug:             opts.Debug,
 	}, nil
 }
@@ -133,21 +151,34 @@ func buildFile(sourcePath string, outputPath string) error {
 		return err
 	}
 
-	return compileGenerated(cPath, outputPath, generatedCompileOptions{UsesCUDA: result.UsesCUDA, Debug: result.Debug})
+	return compileGenerated(cPath, outputPath, generatedCompileOptions{UsesCUDA: result.UsesCUDA, UsesHTTP: result.UsesHTTP, Debug: result.Debug})
 }
 
 func compileC(sourcePath string, outputPath string) error {
-	return compileGenerated(sourcePath, outputPath, generatedCompileOptions{})
+	content, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return fmt.Errorf("read generated source: %w", err)
+	}
+	return compileGenerated(sourcePath, outputPath, generatedCompileOptions{
+		UsesHTTP: strings.Contains(string(content), runtimec.HTTPHeaderName),
+	})
 }
 
 func writeGeneratedFiles(dir string, stem string, result *compileResult) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create output dir: %w", err)
 	}
-	if result.RuntimeHeaderName != "" {
-		headerPath := filepath.Join(dir, result.RuntimeHeaderName)
-		if err := os.WriteFile(headerPath, []byte(result.RuntimeHeader), 0o644); err != nil {
-			return "", fmt.Errorf("write runtime header: %w", err)
+	headers := result.RuntimeHeaders
+	if len(headers) == 0 && result.RuntimeHeaderName != "" {
+		headers = []runtimeHeader{{Name: result.RuntimeHeaderName, Source: result.RuntimeHeader}}
+	}
+	for _, header := range headers {
+		if header.Name == "" {
+			continue
+		}
+		headerPath := filepath.Join(dir, header.Name)
+		if err := os.WriteFile(headerPath, []byte(header.Source), 0o644); err != nil {
+			return "", fmt.Errorf("write runtime header %s: %w", header.Name, err)
 		}
 	}
 
@@ -179,6 +210,8 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 			compiler = "nvcc"
 		}
 		args = []string{"-x", "cu", sourcePath, "-o", outputPath}
+	} else if opts.UsesHTTP {
+		args = append(args, "-pthread")
 	}
 
 	cmd := exec.Command(compiler, args...)

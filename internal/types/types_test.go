@@ -816,6 +816,136 @@ func main() int {
 	}
 }
 
+func TestCheckAllowsStandardHTTPPackage(t *testing.T) {
+	program := mustLoadProgram(t, `package main
+import "http"
+
+func handle(request int) int {
+    let method string = http.method(request)
+    let path string = http.path(request)
+    let query string = http.query(request)
+    let agent string = http.header(request, "User-Agent")
+    let body string = http.body(request)
+    http.respond(request, 200, "text/plain", method + path + query + agent + body)
+    return 0
+}
+
+func main() int {
+    http.serve("127.0.0.1", 8080, 8, handle)
+    return 0
+}`)
+
+	info, err := Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kinds := map[HTTPCallKind]int{}
+	for _, sig := range info.HTTPCalls {
+		kinds[sig.Kind]++
+	}
+	for _, kind := range []HTTPCallKind{
+		HTTPCallMethod,
+		HTTPCallPath,
+		HTTPCallQuery,
+		HTTPCallHeader,
+		HTTPCallBody,
+		HTTPCallRespond,
+		HTTPCallServe,
+	} {
+		if kinds[kind] != 1 {
+			t.Fatalf("HTTP call count for %s = %d, want 1", kind, kinds[kind])
+		}
+	}
+
+	mainFn := program.Functions[1]
+	serveCall := mainFn.Body.Statements[0].(*ast.ExprStmt).Expr.(*ast.CallExpr)
+	if info.HTTPCalls[serveCall].HandlerName != "handle" {
+		t.Fatalf("handler name = %q, want handle", info.HTTPCalls[serveCall].HandlerName)
+	}
+}
+
+func TestCheckRejectsInvalidHTTPServeCalls(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "expression position",
+			src: `package main
+import "http"
+
+func handle(request int) int {
+    return 0
+}
+
+func main() int {
+    return http.serve("127.0.0.1", 8080, 1, handle)
+}`,
+			want: "http.serve can only be used as a statement",
+		},
+		{
+			name: "non identifier handler",
+			src: `package main
+import "http"
+
+func handle(request int) int {
+    return 0
+}
+
+func main() int {
+    http.serve("127.0.0.1", 8080, 1, handle(1))
+    return 0
+}`,
+			want: "http.serve fourth argument must be a handler function name",
+		},
+		{
+			name: "wrong handler signature",
+			src: `package main
+import "http"
+
+func handle(request string) int {
+    return 0
+}
+
+func main() int {
+    http.serve("127.0.0.1", 8080, 1, handle)
+    return 0
+}`,
+			want: `http handler "handle" must have signature func handle(request int) int`,
+		},
+		{
+			name: "bad workers type",
+			src: `package main
+import "http"
+
+func handle(request int) int {
+    return 0
+}
+
+func main() int {
+    http.serve("127.0.0.1", 8080, "many", handle)
+    return 0
+}`,
+			want: "http.serve workers has type string, want int",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			program := mustLoadProgram(t, tt.src)
+			_, err := Check(program)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want it to contain %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
 func TestCheckRejectsUnsupportedClone(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

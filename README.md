@@ -46,6 +46,7 @@ The compiler currently supports:
 - standard `io` and `csv` packages for stdin, file, and CSV IO
 - standard `image` package for first P3 PPM image reads/writes
 - standard `time` package for wall-clock timestamps, monotonic timing, and sleeping
+- standard `http` package for plaintext POSIX HTTP servers backed by a pthread worker pool
 - initial CUDA GPU support with explicit `gpu.Buffer[int|float]`, Trux `kernel func`, and `gpu.launch`
 
 Recursive directory-based packages, separate module compilation, and reusable package artifacts are not implemented.
@@ -162,6 +163,7 @@ More complete IO examples live under [examples/projects/](examples/projects/):
 - `file_notes`: `io.readFile` and `io.writeFile`
 - `csv_roster`: `csv.read`, list mutation, and `csv.write`
 - `rotate_image`: PPM image rotation on CPU and GPU
+- `http_server`: plaintext HTTP with a pthread-backed worker pool
 
 ## Commands
 
@@ -176,9 +178,9 @@ make build-bin FILE=examples/hello.tx OUT=bin/hello
 make lsp
 ```
 
-`trux emit-c main.tx` writes generated source plus `trux_runtime.h` to `out/main/` by default. Use `trux emit-c --out-dir DIR main.tx` to choose a different directory.
+`trux emit-c main.tx` writes generated source plus runtime headers to `out/main/` by default. Use `trux emit-c --out-dir DIR main.tx` to choose a different directory.
 
 ## Documentation
 
-See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including naming, arenas, IO, image, time, modules, and GPU support.
+See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including naming, arenas, IO, HTTP, image, time, modules, and GPU support.
 Editor tooling lives in [tooling/](tooling/), including the Go language server and VS Code extension.

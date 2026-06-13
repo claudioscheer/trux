@@ -1,0 +1,36 @@
+package main
+
+import "http"
+
+func handle(request int) int {
+  let method string = http.method(request)
+  let path string = http.path(request)
+
+  if method == "GET" {
+    if path == "/" {
+      http.respond(request, 200, "text/plain", "hello from trux\n")
+      return 0
+    }
+
+    if path == "/health" {
+      http.respond(request, 200, "text/plain", "ok\n")
+      return 0
+    }
+  }
+
+  if method == "POST" {
+    if path == "/echo" {
+      let body string = http.body(request)
+      http.respond(request, 200, "text/plain", body)
+      return 0
+    }
+  }
+
+  http.respond(request, 404, "text/plain", "not found\n")
+  return 0
+}
+
+func main() int {
+  http.serve("127.0.0.1", 8080, 16, handle)
+  return 0
+}

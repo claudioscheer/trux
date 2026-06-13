@@ -588,7 +588,7 @@ trux build -o main main.tx
 trux emit-c main.tx
 ```
 
-`emit-c` writes `<stem>.c` or `<stem>.cu` plus `trux_runtime.h` to `out/<stem>/` by default. Pass `--out-dir DIR` to choose the output directory.
+`emit-c` writes `<stem>.c` or `<stem>.cu` plus the runtime headers needed by that program to `out/<stem>/` by default. Pass `--out-dir DIR` to choose the output directory.
 
 ## Future Ideas
 

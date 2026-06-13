@@ -36,6 +36,7 @@ type Info struct {
 	AppendCalls   map[*ast.CallExpr]AppendSig
 	CloneCalls    map[*ast.CallExpr]CloneSig
 	IOCalls       map[*ast.CallExpr]IOCallSig
+	HTTPCalls     map[*ast.CallExpr]HTTPCallSig
 	GPUCalls      map[*ast.CallExpr]GPUCallSig
 }
 
@@ -70,6 +71,24 @@ const (
 
 type IOCallSig struct {
 	Kind IOCallKind
+}
+
+type HTTPCallKind string
+
+const (
+	HTTPCallServe   HTTPCallKind = HTTPCallKind(stdlib.CallHTTPServe)
+	HTTPCallMethod  HTTPCallKind = HTTPCallKind(stdlib.CallHTTPMethod)
+	HTTPCallPath    HTTPCallKind = HTTPCallKind(stdlib.CallHTTPPath)
+	HTTPCallQuery   HTTPCallKind = HTTPCallKind(stdlib.CallHTTPQuery)
+	HTTPCallHeader  HTTPCallKind = HTTPCallKind(stdlib.CallHTTPHeader)
+	HTTPCallBody    HTTPCallKind = HTTPCallKind(stdlib.CallHTTPBody)
+	HTTPCallRespond HTTPCallKind = HTTPCallKind(stdlib.CallHTTPRespond)
+)
+
+type HTTPCallSig struct {
+	Kind        HTTPCallKind
+	HandlerName string
+	HandlerSig  FuncSig
 }
 
 type GPUCallKind string
@@ -169,6 +188,7 @@ func Check(program *ast.Program) (*Info, error) {
 			AppendCalls:   map[*ast.CallExpr]AppendSig{},
 			CloneCalls:    map[*ast.CallExpr]CloneSig{},
 			IOCalls:       map[*ast.CallExpr]IOCallSig{},
+			HTTPCalls:     map[*ast.CallExpr]HTTPCallSig{},
 			GPUCalls:      map[*ast.CallExpr]GPUCallSig{},
 		},
 	}
@@ -851,6 +871,14 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		c.setExpr(expr, typ, origin)
 		return typ, nil
 	}
+	if expr.Package == "http" {
+		typ, origin, err := c.checkHTTPCall(locals, expr, allowPrint)
+		if err != nil {
+			return nil, err
+		}
+		c.setExpr(expr, typ, origin)
+		return typ, nil
+	}
 
 	argTypes := make([]ast.Type, 0, len(expr.Args))
 	for _, arg := range expr.Args {
@@ -982,6 +1010,115 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 	c.info.ResolvedCalls[expr] = sig
 	c.setExpr(expr, sig.ReturnType, originForCallResult(sig.ReturnType))
 	return sig.ReturnType, nil
+}
+
+func (c *checker) checkHTTPCall(locals *scope, expr *ast.CallExpr, allowStatementOnly bool) (ast.Type, Origin, error) {
+	switch expr.Callee {
+	case "serve":
+		return c.checkHTTPServe(locals, expr, allowStatementOnly)
+	case "method", "path", "query", "body":
+		if len(expr.Args) != 1 {
+			return nil, "", typeError(expr.Start, "http.%s expects 1 argument, got %d", expr.Callee, len(expr.Args))
+		}
+		requestType, err := c.checkExpr(locals, expr.Args[0], false)
+		if err != nil {
+			return nil, "", err
+		}
+		if !ast.TypeEqual(requestType, ast.IntType) {
+			return nil, "", typeError(expr.Args[0].Pos(), "http.%s request has type %s, want int", expr.Callee, requestType)
+		}
+		c.info.HTTPCalls[expr] = HTTPCallSig{Kind: HTTPCallKind(expr.Callee)}
+		return ast.StringType, OriginFrameOwned, nil
+	case "header":
+		if len(expr.Args) != 2 {
+			return nil, "", typeError(expr.Start, "http.header expects 2 arguments, got %d", len(expr.Args))
+		}
+		requestType, err := c.checkExpr(locals, expr.Args[0], false)
+		if err != nil {
+			return nil, "", err
+		}
+		nameType, err := c.checkExpr(locals, expr.Args[1], false)
+		if err != nil {
+			return nil, "", err
+		}
+		if !ast.TypeEqual(requestType, ast.IntType) {
+			return nil, "", typeError(expr.Args[0].Pos(), "http.header request has type %s, want int", requestType)
+		}
+		if !ast.TypeEqual(nameType, ast.StringType) {
+			return nil, "", typeError(expr.Args[1].Pos(), "http.header name has type %s, want string", nameType)
+		}
+		c.info.HTTPCalls[expr] = HTTPCallSig{Kind: HTTPCallHeader}
+		return ast.StringType, OriginFrameOwned, nil
+	case "respond":
+		if !allowStatementOnly {
+			return nil, "", typeError(expr.Start, "http.respond can only be used as a statement")
+		}
+		if len(expr.Args) != 4 {
+			return nil, "", typeError(expr.Start, "http.respond expects 4 arguments, got %d", len(expr.Args))
+		}
+		argTypes := make([]ast.Type, 0, len(expr.Args))
+		for _, arg := range expr.Args {
+			argType, err := c.checkExpr(locals, arg, false)
+			if err != nil {
+				return nil, "", err
+			}
+			argTypes = append(argTypes, argType)
+		}
+		wants := []ast.Type{ast.IntType, ast.IntType, ast.StringType, ast.StringType}
+		names := []string{"request", "status", "contentType", "body"}
+		for i, want := range wants {
+			if !ast.TypeEqual(argTypes[i], want) {
+				return nil, "", typeError(expr.Args[i].Pos(), "http.respond %s has type %s, want %s", names[i], argTypes[i], want)
+			}
+		}
+		c.info.HTTPCalls[expr] = HTTPCallSig{Kind: HTTPCallRespond}
+		return ast.StringType, OriginUnknown, nil
+	default:
+		return nil, "", typeError(expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
+	}
+}
+
+func (c *checker) checkHTTPServe(locals *scope, expr *ast.CallExpr, allowStatementOnly bool) (ast.Type, Origin, error) {
+	if !allowStatementOnly {
+		return nil, "", typeError(expr.Start, "http.serve can only be used as a statement")
+	}
+	if len(expr.Args) != 4 {
+		return nil, "", typeError(expr.Start, "http.serve expects 4 arguments, got %d", len(expr.Args))
+	}
+	hostType, err := c.checkExpr(locals, expr.Args[0], false)
+	if err != nil {
+		return nil, "", err
+	}
+	portType, err := c.checkExpr(locals, expr.Args[1], false)
+	if err != nil {
+		return nil, "", err
+	}
+	workersType, err := c.checkExpr(locals, expr.Args[2], false)
+	if err != nil {
+		return nil, "", err
+	}
+	if !ast.TypeEqual(hostType, ast.StringType) {
+		return nil, "", typeError(expr.Args[0].Pos(), "http.serve host has type %s, want string", hostType)
+	}
+	if !ast.TypeEqual(portType, ast.IntType) {
+		return nil, "", typeError(expr.Args[1].Pos(), "http.serve port has type %s, want int", portType)
+	}
+	if !ast.TypeEqual(workersType, ast.IntType) {
+		return nil, "", typeError(expr.Args[2].Pos(), "http.serve workers has type %s, want int", workersType)
+	}
+	handlerIdent, ok := expr.Args[3].(*ast.IdentExpr)
+	if !ok {
+		return nil, "", typeError(expr.Args[3].Pos(), "http.serve fourth argument must be a handler function name")
+	}
+	handler, ok := c.info.Funcs[handlerIdent.Name]
+	if !ok {
+		return nil, "", typeError(expr.Args[3].Pos(), "undefined handler %q", handlerIdent.Name)
+	}
+	if len(handler.Params) != 1 || !ast.TypeEqual(handler.Params[0].Type, ast.IntType) || !ast.TypeEqual(handler.ReturnType, ast.IntType) {
+		return nil, "", typeError(expr.Args[3].Pos(), "http handler %q must have signature func %s(request int) int", handler.Name, handler.Name)
+	}
+	c.info.HTTPCalls[expr] = HTTPCallSig{Kind: HTTPCallServe, HandlerName: handler.Name, HandlerSig: handler}
+	return ast.StringType, OriginUnknown, nil
 }
 
 func (c *checker) checkGPUCall(locals *scope, expr *ast.CallExpr, allowStatementOnly bool) (ast.Type, Origin, error) {

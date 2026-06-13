@@ -467,6 +467,61 @@ func main() int {
 	}
 }
 
+func TestBuildCreatesTypedIRForHTTP(t *testing.T) {
+	program := mustLoadProgram(t, `package main
+import "http"
+
+func handle(request int) int {
+    let path string = http.path(request)
+    let agent string = http.header(request, "User-Agent")
+    http.respond(request, 200, "text/plain", path + agent)
+    return 0
+}
+
+func main() int {
+    http.serve("127.0.0.1", 8080, 4, handle)
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !irProgram.UsesHTTP {
+		t.Fatalf("UsesHTTP = false, want true")
+	}
+	handle := irProgram.Functions[0]
+	pathExpr, ok := handle.Body[0].(*LetStmt).Value.(*HTTPRequestStringExpr)
+	if !ok {
+		t.Fatalf("path let value = %T, want HTTPRequestStringExpr", handle.Body[0].(*LetStmt).Value)
+	}
+	if pathExpr.Kind != semtypes.HTTPCallPath {
+		t.Fatalf("path kind = %s, want path", pathExpr.Kind)
+	}
+	headerExpr, ok := handle.Body[1].(*LetStmt).Value.(*HTTPRequestStringExpr)
+	if !ok {
+		t.Fatalf("header let value = %T, want HTTPRequestStringExpr", handle.Body[1].(*LetStmt).Value)
+	}
+	if headerExpr.Kind != semtypes.HTTPCallHeader || headerExpr.Name == nil {
+		t.Fatalf("header expr = %#v, want header with name", headerExpr)
+	}
+	if _, ok := handle.Body[2].(*HTTPRespondStmt); !ok {
+		t.Fatalf("third handler statement = %T, want HTTPRespondStmt", handle.Body[2])
+	}
+	serve, ok := irProgram.Functions[1].Body[0].(*HTTPServeStmt)
+	if !ok {
+		t.Fatalf("main first statement = %T, want HTTPServeStmt", irProgram.Functions[1].Body[0])
+	}
+	if serve.HandlerName != "handle" {
+		t.Fatalf("handler = %q, want handle", serve.HandlerName)
+	}
+}
+
 func sameTypes(got []ast.Type, want []ast.Type) bool {
 	if len(got) != len(want) {
 		return false

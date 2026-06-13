@@ -244,6 +244,36 @@ func main() int {
 	}
 }
 
+func TestGenerateCreatesCForHTTPProgram(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "http"
+
+func handle(request int) int {
+    let path string = http.path(request)
+    http.respond(request, 200, "text/plain", path)
+    return 0
+}
+
+func main() int {
+    http.serve("127.0.0.1", 8080, 4, handle)
+    return 0
+}`)
+
+	wantParts := []string{
+		"#include \"trux_runtime.h\"",
+		"#include \"trux_http_runtime.h\"",
+		"int64_t trux_f_6_handle(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_7_request);",
+		"rt_http_path(&trux_frame, trux_v_7_request)",
+		"rt_http_respond(trux_v_7_request, 200, (rt_string){(const uint8_t*)\"text/plain\", 10}, trux_v_4_path);",
+		"rt_http_serve((rt_string){(const uint8_t*)\"127.0.0.1\", 9}, 8080, 4, trux_f_6_handle);",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
 func TestGenerateUsesCheckedIntegerArithmeticInKernels(t *testing.T) {
 	cSource := mustGenerateC(t, `package main
 import "gpu"

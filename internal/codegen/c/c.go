@@ -64,6 +64,9 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 		out.WriteString("#define TRUX_RUNTIME_CUDA 1\n")
 	}
 	fmt.Fprintf(&out, "#include %s\n", cStringLiteral(runtimec.HeaderName))
+	if program.UsesHTTP {
+		fmt.Fprintf(&out, "#include %s\n", cStringLiteral(runtimec.HTTPHeaderName))
+	}
 	fmt.Fprintln(&out)
 
 	families, err := nestedCollectionFamilies(program)
@@ -528,6 +531,45 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		}
 		e.writePrelude(out, indent, millis.prelude)
 		fmt.Fprintf(out, "%srt_time_sleep_millis(%s);\n", indent, millis.value)
+	case *ir.HTTPServeStmt:
+		host, err := e.emitOrderedOperand(stmt.Host, frameArena)
+		if err != nil {
+			return err
+		}
+		port, err := e.emitOrderedOperand(stmt.Port, frameArena)
+		if err != nil {
+			return err
+		}
+		workers, err := e.emitOrderedOperand(stmt.Workers, frameArena)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, host.prelude)
+		e.writePrelude(out, indent, port.prelude)
+		e.writePrelude(out, indent, workers.prelude)
+		fmt.Fprintf(out, "%srt_http_serve(%s, %s, %s, %s);\n", indent, host.value, port.value, workers.value, mangleFunc(stmt.HandlerName))
+	case *ir.HTTPRespondStmt:
+		request, err := e.emitOrderedOperand(stmt.Request, frameArena)
+		if err != nil {
+			return err
+		}
+		status, err := e.emitOrderedOperand(stmt.Status, frameArena)
+		if err != nil {
+			return err
+		}
+		contentType, err := e.emitOrderedOperand(stmt.ContentType, frameArena)
+		if err != nil {
+			return err
+		}
+		body, err := e.emitOrderedOperand(stmt.Body, frameArena)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, request.prelude)
+		e.writePrelude(out, indent, status.prelude)
+		e.writePrelude(out, indent, contentType.prelude)
+		e.writePrelude(out, indent, body.prelude)
+		fmt.Fprintf(out, "%srt_http_respond(%s, %s, %s, %s);\n", indent, request.value, status.value, contentType.value, body.value)
 	case *ir.ExprStmt:
 		expr, err := e.emitOrderedExpr(stmt.Expr, frameArena)
 		if err != nil {
@@ -698,6 +740,30 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		e.usage.noteArena(targetArena)
 		return emittedExpr{prelude: path.prelude, value: fmt.Sprintf("rt_read_ppm(%s, %s)", targetArena, path.value)}, nil
+	case *ir.HTTPRequestStringExpr:
+		request, err := e.emitOrderedOperand(expr.Request, frameArena)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		e.usage.noteArena(targetArena)
+		switch expr.Kind {
+		case semtypes.HTTPCallMethod:
+			return emittedExpr{prelude: request.prelude, value: fmt.Sprintf("rt_http_method(%s, %s)", targetArena, request.value)}, nil
+		case semtypes.HTTPCallPath:
+			return emittedExpr{prelude: request.prelude, value: fmt.Sprintf("rt_http_path(%s, %s)", targetArena, request.value)}, nil
+		case semtypes.HTTPCallQuery:
+			return emittedExpr{prelude: request.prelude, value: fmt.Sprintf("rt_http_query(%s, %s)", targetArena, request.value)}, nil
+		case semtypes.HTTPCallBody:
+			return emittedExpr{prelude: request.prelude, value: fmt.Sprintf("rt_http_body(%s, %s)", targetArena, request.value)}, nil
+		case semtypes.HTTPCallHeader:
+			name, err := e.emitOrderedOperand(expr.Name, frameArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			return emittedExpr{prelude: joinPreludes(request, name), value: fmt.Sprintf("rt_http_header(%s, %s, %s)", targetArena, request.value, name.value)}, nil
+		default:
+			return emittedExpr{}, fmt.Errorf("unsupported HTTP request string expression %s", expr.Kind)
+		}
 	case *ir.GPUAllocExpr:
 		length, err := e.emitOrderedOperand(expr.Len, frameArena)
 		if err != nil {
@@ -885,7 +951,7 @@ func exprHasSideEffect(expr ir.Expr) bool {
 	switch expr := expr.(type) {
 	case *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr,
 		*ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ImageDimensionExpr, *ir.ReadPPMExpr,
-		*ir.TimeNowExpr, *ir.GPUAllocExpr, *ir.CallExpr:
+		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.CallExpr:
 		return true
 	case *ir.ArrayLiteral:
 		for _, elem := range expr.Elements {
@@ -1032,6 +1098,30 @@ func emitExpr(expr ir.Expr, targetArena string, usage *funcUsage) (string, error
 			return "rt_time_monotonic_nanos()", nil
 		default:
 			return "", fmt.Errorf("unsupported time expression %s", expr.Kind)
+		}
+	case *ir.HTTPRequestStringExpr:
+		request, err := emitExpr(expr.Request, frameArena, usage)
+		if err != nil {
+			return "", err
+		}
+		usage.noteArena(targetArena)
+		switch expr.Kind {
+		case semtypes.HTTPCallMethod:
+			return fmt.Sprintf("rt_http_method(%s, %s)", targetArena, request), nil
+		case semtypes.HTTPCallPath:
+			return fmt.Sprintf("rt_http_path(%s, %s)", targetArena, request), nil
+		case semtypes.HTTPCallQuery:
+			return fmt.Sprintf("rt_http_query(%s, %s)", targetArena, request), nil
+		case semtypes.HTTPCallBody:
+			return fmt.Sprintf("rt_http_body(%s, %s)", targetArena, request), nil
+		case semtypes.HTTPCallHeader:
+			name, err := emitExpr(expr.Name, frameArena, usage)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("rt_http_header(%s, %s, %s)", targetArena, request, name), nil
+		default:
+			return "", fmt.Errorf("unsupported HTTP request string expression %s", expr.Kind)
 		}
 	case *ir.GPUAllocExpr:
 		length, err := emitExpr(expr.Len, frameArena, usage)
@@ -1689,6 +1779,25 @@ func collectStmtNestedCollectionFamilies(stmt ir.Stmt, seen map[string]bool, fam
 		}
 	case *ir.TimeSleepStmt:
 		return collectExprNestedCollectionFamilies(stmt.Millis, seen, families)
+	case *ir.HTTPServeStmt:
+		if err := collectExprNestedCollectionFamilies(stmt.Host, seen, families); err != nil {
+			return err
+		}
+		if err := collectExprNestedCollectionFamilies(stmt.Port, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(stmt.Workers, seen, families)
+	case *ir.HTTPRespondStmt:
+		if err := collectExprNestedCollectionFamilies(stmt.Request, seen, families); err != nil {
+			return err
+		}
+		if err := collectExprNestedCollectionFamilies(stmt.Status, seen, families); err != nil {
+			return err
+		}
+		if err := collectExprNestedCollectionFamilies(stmt.ContentType, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(stmt.Body, seen, families)
 	case *ir.ExprStmt:
 		return collectExprNestedCollectionFamilies(stmt.Expr, seen, families)
 	default:
@@ -1729,6 +1838,11 @@ func collectExprNestedCollectionFamilies(expr ir.Expr, seen map[string]bool, fam
 		return collectExprNestedCollectionFamilies(expr.Path, seen, families)
 	case *ir.TimeNowExpr:
 		return nil
+	case *ir.HTTPRequestStringExpr:
+		if err := collectExprNestedCollectionFamilies(expr.Request, seen, families); err != nil {
+			return err
+		}
+		return collectExprNestedCollectionFamilies(expr.Name, seen, families)
 	case *ir.CallExpr:
 		for _, arg := range expr.Args {
 			if err := collectExprNestedCollectionFamilies(arg, seen, families); err != nil {
@@ -1840,6 +1954,10 @@ func stmtPos(stmt ir.Stmt) token.Position {
 	case *ir.GPULaunchStmt:
 		return stmt.Pos
 	case *ir.TimeSleepStmt:
+		return stmt.Pos
+	case *ir.HTTPServeStmt:
+		return stmt.Pos
+	case *ir.HTTPRespondStmt:
 		return stmt.Pos
 	case *ir.ExprStmt:
 		return stmt.Pos

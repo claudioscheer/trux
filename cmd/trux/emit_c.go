@@ -30,8 +30,14 @@ var emitCCmd = &cobra.Command{
 			return err
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), sourcePath)
-		if result.RuntimeHeaderName != "" {
-			fmt.Fprintln(cmd.OutOrStdout(), filepath.Join(outDir, result.RuntimeHeaderName))
+		headers := result.RuntimeHeaders
+		if len(headers) == 0 && result.RuntimeHeaderName != "" {
+			headers = []runtimeHeader{{Name: result.RuntimeHeaderName, Source: result.RuntimeHeader}}
+		}
+		for _, header := range headers {
+			if header.Name != "" {
+				fmt.Fprintln(cmd.OutOrStdout(), filepath.Join(outDir, header.Name))
+			}
 		}
 		return nil
 	},

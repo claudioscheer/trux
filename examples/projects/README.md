@@ -12,9 +12,13 @@ printf 'Cara\nops\n' | trux run examples/projects/csv_roster/main.tx
 trux run examples/projects/scorebook/main.tx
 trux test examples/projects/scorebook/scores.test.tx
 trux run examples/projects/rotate_image/main.tx
+trux run examples/projects/http_server/main.tx
 ```
 
 `rotate_image` reads a PPM image, rotates it on CPU and GPU, writes both
 outputs, and compares the results.
 
 `scorebook` is a small pure package with unit tests for score calculations.
+
+`http_server` serves `GET /`, `GET /health`, and `POST /echo` on
+`127.0.0.1:8080`.

@@ -3,12 +3,16 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"net"
+	stdhttp "net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunFileParsesValidSourceWithNoOutput(t *testing.T) {
@@ -256,6 +260,117 @@ func TestRunFileCompilesAndExecutesModuleExamples(t *testing.T) {
 				t.Fatalf("output = %q, want %q", out.String(), tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildCommandCompilesAndRunsHTTPServer(t *testing.T) {
+	requireCC(t)
+
+	port := freeTCPPort(t)
+	path := writeTempSource(t, fmt.Sprintf(`package main
+import "http"
+
+func handle(request int) int {
+    let method string = http.method(request)
+    let path string = http.path(request)
+    let query string = http.query(request)
+    let agent string = http.header(request, "User-Agent")
+    let body string = http.body(request)
+
+    if method == "POST" {
+        if path == "/hello" {
+            http.respond(request, 200, "text/plain", query + "|" + agent + "|" + body)
+            return 0
+        }
+    }
+
+    http.respond(request, 404, "text/plain", "missing")
+    return 0
+}
+
+func main() int {
+    http.serve("127.0.0.1", %d, 4, handle)
+    return 0
+}`, port))
+	outputPath := filepath.Join(t.TempDir(), "server")
+	if err := buildFile(path, outputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(outputPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	})
+
+	client := &stdhttp.Client{Timeout: 500 * time.Millisecond}
+	url := fmt.Sprintf("http://127.0.0.1:%d/hello?name=trux", port)
+	var resp *stdhttp.Response
+	var err error
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		req, reqErr := stdhttp.NewRequest("POST", url, strings.NewReader("payload"))
+		if reqErr != nil {
+			t.Fatal(reqErr)
+		}
+		req.Header.Set("User-Agent", "trux-test")
+		resp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("HTTP server did not respond: %v\nstderr:\n%s", err, stderr.String())
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200, body = %q", resp.StatusCode, string(body))
+	}
+	if string(body) != "name=trux|trux-test|payload" {
+		t.Fatalf("body = %q, want request fields", string(body))
+	}
+
+	rawHTTPStatus := func(t *testing.T, request string) string {
+		t.Helper()
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 500*time.Millisecond)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if err := conn.SetDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := conn.Write([]byte(request)); err != nil {
+			t.Fatal(err)
+		}
+		response, err := io.ReadAll(conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line, _, _ := strings.Cut(string(response), "\r\n")
+		return line
+	}
+
+	duplicateCL := "POST /hello HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 5\r\nContent-Length: 7\r\n\r\npayload"
+	if status := rawHTTPStatus(t, duplicateCL); status != "HTTP/1.1 400 Bad Request" {
+		t.Fatalf("duplicate Content-Length status = %q, want 400", status)
+	}
+
+	transferEncoding := "POST /hello HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 7\r\n\r\npayload"
+	if status := rawHTTPStatus(t, transferEncoding); status != "HTTP/1.1 400 Bad Request" {
+		t.Fatalf("Transfer-Encoding status = %q, want 400", status)
 	}
 }
 
@@ -996,6 +1111,43 @@ func main() int {
 	}
 }
 
+func TestEmitCCommandWritesHTTPRuntimeHeader(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "http"
+
+func handle(request int) int {
+    http.respond(request, 200, "text/plain", "ok")
+    return 0
+}
+
+func main() int {
+    http.serve("127.0.0.1", 8080, 2, handle)
+    return 0
+}`)
+	outDir := t.TempDir()
+	var out bytes.Buffer
+
+	oldOutDir := emitCOutDir
+	t.Cleanup(func() {
+		emitCOutDir = oldOutDir
+		emitCCmd.SetOut(nil)
+	})
+	emitCOutDir = outDir
+	emitCCmd.SetOut(&out)
+
+	if err := emitCCmd.RunE(emitCCmd, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+
+	httpHeaderPath := filepath.Join(outDir, "trux_http_runtime.h")
+	if _, err := os.Stat(httpHeaderPath); err != nil {
+		t.Fatalf("expected HTTP runtime header: %v", err)
+	}
+	if !strings.Contains(out.String(), httpHeaderPath) {
+		t.Fatalf("output = %q, want HTTP runtime header path", out.String())
+	}
+}
+
 func TestEmitCFileSupportsModuleProgram(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := writeTempFile(t, dir, "main.tx", `package main
@@ -1100,6 +1252,70 @@ func main() int {
 	}
 	if strings.Contains(log, "-O2") {
 		t.Fatalf("compiler args = %q, did not expect optimized debug build", log)
+	}
+}
+
+func TestCompileGeneratedUsesPthreadForHTTP(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "http"
+
+func handle(request int) int {
+    http.respond(request, 200, "text/plain", "ok")
+    return 0
+}
+
+func main() int {
+    http.serve("127.0.0.1", 8080, 2, handle)
+    return 0
+}`)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "cc.log")
+	fakeCC := filepath.Join(dir, "fake-cc")
+	writeFakeCompiler(t, fakeCC, logPath)
+	t.Setenv("CC", fakeCC)
+	cPath, err := writeGeneratedFiles(dir, "main", result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := compileGenerated(cPath, outputPath, generatedCompileOptions{UsesHTTP: result.UsesHTTP}); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	if !strings.Contains(log, "-pthread") {
+		t.Fatalf("compiler args = %q, want -pthread", log)
+	}
+}
+
+func TestCompileCDetectsHTTPRuntimeInclude(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "main.c")
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "cc.log")
+	fakeCC := filepath.Join(dir, "fake-cc")
+	writeFakeCompiler(t, fakeCC, logPath)
+	t.Setenv("CC", fakeCC)
+	if err := os.WriteFile(sourcePath, []byte(`#include "trux_runtime.h"
+#include "trux_http_runtime.h"
+int main(void) { return 0; }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := compileC(sourcePath, outputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	if !strings.Contains(log, "-pthread") {
+		t.Fatalf("compiler args = %q, want -pthread", log)
 	}
 }
 
@@ -1287,6 +1503,22 @@ func readFile(t *testing.T, path string) string {
 	}
 
 	return string(content)
+}
+
+func freeTCPPort(t *testing.T) int {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address = %T, want *net.TCPAddr", listener.Addr())
+	}
+	return addr.Port
 }
 
 func requireCC(t *testing.T) {

@@ -34,6 +34,7 @@ const (
 	Assign       Type = "="
 	Equal        Type = "=="
 	NotEqual     Type = "!="
+	Not          Type = "!"
 	Less         Type = "<"
 	LessEqual    Type = "<="
 	Greater      Type = ">"

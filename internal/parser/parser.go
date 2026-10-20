@@ -535,7 +535,7 @@ func (p *Parser) parseAssignOrExprStmt() (ast.Statement, error) {
 }
 
 func (p *Parser) parseExpression(minPrecedence int) (ast.Expression, error) {
-	left, err := p.parsePostfix()
+	left, err := p.parseUnary()
 	if err != nil {
 		return nil, err
 	}
@@ -559,6 +559,18 @@ func (p *Parser) parseExpression(minPrecedence int) (ast.Expression, error) {
 			Right:    right,
 		}
 	}
+}
+
+func (p *Parser) parseUnary() (ast.Expression, error) {
+	if p.check(token.Minus) || p.check(token.Not) {
+		operator := p.advance()
+		operand, err := p.parseUnary()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.UnaryExpr{Start: operator.Pos, Operator: operator.Lexeme, Operand: operand}, nil
+	}
+	return p.parsePostfix()
 }
 
 func (p *Parser) parsePostfix() (ast.Expression, error) {
@@ -832,7 +844,7 @@ func describe(tok token.Token) string {
 func isLiteralToken(typ token.Type) bool {
 	switch typ {
 	case token.Assign, token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
-		token.Plus, token.Minus, token.Asterisk, token.Slash,
+		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Not,
 		token.Comma, token.Colon, token.Dot, token.Semicolon, token.LParen, token.RParen, token.LBrace, token.RBrace, token.LBracket, token.RBracket:
 		return true
 	default:

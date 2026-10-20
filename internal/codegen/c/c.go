@@ -802,6 +802,12 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 			values = append(values, arg.value)
 		}
 		return emittedExpr{prelude: prelude, value: fmt.Sprintf("%s(%s)", mangleFunc(expr.Callee), strings.Join(values, ", "))}, nil
+	case *ir.UnaryExpr:
+		operand, err := e.emitOrderedOperand(expr.Operand, targetArena)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		return emittedExpr{prelude: operand.prelude, value: emitUnaryValue(expr.Operator, expr.Type(), operand.value)}, nil
 	case *ir.BinaryExpr:
 		left, err := e.emitOrderedOperand(expr.Left, targetArena)
 		if err != nil {
@@ -970,6 +976,8 @@ func exprHasSideEffect(expr ir.Expr) bool {
 		return exprHasSideEffect(expr.Len)
 	case *ir.CloneExpr:
 		return exprHasSideEffect(expr.Value)
+	case *ir.UnaryExpr:
+		return exprHasSideEffect(expr.Operand)
 	case *ir.BinaryExpr:
 		return exprHasSideEffect(expr.Left) || exprHasSideEffect(expr.Right)
 	case *ir.LenExpr:
@@ -1158,6 +1166,12 @@ func emitExpr(expr ir.Expr, targetArena string, usage *funcUsage) (string, error
 			args = append(args, emitArg)
 		}
 		return fmt.Sprintf("%s(%s)", mangleFunc(expr.Callee), strings.Join(args, ", ")), nil
+	case *ir.UnaryExpr:
+		operand, err := emitExpr(expr.Operand, targetArena, usage)
+		if err != nil {
+			return "", err
+		}
+		return emitUnaryValue(expr.Operator, expr.Type(), operand), nil
 	case *ir.BinaryExpr:
 		left, err := emitExpr(expr.Left, targetArena, usage)
 		if err != nil {
@@ -1220,6 +1234,20 @@ func emitExpr(expr ir.Expr, targetArena string, usage *funcUsage) (string, error
 		return fmt.Sprintf("%s(%s, %s, %s, %s, %s)", sliceFn, collection, hasStart, start, hasEnd, end), nil
 	default:
 		return "", fmt.Errorf("unsupported IR expression %T", expr)
+	}
+}
+
+func emitUnaryValue(operator string, typ ast.Type, operand string) string {
+	switch operator {
+	case "!":
+		return fmt.Sprintf("!(%s)", operand)
+	case "-":
+		if ast.TypeEqual(typ, ast.IntType) {
+			return fmt.Sprintf("rt_sub_i64(0, %s)", operand)
+		}
+		return fmt.Sprintf("-(%s)", operand)
+	default:
+		return fmt.Sprintf("(%s%s)", operator, operand)
 	}
 }
 
@@ -1446,6 +1474,12 @@ func emitKernelExpr(expr ir.Expr) (string, error) {
 			return "true", nil
 		}
 		return "false", nil
+	case *ir.UnaryExpr:
+		operand, err := emitKernelExpr(expr.Operand)
+		if err != nil {
+			return "", err
+		}
+		return emitUnaryValue(expr.Operator, expr.Type(), operand), nil
 	case *ir.BinaryExpr:
 		left, err := emitKernelExpr(expr.Left)
 		if err != nil {
@@ -1852,6 +1886,8 @@ func collectExprNestedCollectionFamilies(expr ir.Expr, seen map[string]bool, fam
 		}
 	case *ir.CloneExpr:
 		return collectExprNestedCollectionFamilies(expr.Value, seen, families)
+	case *ir.UnaryExpr:
+		return collectExprNestedCollectionFamilies(expr.Operand, seen, families)
 	case *ir.BinaryExpr:
 		if err := collectExprNestedCollectionFamilies(expr.Left, seen, families); err != nil {
 			return err

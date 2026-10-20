@@ -65,7 +65,7 @@ func (l *Lexer) NextToken() token.Token {
 		if l.match('=') {
 			return token.Token{Type: token.NotEqual, Lexeme: "!=", Pos: pos}
 		}
-		return token.Token{Type: token.Illegal, Lexeme: "!", Pos: pos}
+		return token.Token{Type: token.Not, Lexeme: "!", Pos: pos}
 	case '<':
 		l.advance()
 		if l.match('=') {

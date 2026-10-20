@@ -51,6 +51,20 @@ pub func add(a int, b int) int {
 	}
 }
 
+func TestFormatKeepsPrefixOperatorsTight(t *testing.T) {
+	src := "package main\nfunc main() int {\nlet n int=-1\nlet flag bool=!false\nreturn 0\n}\n"
+	got, err := Format("main.tx", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "let n int = -1") {
+		t.Fatalf("formatted = %q, want tight prefix minus", got)
+	}
+	if !strings.Contains(got, "let flag bool = !false") {
+		t.Fatalf("formatted = %q, want tight boolean not", got)
+	}
+}
+
 func TestFormatNormalizesCStyleFor(t *testing.T) {
 	src := `package main
 func main() int{

@@ -379,6 +379,38 @@ func main() int {
 	}
 }
 
+func TestParsesPrefixOperators(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let n int = -1
+    let f float = -1.5
+    let flag bool = !false
+    let grouped bool = !(n == 0)
+    return 0
+}`)
+
+	mainFn := program.Functions[0]
+	n := mainFn.Body.Statements[0].(*ast.LetStmt).Value.(*ast.UnaryExpr)
+	if n.Operator != "-" {
+		t.Fatalf("int operator = %q, want -", n.Operator)
+	}
+	f := mainFn.Body.Statements[1].(*ast.LetStmt).Value.(*ast.UnaryExpr)
+	if f.Operator != "-" {
+		t.Fatalf("float operator = %q, want -", f.Operator)
+	}
+	flag := mainFn.Body.Statements[2].(*ast.LetStmt).Value.(*ast.UnaryExpr)
+	if flag.Operator != "!" {
+		t.Fatalf("bool operator = %q, want !", flag.Operator)
+	}
+	grouped := mainFn.Body.Statements[3].(*ast.LetStmt).Value.(*ast.UnaryExpr)
+	if grouped.Operator != "!" {
+		t.Fatalf("grouped operator = %q, want !", grouped.Operator)
+	}
+	if _, ok := grouped.Operand.(*ast.BinaryExpr); !ok {
+		t.Fatalf("grouped operand = %T, want comparison", grouped.Operand)
+	}
+}
+
 func TestParsesTrailingCommaInExpressionList(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

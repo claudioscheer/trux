@@ -474,6 +474,19 @@ func (e *HTTPRequestStringExpr) Ownership() types.Origin { return e.Origin }
 
 func (*HTTPRequestStringExpr) exprNode() {}
 
+type UnaryExpr struct {
+	Operator string
+	Operand  Expr
+	Typ      ast.Type
+	Origin   types.Origin
+}
+
+func (e *UnaryExpr) Type() ast.Type { return e.Typ }
+
+func (e *UnaryExpr) Ownership() types.Origin { return e.Origin }
+
+func (*UnaryExpr) exprNode() {}
+
 type BinaryExpr struct {
 	Left     Expr
 	Operator string
@@ -835,6 +848,12 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 			return nil, err
 		}
 		return &CallExpr{Callee: sig.Name, ReturnType: sig.ReturnType, Args: args, Origin: origin}, nil
+	case *ast.UnaryExpr:
+		operand, err := b.buildExpr(expr.Operand)
+		if err != nil {
+			return nil, err
+		}
+		return &UnaryExpr{Operator: expr.Operator, Operand: operand, Typ: typ, Origin: origin}, nil
 	case *ast.BinaryExpr:
 		left, err := b.buildExpr(expr.Left)
 		if err != nil {

@@ -321,6 +321,16 @@ func (e *CallExpr) TargetName() string {
 	return e.Callee
 }
 
+type UnaryExpr struct {
+	Start    token.Position
+	Operator string
+	Operand  Expression
+}
+
+func (e *UnaryExpr) Pos() token.Position { return e.Start }
+
+func (*UnaryExpr) expressionNode() {}
+
 type BinaryExpr struct {
 	Start    token.Position
 	Left     Expression

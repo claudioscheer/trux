@@ -3,6 +3,7 @@ package modules
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -123,7 +124,7 @@ func TestLoadRejectsInvalidImportPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			writeSource(t, dir, "main.tx", `package main
-import "`+tt.path+`"
+import `+strconv.Quote(tt.path)+`
 
 func main() int {
     return 0

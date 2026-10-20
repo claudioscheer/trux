@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -264,6 +265,9 @@ func TestRunFileCompilesAndExecutesModuleExamples(t *testing.T) {
 }
 
 func TestBuildCommandCompilesAndRunsHTTPServer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("http runtime is POSIX-only")
+	}
 	requireCC(t)
 
 	port := freeTCPPort(t)
@@ -1198,8 +1202,7 @@ func main() int {
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "program")
 	logPath := filepath.Join(dir, "cc.log")
-	fakeCC := filepath.Join(dir, "fake-cc")
-	writeFakeCompiler(t, fakeCC, logPath)
+	fakeCC := writeFakeCompiler(t, filepath.Join(dir, "fake-cc"), logPath)
 	t.Setenv("CC", fakeCC)
 
 	if err := buildFile(path, outputPath); err != nil {
@@ -1234,8 +1237,7 @@ func main() int {
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "program")
 	logPath := filepath.Join(dir, "cc.log")
-	fakeCC := filepath.Join(dir, "fake-cc")
-	writeFakeCompiler(t, fakeCC, logPath)
+	fakeCC := writeFakeCompiler(t, filepath.Join(dir, "fake-cc"), logPath)
 	t.Setenv("CC", fakeCC)
 	cPath, err := writeGeneratedFiles(dir, "main", result)
 	if err != nil {
@@ -1276,8 +1278,7 @@ func main() int {
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "program")
 	logPath := filepath.Join(dir, "cc.log")
-	fakeCC := filepath.Join(dir, "fake-cc")
-	writeFakeCompiler(t, fakeCC, logPath)
+	fakeCC := writeFakeCompiler(t, filepath.Join(dir, "fake-cc"), logPath)
 	t.Setenv("CC", fakeCC)
 	cPath, err := writeGeneratedFiles(dir, "main", result)
 	if err != nil {
@@ -1299,8 +1300,7 @@ func TestCompileCDetectsHTTPRuntimeInclude(t *testing.T) {
 	sourcePath := filepath.Join(dir, "main.c")
 	outputPath := filepath.Join(dir, "program")
 	logPath := filepath.Join(dir, "cc.log")
-	fakeCC := filepath.Join(dir, "fake-cc")
-	writeFakeCompiler(t, fakeCC, logPath)
+	fakeCC := writeFakeCompiler(t, filepath.Join(dir, "fake-cc"), logPath)
 	t.Setenv("CC", fakeCC)
 	if err := os.WriteFile(sourcePath, []byte(`#include "trux_runtime.h"
 #include "trux_http_runtime.h"
@@ -1422,8 +1422,7 @@ func main() int {
 	dir := t.TempDir()
 	outputPath := filepath.Join(dir, "program")
 	logPath := filepath.Join(dir, "nvcc.log")
-	fakeNVCC := filepath.Join(dir, "fake-nvcc")
-	writeFakeCompiler(t, fakeNVCC, logPath)
+	fakeNVCC := writeFakeCompiler(t, filepath.Join(dir, "fake-nvcc"), logPath)
 	t.Setenv("NVCC", fakeNVCC)
 
 	if err := buildFile(path, outputPath); err != nil {
@@ -1546,14 +1545,28 @@ func requireNVCCAndCUDA(t *testing.T) {
 	if _, err := exec.LookPath("nvidia-smi"); err != nil {
 		t.Skip("nvidia-smi not found")
 	}
+	if runtime.GOOS == "windows" {
+		if _, err := exec.LookPath("cl"); err != nil {
+			t.Skip("nvcc host compiler cl.exe not found")
+		}
+	}
 	cmd := exec.Command("nvidia-smi")
 	if err := cmd.Run(); err != nil {
 		t.Skipf("CUDA device unavailable: %v", err)
 	}
 }
 
-func writeFakeCompiler(t *testing.T, path string, logPath string) {
+func writeFakeCompiler(t *testing.T, path string, logPath string) string {
 	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		path += ".cmd"
+		script := fmt.Sprintf("@echo off\r\nsetlocal\r\necho %%* > \"%s\"\r\n:loop\r\nif \"%%~1\"==\"\" exit /b 2\r\nif \"%%~1\"==\"-o\" goto writeout\r\nshift\r\ngoto loop\r\n:writeout\r\nshift\r\ntype nul > \"%%~1\"\r\nexit /b 0\r\n", logPath)
+		if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
 
 	script := fmt.Sprintf(`#!/bin/sh
 echo "$@" > %q
@@ -1570,6 +1583,7 @@ exit 2
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	return path
 }
 
 func truxString(value string) string {

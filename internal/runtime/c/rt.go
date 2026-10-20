@@ -17,6 +17,11 @@ const Source = `#ifndef TRUX_RUNTIME_H
 #include <inttypes.h>
 #include <time.h>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #ifdef TRUX_RUNTIME_CUDA
 #include <cuda_runtime.h>
 #endif
@@ -34,6 +39,14 @@ const Source = `#ifndef TRUX_RUNTIME_H
 #endif
 
 #define RT_ARENA_DEFAULT_CHUNK_SIZE ((size_t)4096)
+
+/* Windows text-mode stdout turns \n into \r\n. Trux programs and tests use \n. */
+static RT_UNUSED void rt_stdio_binary(void) {
+#if defined(_WIN32) && !defined(__CUDA_ARCH__)
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+#endif
+}
 
 typedef struct {
     const uint8_t* data;

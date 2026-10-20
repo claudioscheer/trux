@@ -624,6 +624,17 @@ func (c *checker) checkKernelExpr(locals *scope, expr ast.Expression) (ast.Type,
 		}
 		c.setExpr(expr, local.typ, local.origin)
 		return local.typ, nil
+	case *ast.UnaryExpr:
+		operandType, err := c.checkKernelExpr(locals, expr.Operand)
+		if err != nil {
+			return nil, err
+		}
+		typ, err := unaryType(expr.Start, expr.Operator, operandType)
+		if err != nil {
+			return nil, err
+		}
+		c.setExpr(expr, typ, OriginOwned)
+		return typ, nil
 	case *ast.BinaryExpr:
 		leftType, err := c.checkKernelExpr(locals, expr.Left)
 		if err != nil {
@@ -781,6 +792,17 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		}
 		c.setExpr(expr, local.typ, local.origin)
 		return local.typ, nil
+	case *ast.UnaryExpr:
+		operandType, err := c.checkExpr(locals, expr.Operand, false)
+		if err != nil {
+			return nil, err
+		}
+		typ, err := unaryType(expr.Start, expr.Operator, operandType)
+		if err != nil {
+			return nil, err
+		}
+		c.setExpr(expr, typ, OriginOwned)
+		return typ, nil
 	case *ast.BinaryExpr:
 		leftType, err := c.checkExpr(locals, expr.Left, false)
 		if err != nil {
@@ -1265,6 +1287,23 @@ func originForStdlibResult(origin stdlib.ResultOrigin) Origin {
 		return OriginFrameOwned
 	default:
 		return OriginUnknown
+	}
+}
+
+func unaryType(pos token.Position, operator string, operand ast.Type) (ast.Type, error) {
+	switch operator {
+	case "!":
+		if ast.TypeEqual(operand, ast.BoolType) {
+			return ast.BoolType, nil
+		}
+		return nil, typeError(pos, "operator %q requires a bool operand, got %s", operator, operand)
+	case "-":
+		if ast.TypeEqual(operand, ast.IntType) || ast.TypeEqual(operand, ast.FloatType) {
+			return operand, nil
+		}
+		return nil, typeError(pos, "operator %q requires an int or float operand, got %s", operator, operand)
+	default:
+		return nil, typeError(pos, "unsupported operator %q", operator)
 	}
 }
 

@@ -244,6 +244,10 @@ func needsSpace(tokens []token.Token, index int, prevprev token.Token, prev toke
 		return true
 	}
 
+	if isPrefixOperand(prevprev, prev, curr) {
+		return false
+	}
+
 	if isOperator(curr.Type) || isOperator(prev.Type) {
 		return true
 	}
@@ -401,9 +405,28 @@ func noSpaceAfter(typ token.Type) bool {
 	}
 }
 
+func isPrefixOperand(prevprev token.Token, prev token.Token, curr token.Token) bool {
+	if prev.Type != token.Minus && prev.Type != token.Not {
+		return false
+	}
+	switch curr.Type {
+	case token.Ident, token.Int, token.Float, token.True, token.False, token.LParen, token.Minus, token.Not:
+	default:
+		return false
+	}
+	switch prevprev.Type {
+	case "", token.Assign, token.LParen, token.LBrace, token.Comma, token.Semicolon, token.Return,
+		token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
+		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Not, token.In, token.LBracket, token.If, token.For, token.Else:
+		return true
+	default:
+		return false
+	}
+}
+
 func isOperator(typ token.Type) bool {
 	switch typ {
-	case token.Assign, token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
+	case token.Assign, token.Equal, token.NotEqual, token.Not, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
 		token.Plus, token.Minus, token.Asterisk, token.Slash, token.In:
 		return true
 	default:

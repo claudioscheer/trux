@@ -1391,6 +1391,42 @@ func sameTypes(got []ast.Type, want []ast.Type) bool {
 	return true
 }
 
+func TestCheckPrefixOperators(t *testing.T) {
+	info, err := Check(mustParse(t, `package main
+func main() int {
+    let n int = -3
+    let f float = -1.5
+    let flag bool = !false
+    let grouped bool = !(n == 0)
+    print(n, f, flag, grouped)
+    return 0
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info == nil {
+		t.Fatal("missing type info")
+	}
+
+	_, err = Check(mustParse(t, `package main
+func main() int {
+    let bad bool = !1
+    return 0
+}`))
+	if err == nil || !strings.Contains(err.Error(), "requires a bool operand") {
+		t.Fatalf("error = %v, want bool operand", err)
+	}
+
+	_, err = Check(mustParse(t, `package main
+func main() int {
+    let bad int = -true
+    return 0
+}`))
+	if err == nil || !strings.Contains(err.Error(), "requires an int or float operand") {
+		t.Fatalf("error = %v, want numeric operand", err)
+	}
+}
+
 func mustParse(t *testing.T, src string) *ast.Program {
 	t.Helper()
 

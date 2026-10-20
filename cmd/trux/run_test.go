@@ -639,6 +639,83 @@ func main() int {
 	}
 }
 
+func TestRunFileCompilesAndExecutesPrefixOperators(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func main() int {
+    let n int = -4
+    let f float = -1.5
+    let flag bool = !false
+    let grouped bool = !(1 == 2)
+    print(n)
+    print(f)
+    print(flag)
+    print(grouped)
+    return 0
+}`)
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "-4\n-1.5\ntrue\ntrue\n" {
+		t.Fatalf("output = %q, want prefix results", out.String())
+	}
+}
+
+func TestRunFileNegatingMinimumIntOverflows(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func main() int {
+    let min int = (0 - 9223372036854775807) - 1
+    print(-min)
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err == nil {
+		t.Fatal("expected overflow")
+	}
+	if !strings.Contains(err.Error(), "trux runtime error: integer overflow in -") {
+		t.Fatalf("error = %q, want integer overflow", err.Error())
+	}
+}
+
+func TestCompileFileEmitsPrefixOperatorsForHostAndKernel(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+
+kernel func scale(out gpu.Buffer[int], n int, enabled bool) {
+    let i int = -gpu.globalX()
+    if !enabled {
+        out[0] = i
+    }
+}
+
+func main() int {
+    let n int = -1
+    let f float = -1.5
+    let flag bool = !false
+    print(n)
+    print(f)
+    print(flag)
+    return 0
+}`)
+
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{"rt_sub_i64(0,", "!(", "-(", "__global__"} {
+		if !strings.Contains(result.CSource, part) {
+			t.Fatalf("generated source missing %q:\n%s", part, result.CSource)
+		}
+	}
+}
+
 func TestRunFileReturnsRuntimeIntegerDivisionErrors(t *testing.T) {
 	requireCC(t)
 

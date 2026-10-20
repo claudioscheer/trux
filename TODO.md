@@ -1,3 +1,19 @@
+# Historical review
+
+This file is a past review transcript. It is not the open-work list. Open work is `docs/language-audit-tickets.json`.
+
+## Already in the compiler
+
+These items from the transcript below are already in the compiler. They are not open work:
+
+- return-path analysis
+- function and kernel name mangling
+- checked integer arithmetic, including division by zero and signed overflow
+- left-to-right evaluation order
+- `-O2` for normal builds
+
+# Transcript
+
 Now let me look at the C runtime — that's where arena semantics, string handling, and the collection macros live.Now let me check the IR ownership model and how `void`/returns are handled, then build and run the test suite.It builds and runs with Go 1.22 (the `go 1.26.3` directive was stricter than needed). Now the test suites:All green. Now let me probe the suspected reliability holes with adversarial programs. First: a function that doesn't return on every path.Both confirmed — valid Trux programs that leak raw C compiler errors. Next: argument evaluation order with side-effecting expressions.Division by zero is a raw SIGFPE — no trux error despite the language bounds-checking everything else. Now the subtle one: arena/ownership correctness across calls (dangling views):Ownership analysis holds up. One string-borrowing probe, then performance:Solid project — and the part I expected to be broken (the arena/ownership model) actually survived everything I threw at it. I cloned the repo, built it (note: your `go.mod` says `go 1.26.3` but it compiles fine on 1.22 — you're demanding a newer toolchain than you use), ran both test suites (all green), and then probed the generated C with adversarial programs. The real problems are elsewhere. Here's what I found, all verified by running code.
 
 ## Reliability: four confirmed bugs

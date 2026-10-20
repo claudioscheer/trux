@@ -1,0 +1,89 @@
+package language
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+func TestLanguageDocsMatchTheCompiler(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	root := filepath.Join(filepath.Dir(file), "..", "..")
+
+	specs := readDoc(t, filepath.Join(root, "docs", "SPECS.md"))
+	modules := readDoc(t, filepath.Join(root, "docs", "MODULES.md"))
+	readme := readDoc(t, filepath.Join(root, "README.md"))
+	gpu := readDoc(t, filepath.Join(root, "docs", "GPU.md"))
+	todo := readDoc(t, filepath.Join(root, "TODO.md"))
+
+	for _, phrase := range []string{
+		"Nested lists, slices, and arrays are supported",
+		"pub func` and package-qualified calls are implemented",
+		"Integer `+`, `-`, `*`, and `/` trap on signed overflow",
+		"Integer `/` also traps on division by zero",
+		"Float arithmetic follows IEEE 754",
+	} {
+		if !strings.Contains(specs, phrase) {
+			t.Fatalf("SPECS.md missing %q", phrase)
+		}
+	}
+	if strings.Contains(specs, "Nested collections are rejected") {
+		t.Fatal("SPECS.md still rejects nested collections")
+	}
+	if strings.Contains(specs, "nested collection element types") {
+		t.Fatal("SPECS.md still lists nested collections as a compiler rejection")
+	}
+
+	for _, pkg := range []string{"`io`", "`csv`", "`image`", "`time`", "`http`", "`gpu`"} {
+		if !strings.Contains(modules, pkg) {
+			t.Fatalf("MODULES.md missing standard package %s", pkg)
+		}
+	}
+	if strings.Contains(modules, "Currently supported standard packages are `io` and `csv`") {
+		t.Fatal("MODULES.md still limits bare imports to io and csv")
+	}
+
+	if !strings.Contains(readme, "nvcc") {
+		t.Fatal("README pipeline missing nvcc")
+	}
+	if !strings.Contains(readme, "CUDA") {
+		t.Fatal("README pipeline missing CUDA")
+	}
+
+	if !strings.Contains(gpu, "does not print a Trux runtime error message") {
+		t.Fatal("GPU.md missing the device trap note")
+	}
+
+	if !strings.Contains(todo, "# Historical review") {
+		t.Fatal("TODO.md is not marked historical")
+	}
+	for _, item := range []string{
+		"return-path analysis",
+		"function and kernel name mangling",
+		"checked integer arithmetic, including division by zero and signed overflow",
+		"left-to-right evaluation order",
+		"`-O2` for normal builds",
+	} {
+		if !strings.Contains(todo, item) {
+			t.Fatalf("TODO.md already-done list missing %q", item)
+		}
+	}
+	already := todo[:strings.Index(todo, "# Transcript")]
+	if strings.Contains(already, "open work:\n\n- return-path") {
+		t.Fatal("fixed items are listed as open work")
+	}
+}
+
+func readDoc(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}

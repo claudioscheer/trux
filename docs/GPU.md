@@ -73,6 +73,8 @@ gpu.blockDimZ()
 
 `gpu.copyToHost` is synchronous for the copied data. `gpu.sync()` is available when source code needs an explicit synchronization point, such as timing a kernel.
 
+Integer arithmetic inside a kernel uses the same overflow and division checks as host code. On device, a failing check traps the kernel. That trap does not print a Trux runtime error message.
+
 ## Example
 
 `examples/gpu_matrix_multiply.tx` runs square matrix multiplication twice in the same Trux program: once on the CPU and once with a Trux GPU kernel. It computes launch geometry from `n`, then prints CPU and GPU checksums, mismatch count, and elapsed time from the `time` package.

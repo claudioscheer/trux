@@ -11,8 +11,8 @@ source code
   -> AST
   -> type checker
   -> typed IR
-  -> C code
-  -> cc (or $CC)
+  -> C code or CUDA
+  -> cc (or $CC), or nvcc (or $NVCC) for a program that declares a kernel
   -> executable
 ```
 

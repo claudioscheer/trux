@@ -970,7 +970,7 @@ func generatedFunctionBody(t *testing.T, cSource string, name string) string {
 	}
 }
 
-func TestGenerateOnlyEmitsVoidCastsForUnusedRuntimeParameters(t *testing.T) {
+func TestGenerateAlwaysVoidCastsRuntimeParameters(t *testing.T) {
 	cSource := mustGenerateC(t, `package main
 func id(x int) int {
     return x
@@ -1005,19 +1005,35 @@ func main() int {
 	}
 
 	owned := generatedFunctionBody(t, cSource, "ownedMiddle")
-	if !strings.Contains(owned, "(void)trux_ctx;") {
-		t.Fatalf("ownedMiddle should mark unused trux_ctx:\n%s", owned)
-	}
-	if strings.Contains(owned, "(void)trux_result_arena;") {
-		t.Fatalf("ownedMiddle should not mark used trux_result_arena unused:\n%s", owned)
+	if !strings.Contains(owned, "(void)trux_ctx;") || !strings.Contains(owned, "(void)trux_result_arena;") {
+		t.Fatalf("ownedMiddle should void-cast both runtime parameters:\n%s", owned)
 	}
 
 	callsCtx := generatedFunctionBody(t, cSource, "callsCtx")
-	if strings.Contains(callsCtx, "(void)trux_ctx;") {
-		t.Fatalf("callsCtx should not mark used trux_ctx unused:\n%s", callsCtx)
+	if !strings.Contains(callsCtx, "(void)trux_ctx;") || !strings.Contains(callsCtx, "(void)trux_result_arena;") {
+		t.Fatalf("callsCtx should void-cast both runtime parameters:\n%s", callsCtx)
 	}
-	if !strings.Contains(callsCtx, "(void)trux_result_arena;") {
-		t.Fatalf("callsCtx should mark unused trux_result_arena:\n%s", callsCtx)
+	if strings.Contains(cSource, "funcUsage") {
+		t.Fatal("generated source should not mention a usage tracker")
+	}
+}
+
+func TestKernelPrototypeMatchesDefinition(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "gpu"
+
+kernel func fill(out gpu.Buffer[int], n int) {
+    out[0] = n
+}
+
+func main() int {
+    return 0
+}`)
+
+	proto := "__global__ void trux_k_4_fill(int64_t* trux_v_3_out, int64_t trux_v_1_n);"
+	def := "__global__ void trux_k_4_fill(int64_t* trux_v_3_out, int64_t trux_v_1_n) {"
+	if !strings.Contains(cSource, proto) || !strings.Contains(cSource, def) {
+		t.Fatalf("kernel prototype and definition diverged:\n%s", cSource)
 	}
 }
 

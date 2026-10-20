@@ -1,6 +1,7 @@
 package c
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -627,6 +628,235 @@ int main(void) {
     rt_context recursive = {0};
     if (!recurse(&recursive, 8)) return 4;
     rt_context_free_chunks(&recursive);
+    return 0;
+}
+`)
+}
+
+func TestListHeaderSharesRegistrationAllocation(t *testing.T) {
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    size_t before = rt_test_malloc_calls;
+    rt_list_int* list = rt_list_int_new(&arena, 4);
+    size_t created = rt_test_malloc_calls - before;
+    if (created != 2) {
+        fprintf(stderr, "list mallocs = %zu, want 2\n", created);
+        return 1;
+    }
+    uintptr_t node = (uintptr_t)arena.lists;
+    uintptr_t header = (uintptr_t)list;
+    if (arena.lists == NULL || arena.lists->list != list ||
+        header < node + sizeof(rt_list_allocation) ||
+        header >= node + sizeof(rt_list_allocation) + 64) {
+        fprintf(stderr, "list header is not inside its registration block\n");
+        return 2;
+    }
+
+    rt_list_int_append(list, 10);
+    rt_list_int_append(list, 20);
+    rt_list_int_set(list, 0, 7);
+    if (rt_list_int_get(list, 0) != 7 || rt_list_int_get(list, 1) != 20 || list->len != 2) {
+        fprintf(stderr, "list append or index failed\n");
+        return 3;
+    }
+
+    rt_list_int* cloned = rt_list_int_clone(&arena, list);
+    rt_list_int_set(list, 0, 1);
+    if (cloned == list || rt_list_int_get(cloned, 0) != 7 || rt_list_int_get(cloned, 1) != 20) {
+        fprintf(stderr, "list clone did not keep an independent copy\n");
+        return 4;
+    }
+
+    before = rt_test_malloc_calls;
+    rt_list_int* empty = rt_list_int_new(&arena, 0);
+    if (rt_test_malloc_calls - before != 1) {
+        fprintf(stderr, "empty list mallocs = %zu, want 1\n", rt_test_malloc_calls - before);
+        return 5;
+    }
+    uintptr_t empty_node = (uintptr_t)arena.lists;
+    uintptr_t empty_header = (uintptr_t)empty;
+    if (arena.lists->list != empty ||
+        empty_header < empty_node + sizeof(rt_list_allocation) ||
+        empty_header >= empty_node + sizeof(rt_list_allocation) + 64) {
+        fprintf(stderr, "empty list header is not inside its registration block\n");
+        return 6;
+    }
+    rt_list_int_append(empty, 5);
+    if (rt_list_int_get(empty, 0) != 5 || empty->len != 1) {
+        fprintf(stderr, "append on an empty list failed\n");
+        return 7;
+    }
+
+    rt_arena_deinit(&arena);
+    if (arena.lists != NULL) {
+        fprintf(stderr, "deinit left a list registration\n");
+        return 8;
+    }
+    return 0;
+}
+`)
+}
+
+func TestReadFileFillsOneBuffer(t *testing.T) {
+	dir := t.TempDir()
+	smallPath := filepath.Join(dir, "small.bin")
+	small := []byte{0, 1, 255, 'a', '\n', 0}
+	if err := os.WriteFile(smallPath, small, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	emptyPath := filepath.Join(dir, "empty.bin")
+	if err := os.WriteFile(emptyPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bigPath := filepath.Join(dir, "big.bin")
+	if err := os.WriteFile(bigPath, bytes.Repeat([]byte{'Z'}, 5000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    rt_string small_path = `+cString(smallPath)+`;
+    rt_string empty_path = `+cString(emptyPath)+`;
+    rt_string big_path = `+cString(bigPath)+`;
+    const uint8_t small_want[] = {0, 1, 255, 'a', 10, 0};
+
+    size_t before = rt_test_malloc_calls;
+    rt_string text = rt_read_file(&arena, small_path);
+    if (rt_test_malloc_calls - before != 2) {
+        fprintf(stderr, "small read mallocs = %zu, want 2\n", rt_test_malloc_calls - before);
+        return 1;
+    }
+    if (arena.chunks == NULL || arena.chunks->next != NULL) {
+        fprintf(stderr, "small read did not use exactly one chunk\n");
+        return 2;
+    }
+    if (text.len != 6 || text.data == NULL || memcmp(text.data, small_want, 6) != 0) {
+        fprintf(stderr, "small read bytes mismatch\n");
+        return 3;
+    }
+    uintptr_t chunk_start = (uintptr_t)arena.chunks->data;
+    uintptr_t chunk_end = chunk_start + arena.chunks->used;
+    uintptr_t text_addr = (uintptr_t)text.data;
+    if (text_addr < chunk_start || text_addr + text.len > chunk_end) {
+        fprintf(stderr, "small read is not inside the arena chunk\n");
+        return 4;
+    }
+
+    before = rt_test_malloc_calls;
+    rt_string empty = rt_read_file(&arena, empty_path);
+    if (rt_test_malloc_calls - before != 1) {
+        fprintf(stderr, "empty read mallocs = %zu, want 1\n", rt_test_malloc_calls - before);
+        return 5;
+    }
+    if (empty.len != 0 || empty.data != NULL) {
+        fprintf(stderr, "empty read was not an empty string\n");
+        return 6;
+    }
+    if (arena.chunks == NULL || arena.chunks->next != NULL) {
+        fprintf(stderr, "empty read allocated another chunk\n");
+        return 7;
+    }
+
+    before = rt_test_malloc_calls;
+    rt_string big = rt_read_file(&arena, big_path);
+    if (rt_test_malloc_calls - before != 2) {
+        fprintf(stderr, "big read mallocs = %zu, want 2\n", rt_test_malloc_calls - before);
+        return 8;
+    }
+    if (big.len != 5000 || big.data == NULL || big.data[0] != 'Z' || big.data[4999] != 'Z') {
+        fprintf(stderr, "big read bytes mismatch\n");
+        return 9;
+    }
+    if (arena.chunks == NULL || arena.chunks->cap < 5000) {
+        fprintf(stderr, "big read chunk cap = %zu\n", arena.chunks == NULL ? 0 : arena.chunks->cap);
+        return 10;
+    }
+
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`)
+}
+
+func TestArenaChunksGrowGeometrically(t *testing.T) {
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    if (rt_arena_alloc(&arena, RT_ARENA_DEFAULT_CHUNK_SIZE) == NULL) {
+        return 1;
+    }
+    size_t first_cap = arena.chunks->cap;
+    if (first_cap != RT_ARENA_DEFAULT_CHUNK_SIZE) {
+        fprintf(stderr, "first cap = %zu\n", first_cap);
+        return 2;
+    }
+
+    if (rt_arena_alloc(&arena, 1) == NULL) {
+        return 1;
+    }
+    size_t second_cap = arena.chunks->cap;
+    if (second_cap < first_cap * 2) {
+        fprintf(stderr, "second cap = %zu, first = %zu\n", second_cap, first_cap);
+        return 3;
+    }
+
+    size_t room = arena.chunks->cap - arena.chunks->used;
+    if (rt_arena_alloc(&arena, room) == NULL) {
+        return 1;
+    }
+    if (arena.chunks->cap != second_cap || arena.chunks->used != second_cap) {
+        fprintf(stderr, "second chunk was not filled in place\n");
+        return 4;
+    }
+
+    if (rt_arena_alloc(&arena, 1) == NULL) {
+        return 1;
+    }
+    size_t third_cap = arena.chunks->cap;
+    if (third_cap < second_cap * 2) {
+        fprintf(stderr, "third cap = %zu, second = %zu\n", third_cap, second_cap);
+        return 5;
+    }
+    if (rt_test_malloc_calls != 3) {
+        fprintf(stderr, "chunk mallocs = %zu, want 3\n", rt_test_malloc_calls);
+        return 6;
+    }
+
+    size_t used = first_cap + second_cap + (size_t)RT_ALIGNOF(max_align_t);
+    size_t fixed_chunks = (used + RT_ARENA_DEFAULT_CHUNK_SIZE - 1) / RT_ARENA_DEFAULT_CHUNK_SIZE;
+    if (!(rt_test_malloc_calls < fixed_chunks)) {
+        fprintf(stderr, "geometric mallocs = %zu, fixed 4KB chunks = %zu\n", rt_test_malloc_calls, fixed_chunks);
+        return 7;
+    }
+
+    rt_arena_deinit(&arena);
+
+    rt_context ctx = {0};
+    rt_arena frame;
+    rt_arena_init_frame(&frame, &ctx);
+    if (rt_arena_alloc(&frame, RT_ARENA_DEFAULT_CHUNK_SIZE) == NULL || rt_arena_alloc(&frame, 1) == NULL) {
+        return 1;
+    }
+    rt_arena_deinit(&frame);
+    size_t pooled = rt_test_malloc_calls;
+    rt_arena_init_frame(&frame, &ctx);
+    if (rt_arena_alloc(&frame, RT_ARENA_DEFAULT_CHUNK_SIZE) == NULL || rt_arena_alloc(&frame, 1) == NULL) {
+        return 1;
+    }
+    if (rt_test_malloc_calls != pooled) {
+        fprintf(stderr, "pool reused %zu then allocated %zu\n", pooled, rt_test_malloc_calls);
+        return 8;
+    }
+    rt_arena_deinit(&frame);
+    rt_context_free_chunks(&ctx);
     return 0;
 }
 `)

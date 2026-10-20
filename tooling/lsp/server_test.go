@@ -267,9 +267,14 @@ func TestInitializeAdvertisesDefinitionAndReferences(t *testing.T) {
 	}
 }
 
+func roundTripURI(t *testing.T, name string) string {
+	t.Helper()
+	return uriFromPath(filepath.Join(t.TempDir(), name))
+}
+
 func TestDefinitionForLocalVariable(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
-	uri := "file:///tmp/main.tx"
+	uri := roundTripURI(t, "main.tx")
 	src := `package main
 func main() int {
     let total int = 1
@@ -292,7 +297,7 @@ func main() int {
 
 func TestDefinitionForParameter(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
-	uri := "file:///tmp/main.tx"
+	uri := roundTripURI(t, "main.tx")
 	src := `package main
 func echo(value int) int {
     return value
@@ -561,7 +566,7 @@ pub func add(a int, b int) int {
 
 func TestDefinitionForStandardLibraryPackageQualifier(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
-	uri := "file:///tmp/main.tx"
+	uri := roundTripURI(t, "main.tx")
 	src := `package main
 import "io"
 
@@ -598,7 +603,7 @@ func main() int {
 
 func TestReferencesForLocalVariable(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
-	uri := "file:///tmp/main.tx"
+	uri := roundTripURI(t, "main.tx")
 	src := `package main
 func main() int {
     let total int = 1

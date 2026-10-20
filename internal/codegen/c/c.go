@@ -110,6 +110,7 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	}
 
 	fmt.Fprintln(&out, "int main(void) {")
+	fmt.Fprintln(&out, "    rt_stdio_binary();")
 	fmt.Fprintln(&out, "    rt_arena trux_arena;")
 	fmt.Fprintln(&out, "    rt_arena_init(&trux_arena);")
 	fmt.Fprintln(&out, "    rt_context trux_ctx = {&trux_arena};")

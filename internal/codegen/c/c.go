@@ -125,8 +125,9 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	fmt.Fprintln(&out, "    rt_stdio_binary();")
 	fmt.Fprintln(&out, "    rt_arena trux_arena;")
 	fmt.Fprintln(&out, "    rt_arena_init(&trux_arena);")
-	fmt.Fprintln(&out, "    rt_context trux_ctx = {&trux_arena};")
+	fmt.Fprintln(&out, "    rt_context trux_ctx = {&trux_arena, NULL};")
 	fmt.Fprintf(&out, "    int64_t trux_exit_code = %s(&trux_ctx, &trux_arena);\n", mangleFunc("main"))
+	fmt.Fprintln(&out, "    rt_context_free_chunks(&trux_ctx);")
 	fmt.Fprintln(&out, "    rt_arena_deinit(&trux_arena);")
 	fmt.Fprintln(&out, "    return (int)trux_exit_code;")
 	fmt.Fprintln(&out, "}")
@@ -152,7 +153,7 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
 	fmt.Fprintln(out, "    (void)trux_result_arena;")
 
 	fmt.Fprintln(out, "    rt_arena trux_frame;")
-	fmt.Fprintln(out, "    rt_arena_init(&trux_frame);")
+	fmt.Fprintln(out, "    rt_arena_init_frame(&trux_frame, trux_ctx);")
 	fmt.Fprintf(out, "    %s trux_return_value;\n", returnType)
 	emitter := &funcEmitter{}
 	for _, stmt := range fn.Body {

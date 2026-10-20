@@ -639,6 +639,32 @@ func main() int {
 	}
 }
 
+func TestRunFileReusesFrameChunksAcrossCalls(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func bang(value string) string {
+    return value + "!"
+}
+
+func main() int {
+    let i int = 0
+    let word string = "a"
+    for ; i < 5; i = i + 1 {
+        word = bang(word)
+    }
+    print(word)
+    return 0
+}`)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "a!!!!!\n" {
+		t.Fatalf("output = %q, want a!!!!!", out.String())
+	}
+}
+
 func TestRunFileBreakAndContinue(t *testing.T) {
 	requireCC(t)
 

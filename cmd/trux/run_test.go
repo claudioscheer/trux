@@ -639,6 +639,158 @@ func main() int {
 	}
 }
 
+func TestRunFileRewindsLoopTempsAndKeepsEscapes(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func temps(n int) int {
+    let i int = 0
+    let count int = 0
+    for ; i < n; i = i + 1 {
+        let temp string = "a" + "b"
+        if temp == "ab" {
+            count = count + 1
+        }
+    }
+    return count
+}
+
+func kept(n int) string {
+    let acc string = ""
+    let i int = 0
+    for ; i < n; i = i + 1 {
+        acc = acc + "x"
+    }
+    return acc
+}
+
+func collect(n int) int {
+    let words list[string] = list[string]{}
+    let i int = 0
+    for ; i < n; i = i + 1 {
+        append(words, "a" + "b")
+    }
+    return len(words)
+}
+
+func word() string {
+    return "a" + "b"
+}
+
+func countWords(n int) int {
+    let i int = 0
+    let count int = 0
+    for ; i < n; i = i + 1 {
+        let temp string = word()
+        if temp == "ab" {
+            count = count + 1
+        }
+    }
+    return count
+}
+
+func pushWord(mut words list[string], word string) int {
+    append(words, word)
+    return len(words)
+}
+
+func fill(n int) int {
+    let words list[string] = list[string]{}
+    let i int = 0
+    for ; i < n; i = i + 1 {
+        pushWord(words, "a" + "b")
+    }
+    print(words[0], " ", words[2])
+    return len(words)
+}
+
+func early() string {
+    let i int = 0
+    for ; i < 5; i = i + 1 {
+        let temp string = "h" + "i"
+        if i == 3 {
+            return temp
+        }
+    }
+    return ""
+}
+
+func leaf(n int) int {
+    if n == 0 {
+        return 2
+    }
+    let i int = 0
+    let sum int = 0
+    for ; i < 2; i = i + 1 {
+        let inner string = "v" + "w"
+        sum = sum + leaf(n - 1) + len(inner)
+    }
+    return sum
+}
+
+func sumViews(n int) int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let i int = 0
+    let total int = 0
+    for ; i < n; i = i + 1 {
+        let view []int = clone(xs[:])
+        total = total + view[0] + view[2]
+    }
+    return total
+}
+
+func keptSlice() int {
+    let xs [3]int = [3]int{4, 5, 6}
+    let view []int = xs[:]
+    let i int = 0
+    for ; i < 3; i = i + 1 {
+        view = clone(xs[:])
+    }
+    return view[0] + view[2]
+}
+
+func mix(n int) int {
+    let nums list[int] = list[int]{}
+    let i int = 0
+    for ; i < n; i = i + 1 {
+        let temp string = "a" + "b"
+        append(nums, len(temp))
+    }
+    return nums[0] + nums[n - 1] + len(nums)
+}
+
+func hot(n int) int {
+    let checksum int = 1
+    for let i int = 0; i < n; i = i + 1 {
+        checksum = checksum + i
+    }
+    return checksum
+}
+
+func main() int {
+    print(temps(20))
+    print(kept(4))
+    print(collect(3))
+    print(countWords(4))
+    print(fill(3))
+    print(early())
+    print(leaf(2))
+    print(sumViews(3))
+    print(keptSlice())
+    print(mix(4))
+    print(hot(5))
+    return 0
+}`)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	want := "20\nxxxx\n3\n4\nab ab\n3\nhi\n20\n12\n10\n8\n11\n"
+	if out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
+	}
+}
+
 func TestRunFileReusesFrameChunksAcrossCalls(t *testing.T) {
 	requireCC(t)
 

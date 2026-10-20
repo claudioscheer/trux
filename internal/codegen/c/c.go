@@ -23,6 +23,7 @@ type funcEmitter struct {
 	temp    int
 	loops   []string
 	loopID  int
+	marks   int
 	scratch string
 }
 
@@ -153,6 +154,296 @@ func loopHasContinue(stmts []ir.Stmt) bool {
 		}
 	}
 	return false
+}
+
+// forLoopCanRewind reports whether memory allocated by this loop dies at the
+// end of the iteration. A return copies its value out and jumps to the
+// epilogue, so it does not by itself keep the loop from rewinding.
+func forLoopCanRewind(stmt *ir.ForStmt) bool {
+	if !forLoopAllocates(stmt) {
+		return false
+	}
+	declared := map[string]bool{}
+	tainted := map[string]bool{}
+	if stmtsPublishFrame(stmt.Body, declared, tainted) {
+		return false
+	}
+	if exprPublishesFrame(stmt.Condition, declared, tainted) {
+		return false
+	}
+	if stmt.Post != nil && stmtPublishesFrame(stmt.Post, declared, tainted) {
+		return false
+	}
+	return true
+}
+
+func forLoopAllocates(stmt *ir.ForStmt) bool {
+	return exprNeedsFrame(stmt.Condition) || stmtsAllocateInLoop(stmt.Body) || stmtAllocatesInLoop(stmt.Post)
+}
+
+func stmtsAllocateInLoop(stmts []ir.Stmt) bool {
+	for _, stmt := range stmts {
+		if stmt != nil && stmtAllocatesInLoop(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtAllocatesInLoop(stmt ir.Stmt) bool {
+	if stmt == nil {
+		return false
+	}
+	switch stmt := stmt.(type) {
+	case *ir.AppendStmt:
+		return exprNeedsFrame(stmt.Value) || exprNeedsFrame(stmt.List)
+	case *ir.IndexAssignStmt:
+		return exprNeedsFrame(stmt.Value) || exprNeedsFrame(stmt.Target.Collection) || exprNeedsFrame(stmt.Target.Index)
+	case *ir.ForStmt:
+		return forLoopAllocates(stmt)
+	default:
+		return stmtNeedsFrame(stmt)
+	}
+}
+
+func stmtsPublishFrame(stmts []ir.Stmt, declared map[string]bool, tainted map[string]bool) bool {
+	for _, stmt := range stmts {
+		if stmt != nil && stmtPublishesFrame(stmt, declared, tainted) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtPublishesFrame(stmt ir.Stmt, declared map[string]bool, tainted map[string]bool) bool {
+	switch stmt := stmt.(type) {
+	case *ir.LetStmt:
+		if exprPublishesFrame(stmt.Value, declared, tainted) {
+			return true
+		}
+		declared[stmt.Name] = true
+		if valueReferencesFrame(stmt.Value, tainted) {
+			tainted[stmt.Name] = true
+		}
+		return false
+	case *ir.AssignStmt:
+		if exprPublishesFrame(stmt.Value, declared, tainted) {
+			return true
+		}
+		refs := valueReferencesFrame(stmt.Value, tainted)
+		if !declared[stmt.Name] {
+			return refs
+		}
+		if refs {
+			tainted[stmt.Name] = true
+		} else {
+			delete(tainted, stmt.Name)
+		}
+		return false
+	case *ir.AppendStmt:
+		if exprPublishesFrame(stmt.List, declared, tainted) || exprPublishesFrame(stmt.Value, declared, tainted) {
+			return true
+		}
+		return valueReferencesFrame(stmt.Value, tainted)
+	case *ir.IndexAssignStmt:
+		if exprPublishesFrame(stmt.Target.Collection, declared, tainted) || exprPublishesFrame(stmt.Target.Index, declared, tainted) || exprPublishesFrame(stmt.Value, declared, tainted) {
+			return true
+		}
+		return valueReferencesFrame(stmt.Value, tainted)
+	case *ir.IfStmt:
+		if exprPublishesFrame(stmt.Condition, declared, tainted) {
+			return true
+		}
+		thenDeclared := copyStringSet(declared)
+		thenTainted := copyStringSet(tainted)
+		if stmtsPublishFrame(stmt.Then, thenDeclared, thenTainted) {
+			return true
+		}
+		elseDeclared := copyStringSet(declared)
+		elseTainted := copyStringSet(tainted)
+		if stmtsPublishFrame(stmt.Else, elseDeclared, elseTainted) {
+			return true
+		}
+		for name := range declared {
+			if thenTainted[name] || elseTainted[name] {
+				tainted[name] = true
+			} else {
+				delete(tainted, name)
+			}
+		}
+		return false
+	case *ir.ForStmt:
+		childDeclared := copyStringSet(declared)
+		childTainted := copyStringSet(tainted)
+		if init, ok := stmt.Init.(*ir.LetStmt); ok {
+			if exprPublishesFrame(init.Value, childDeclared, childTainted) {
+				return true
+			}
+			childDeclared[init.Name] = true
+			if valueReferencesFrame(init.Value, childTainted) {
+				childTainted[init.Name] = true
+			}
+		} else if stmt.Init != nil && stmtPublishesFrame(stmt.Init, childDeclared, childTainted) {
+			return true
+		}
+		if stmtsPublishFrame(stmt.Body, childDeclared, childTainted) ||
+			exprPublishesFrame(stmt.Condition, childDeclared, childTainted) ||
+			(stmt.Post != nil && stmtPublishesFrame(stmt.Post, childDeclared, childTainted)) {
+			return true
+		}
+		for name := range declared {
+			if childTainted[name] {
+				tainted[name] = true
+			}
+		}
+		return false
+	case *ir.ReturnStmt:
+		return exprPublishesFrame(stmt.Value, declared, tainted)
+	case *ir.PrintStmt:
+		for _, arg := range stmt.Args {
+			if exprPublishesFrame(arg, declared, tainted) {
+				return true
+			}
+		}
+		return false
+	case *ir.AssertStmt:
+		return exprPublishesFrame(stmt.Condition, declared, tainted) || exprPublishesFrame(stmt.Message, declared, tainted)
+	case *ir.ExprStmt:
+		return exprPublishesFrame(stmt.Expr, declared, tainted)
+	case *ir.WriteFileStmt:
+		return exprPublishesFrame(stmt.Path, declared, tainted) || exprPublishesFrame(stmt.Contents, declared, tainted)
+	case *ir.WriteCSVStmt:
+		return exprPublishesFrame(stmt.Path, declared, tainted) || exprPublishesFrame(stmt.Cells, declared, tainted) || exprPublishesFrame(stmt.Columns, declared, tainted)
+	case *ir.WritePPMStmt:
+		return exprPublishesFrame(stmt.Path, declared, tainted) || exprPublishesFrame(stmt.Pixels, declared, tainted) || exprPublishesFrame(stmt.Width, declared, tainted) || exprPublishesFrame(stmt.Height, declared, tainted)
+	case *ir.TimeSleepStmt:
+		return exprPublishesFrame(stmt.Millis, declared, tainted)
+	case *ir.BreakStmt, *ir.ContinueStmt, *ir.GPUSyncStmt:
+		return false
+	case *ir.GPUCopyStmt, *ir.GPUFreeStmt, *ir.GPULaunchStmt, *ir.HTTPServeStmt, *ir.HTTPRespondStmt:
+		return true
+	default:
+		return true
+	}
+}
+
+func exprPublishesFrame(expr ir.Expr, declared map[string]bool, tainted map[string]bool) bool {
+	if expr == nil {
+		return false
+	}
+	switch expr := expr.(type) {
+	case *ir.IdentExpr, *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.GPUCoordExpr, *ir.TimeNowExpr, *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr:
+		return false
+	case *ir.CallExpr:
+		for _, arg := range expr.Args {
+			if valueReferencesFrame(arg, tainted) || exprPublishesFrame(arg, declared, tainted) {
+				return true
+			}
+		}
+		return false
+	case *ir.BinaryExpr:
+		return exprPublishesFrame(expr.Left, declared, tainted) || exprPublishesFrame(expr.Right, declared, tainted)
+	case *ir.UnaryExpr:
+		return exprPublishesFrame(expr.Operand, declared, tainted)
+	case *ir.LenExpr:
+		return exprPublishesFrame(expr.Value, declared, tainted)
+	case *ir.IndexExpr:
+		return exprPublishesFrame(expr.Collection, declared, tainted) || exprPublishesFrame(expr.Index, declared, tainted)
+	case *ir.SliceExpr:
+		return exprPublishesFrame(expr.Collection, declared, tainted) || exprPublishesFrame(expr.Start, declared, tainted) || exprPublishesFrame(expr.End, declared, tainted)
+	case *ir.CloneExpr:
+		return exprPublishesFrame(expr.Value, declared, tainted)
+	case *ir.MakeExpr:
+		return exprPublishesFrame(expr.Len, declared, tainted)
+	case *ir.ArrayLiteral:
+		for _, elem := range expr.Elements {
+			if exprPublishesFrame(elem, declared, tainted) {
+				return true
+			}
+		}
+		return false
+	case *ir.ListLiteral:
+		for _, elem := range expr.Elements {
+			if exprPublishesFrame(elem, declared, tainted) {
+				return true
+			}
+		}
+		return false
+	case *ir.ReadFileExpr, *ir.ImageDimensionExpr:
+		return exprPublishesFrame(exprPath(expr), declared, tainted)
+	case *ir.ReadCSVExpr:
+		return exprPublishesFrame(expr.Path, declared, tainted) || exprPublishesFrame(expr.Columns, declared, tainted)
+	case *ir.ReadPPMExpr:
+		return exprPublishesFrame(expr.Path, declared, tainted)
+	case *ir.HTTPRequestStringExpr:
+		return exprPublishesFrame(expr.Request, declared, tainted) || exprPublishesFrame(expr.Name, declared, tainted)
+	case *ir.GPUAllocExpr:
+		return exprPublishesFrame(expr.Len, declared, tainted)
+	default:
+		return true
+	}
+}
+
+func exprPath(expr ir.Expr) ir.Expr {
+	switch expr := expr.(type) {
+	case *ir.ReadFileExpr:
+		return expr.Path
+	case *ir.ImageDimensionExpr:
+		return expr.Path
+	default:
+		return nil
+	}
+}
+
+func valueReferencesFrame(expr ir.Expr, tainted map[string]bool) bool {
+	if expr == nil {
+		return false
+	}
+	switch expr := expr.(type) {
+	case *ir.IdentExpr:
+		return tainted[expr.Name]
+	case *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.GPUCoordExpr, *ir.TimeNowExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr, *ir.ImageDimensionExpr, *ir.GPUAllocExpr:
+		return false
+	case *ir.BinaryExpr:
+		if expr.Operator == "+" && ast.TypeEqual(expr.Type(), ast.StringType) {
+			return true
+		}
+		return false
+	case *ir.UnaryExpr, *ir.LenExpr:
+		return false
+	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr:
+		return true
+	case *ir.CallExpr:
+		return isDynamicType(expr.Type())
+	case *ir.IndexExpr, *ir.SliceExpr:
+		return dynamicValueReferencesCollection(expr, tainted)
+	default:
+		return true
+	}
+}
+
+func dynamicValueReferencesCollection(expr ir.Expr, tainted map[string]bool) bool {
+	switch expr := expr.(type) {
+	case *ir.IndexExpr:
+		if !isDynamicType(expr.Type()) && !ast.TypeEqual(expr.Type(), ast.StringType) {
+			return false
+		}
+		return valueReferencesFrame(expr.Collection, tainted)
+	case *ir.SliceExpr:
+		return valueReferencesFrame(expr.Collection, tainted)
+	default:
+		return true
+	}
+}
+
+func copyStringSet(in map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(in))
+	for key, value := range in {
+		if value {
+			out[key] = true
+		}
+	}
+	return out
 }
 
 type emittedExpr struct {
@@ -432,6 +723,44 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 			if err := e.emitStmt(out, stmt.Init, level+1, opts); err != nil {
 				return err
 			}
+		}
+		// Only the function frame can be rewound. trux_result_arena belongs to the caller.
+		if e.scratch == frameArena && forLoopCanRewind(stmt) {
+			mark := fmt.Sprintf("trux_loop_mark_%d", e.marks)
+			e.marks++
+			fmt.Fprintf(out, "%s    for (;;) {\n", indent)
+			fmt.Fprintf(out, "%s        rt_arena_mark %s = rt_arena_mark_current(%s);\n", indent, mark, e.scratch)
+			if stmt.Condition != nil {
+				condition, err := e.emitCondition(stmt.Condition)
+				if err != nil {
+					return err
+				}
+				e.writePrelude(out, indent+"        ", condition.prelude)
+				fmt.Fprintf(out, "%s        if (!(%s)) {\n", indent, condition.value)
+				fmt.Fprintf(out, "%s            rt_arena_rewind(%s, %s);\n", indent, e.scratch, mark)
+				fmt.Fprintf(out, "%s            break;\n", indent)
+				fmt.Fprintf(out, "%s        }\n", indent)
+			}
+			label := e.pushLoop()
+			if err := e.emitStmts(out, stmt.Body, level+2, opts); err != nil {
+				return err
+			}
+			if loopHasContinue(stmt.Body) {
+				fmt.Fprintf(out, "%s%s:\n", indent+"        ", label)
+				if stmt.Post == nil {
+					fmt.Fprintf(out, "%s(void)0;\n", indent+"        ")
+				}
+			}
+			if stmt.Post != nil {
+				if err := e.emitStmt(out, stmt.Post, level+2, opts); err != nil {
+					return err
+				}
+			}
+			fmt.Fprintf(out, "%s        rt_arena_rewind(%s, %s);\n", indent, e.scratch, mark)
+			e.popLoop()
+			fmt.Fprintf(out, "%s    }\n", indent)
+			fmt.Fprintf(out, "%s}\n", indent)
+			break
 		}
 		if stmt.Condition == nil {
 			fmt.Fprintf(out, "%s    for (;;) {\n", indent)

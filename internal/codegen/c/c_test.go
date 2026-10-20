@@ -1,6 +1,9 @@
 package c
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +11,7 @@ import (
 	"github.com/claudioscheer/trux/internal/ir"
 	"github.com/claudioscheer/trux/internal/modules"
 	"github.com/claudioscheer/trux/internal/parser"
+	runtimec "github.com/claudioscheer/trux/internal/runtime/c"
 	semtypes "github.com/claudioscheer/trux/internal/types"
 )
 
@@ -1032,6 +1036,246 @@ func main() int {
 	if !strings.Contains(cSource, proto) || !strings.Contains(cSource, def) {
 		t.Fatalf("kernel prototype and definition diverged:\n%s", cSource)
 	}
+}
+
+func TestGenerateRewindsNonEscapingLoopTemps(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func temps(n int) int {
+    let i int = 0
+    let count int = 0
+    for ; i < n; i = i + 1 {
+        let temp string = "a" + "b"
+        if temp == "ab" {
+            count = count + 1
+        }
+    }
+    return count
+}
+
+func sumViews(n int) int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let i int = 0
+    let total int = 0
+    for ; i < n; i = i + 1 {
+        let view []int = clone(xs[:])
+        total = total + view[0] + view[2]
+    }
+    return total
+}
+
+func mix(n int) int {
+    let nums list[int] = list[int]{}
+    let i int = 0
+    for ; i < n; i = i + 1 {
+        let temp string = "a" + "b"
+        append(nums, len(temp))
+    }
+    return nums[0] + len(nums)
+}
+
+func kept(n int) string {
+    let acc string = ""
+    let i int = 0
+    for ; i < n; i = i + 1 {
+        acc = acc + "x"
+    }
+    return acc
+}
+
+func collect(n int) int {
+    let words list[string] = list[string]{}
+    let i int = 0
+    for ; i < n; i = i + 1 {
+        append(words, "a" + "b")
+    }
+    return len(words)
+}
+
+func pushWord(mut words list[string], word string) int {
+    append(words, word)
+    return len(words)
+}
+
+func fill(n int) int {
+    let words list[string] = list[string]{}
+    let i int = 0
+    for ; i < n; i = i + 1 {
+        pushWord(words, "a" + "b")
+    }
+    return len(words)
+}
+
+func hot(n int) int {
+    let checksum int = 1
+    for let i int = 0; i < n; i = i + 1 {
+        checksum = checksum + i
+    }
+    return checksum
+}
+
+func skipped(n int) int {
+    let i int = 0
+    let count int = 0
+    for ; i < n; i = i + 1 {
+        let temp string = "a" + "b"
+        if i == 1 {
+            continue
+        }
+        if temp == "ab" {
+            count = count + 1
+        }
+    }
+    return count
+}
+
+func main() int {
+    return temps(1) + sumViews(1) + mix(1) + len(kept(1)) + collect(1) + fill(1) + hot(1) + skipped(1)
+}`)
+
+	for _, name := range []string{"temps", "sumViews", "mix", "skipped"} {
+		body := generatedFunctionBody(t, cSource, name)
+		if !strings.Contains(body, "rt_arena_mark_current(&trux_frame)") || !strings.Contains(body, "rt_arena_rewind(&trux_frame,") {
+			t.Fatalf("%s should rewind non-escaping loop memory:\n%s", name, body)
+		}
+	}
+	skipped := generatedFunctionBody(t, cSource, "skipped")
+	labelAt := strings.Index(skipped, "trux_continue_")
+	rewindAt := strings.LastIndex(skipped, "rt_arena_rewind(&trux_frame,")
+	if labelAt < 0 || rewindAt < 0 || labelAt > rewindAt {
+		t.Fatalf("continue should reach rewind, label %d rewind %d:\n%s", labelAt, rewindAt, skipped)
+	}
+	for _, name := range []string{"kept", "collect", "fill"} {
+		body := generatedFunctionBody(t, cSource, name)
+		if strings.Contains(body, "rt_arena_rewind") {
+			t.Fatalf("%s should keep memory that escapes the iteration:\n%s", name, body)
+		}
+	}
+	hot := generatedFunctionBody(t, cSource, "hot")
+	if strings.Contains(hot, "rt_arena_mark") || strings.Contains(hot, "rt_arena_init_frame") {
+		t.Fatalf("integer loop should not touch a frame arena:\n%s", hot)
+	}
+}
+
+func TestNonEscapingLoopReusesOneChunk(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func main() int {
+    let i int = 0
+    let count int = 0
+    for ; i < 5000; i = i + 1 {
+        let temp string = "a" + "b"
+        if temp == "ab" {
+            count = count + 1
+        }
+    }
+    print(count)
+    return 0
+}`)
+	stdout, mallocs := compileAndRunGeneratedC(t, cSource)
+	if stdout != "5000\n" {
+		t.Fatalf("stdout = %q, want 5000", stdout)
+	}
+	if mallocs != 1 {
+		t.Fatalf("mallocs = %d, want 1 reused frame chunk", mallocs)
+	}
+}
+
+func TestEscapingLoopKeepsGrowingString(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func main() int {
+    let acc string = ""
+    let i int = 0
+    for ; i < 200; i = i + 1 {
+        acc = acc + "x"
+    }
+    print(len(acc))
+    return 0
+}`)
+	if strings.Contains(generatedFunctionBody(t, cSource, "main"), "rt_arena_rewind") {
+		t.Fatal("growing string loop should not rewind")
+	}
+	stdout, mallocs := compileAndRunGeneratedC(t, cSource)
+	if stdout != "200\n" {
+		t.Fatalf("stdout = %q, want 200", stdout)
+	}
+	if mallocs < 2 {
+		t.Fatalf("mallocs = %d, want the growing string to allocate more than one chunk", mallocs)
+	}
+}
+
+func compileAndRunGeneratedC(t *testing.T, source string) (string, int) {
+	t.Helper()
+
+	const stdlibInclude = "#include <stdlib.h>\n"
+	const mallocHooks = `#include <stdlib.h>
+
+static size_t rt_test_malloc_calls = 0;
+
+static void* rt_test_malloc(size_t size) {
+    rt_test_malloc_calls++;
+    return malloc(size);
+}
+
+static void rt_test_free(void* ptr) {
+    free(ptr);
+}
+
+static void* rt_test_realloc(void* ptr, size_t size) {
+    return realloc(ptr, size);
+}
+
+#define malloc rt_test_malloc
+#define free rt_test_free
+#define realloc rt_test_realloc
+`
+	header := runtimec.Source
+	if !strings.Contains(header, stdlibInclude) {
+		t.Fatal("runtime header is missing stdlib include")
+	}
+	header = strings.Replace(header, stdlibInclude, mallocHooks, 1)
+	const ret = "return (int)trux_exit_code;"
+	if !strings.Contains(source, ret) {
+		t.Fatal("generated C is missing main return")
+	}
+	source = strings.Replace(source, ret, "fflush(stdout);\n    fprintf(stderr, \"mallocs %zu\\n\", rt_test_malloc_calls);\n    "+ret, 1)
+
+	compiler := os.Getenv("CC")
+	if compiler == "" {
+		compiler = "cc"
+	}
+	if _, err := exec.LookPath(compiler); err != nil {
+		t.Skipf("C compiler %q not found", compiler)
+	}
+	dir := t.TempDir()
+	cPath := filepath.Join(dir, "main.c")
+	exePath := filepath.Join(dir, "main")
+	if err := os.WriteFile(filepath.Join(dir, runtimec.HeaderName), []byte(header), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cPath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile := exec.Command(compiler, "-std=c11", "-Wall", "-Wextra", "-pedantic", cPath, "-o", exePath)
+	if output, err := compile.CombinedOutput(); err != nil {
+		t.Fatalf("compile generated C: %v\n%s", err, output)
+	}
+	run := exec.Command(exePath)
+	output, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run generated C: %v\n%s", err, output)
+	}
+	text := string(output)
+	const marker = "mallocs "
+	idx := strings.LastIndex(text, marker)
+	if idx < 0 {
+		t.Fatalf("missing malloc count:\n%s", text)
+	}
+	stdout := text[:idx]
+	rest := strings.TrimSpace(text[idx+len(marker):])
+	var mallocs int
+	if _, err := fmt.Sscan(rest, &mallocs); err != nil {
+		t.Fatalf("malloc count %q: %v", rest, err)
+	}
+	return stdout, mallocs
 }
 
 func TestGenerateElidesFrameForBorrowedSliceReturn(t *testing.T) {

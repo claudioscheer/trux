@@ -251,11 +251,22 @@ static RT_UNUSED void rt_arena_free_lists(rt_arena* arena) {
     rt_arena_free_lists_until(arena, NULL);
 }
 
-static RT_UNUSED rt_arena_chunk* rt_arena_new_chunk(size_t min_cap) {
+static RT_UNUSED size_t rt_arena_next_chunk_cap(const rt_arena* arena, size_t min_cap) {
     size_t cap = RT_ARENA_DEFAULT_CHUNK_SIZE;
+    if (arena->chunks != NULL && arena->chunks->cap <= SIZE_MAX / 2) {
+        size_t doubled = arena->chunks->cap * 2;
+        if (doubled > cap) {
+            cap = doubled;
+        }
+    }
     if (min_cap > cap) {
         cap = min_cap;
     }
+    return cap;
+}
+
+static RT_UNUSED rt_arena_chunk* rt_arena_new_chunk(rt_arena* arena, size_t min_cap) {
+    size_t cap = rt_arena_next_chunk_cap(arena, min_cap);
     if (cap > SIZE_MAX - sizeof(rt_arena_chunk)) {
         rt_runtime_fail("allocation size overflow");
     }
@@ -309,7 +320,7 @@ static RT_UNUSED rt_arena_chunk* rt_arena_take_chunk(rt_arena* arena, size_t min
             chunk = chunk->next;
         }
     }
-    return rt_arena_new_chunk(min_cap);
+    return rt_arena_new_chunk(arena, min_cap);
 }
 
 static RT_UNUSED void rt_arena_reset(rt_arena* arena) {
@@ -361,11 +372,7 @@ static RT_UNUSED void rt_arena_rewind(rt_arena* arena, rt_arena_mark mark) {
     }
 }
 
-static RT_UNUSED void rt_arena_register_list(rt_arena* arena, void* list, void (*free_list)(void*)) {
-    rt_list_allocation* node = (rt_list_allocation*)malloc(sizeof(rt_list_allocation));
-    if (node == NULL) {
-        rt_runtime_fail("allocation failed");
-    }
+static RT_UNUSED void rt_arena_track_list(rt_arena* arena, rt_list_allocation* node, void* list, void (*free_list)(void*)) {
     node->list = list;
     node->free_list = free_list;
     node->next = arena->lists;
@@ -718,28 +725,30 @@ static RT_UNUSED rt_string rt_read_file(rt_arena* arena, rt_string path) {
     if (file == NULL) {
         rt_file_fail("open file for reading", c_path);
     }
+    if (fseek(file, 0, SEEK_END) != 0) {
+        rt_file_fail("seek file for reading", c_path);
+    }
+    long file_size = ftell(file);
+    if (file_size < 0) {
+        rt_file_fail("tell file size", c_path);
+    }
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        rt_file_fail("rewind file for reading", c_path);
+    }
 
-    rt_byte_buffer buffer;
-    rt_byte_buffer_init(&buffer);
-    uint8_t chunk[4096];
-    for (;;) {
-        size_t read = fread(chunk, 1, sizeof(chunk), file);
-        rt_byte_buffer_append_bytes(&buffer, chunk, read);
-        if (read < sizeof(chunk)) {
-            if (ferror(file)) {
-                rt_runtime_fail("read failed");
-            }
-            break;
+    size_t size = (size_t)file_size;
+    uint8_t* data = NULL;
+    if (size > 0) {
+        data = (uint8_t*)rt_arena_alloc(arena, size);
+        if (fread(data, 1, size, file) != size) {
+            rt_runtime_fail("read failed");
         }
     }
     if (fclose(file) != 0) {
         rt_file_fail("close file after reading", c_path);
     }
-
-    rt_string contents = rt_byte_buffer_to_string(arena, &buffer);
-    rt_byte_buffer_free(&buffer);
     free(c_path);
-    return contents;
+    return (rt_string){data, size};
 }
 
 static RT_UNUSED void rt_write_file(rt_string path, rt_string contents) {
@@ -959,25 +968,40 @@ static RT_UNUSED rt_slice_##NAME rt_list_##NAME##_slice(rt_list_##NAME* value, b
 } \
 static RT_UNUSED void rt_list_##NAME##_free(void* ptr) { \
     rt_list_##NAME* list = (rt_list_##NAME*)ptr; \
-    free(list->data); \
-    free(list); \
+    if (list->data != NULL) { \
+        free(list->data); \
+    } \
 } \
 static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_new(rt_arena* arena, size_t cap) { \
-    rt_list_##NAME* list = (rt_list_##NAME*)malloc(sizeof(rt_list_##NAME)); \
-    if (list == NULL) { \
+    size_t offset = sizeof(rt_list_allocation); \
+    size_t align = RT_ALIGNOF(rt_list_##NAME); \
+    if (align > 1 && offset % align != 0) { \
+        size_t padding = align - (offset % align); \
+        if (offset > SIZE_MAX - padding) { \
+            rt_runtime_fail("allocation size overflow"); \
+        } \
+        offset += padding; \
+    } \
+    if (offset > SIZE_MAX - sizeof(rt_list_##NAME)) { \
+        rt_runtime_fail("allocation size overflow"); \
+    } \
+    uint8_t* block = (uint8_t*)malloc(offset + sizeof(rt_list_##NAME)); \
+    if (block == NULL) { \
         rt_runtime_fail("allocation failed"); \
     } \
+    rt_list_allocation* node = (rt_list_allocation*)block; \
+    rt_list_##NAME* list = (rt_list_##NAME*)(block + offset); \
     list->data = NULL; \
     list->len = 0; \
     list->cap = cap; \
     if (cap > 0) { \
         list->data = (CTYPE*)malloc(rt_checked_bytes(cap, sizeof(CTYPE))); \
         if (list->data == NULL) { \
-            free(list); \
+            free(block); \
             rt_runtime_fail("allocation failed"); \
         } \
     } \
-    rt_arena_register_list(arena, list, rt_list_##NAME##_free); \
+    rt_arena_track_list(arena, node, list, rt_list_##NAME##_free); \
     return list; \
 } \
 static RT_UNUSED rt_list_##NAME* rt_list_##NAME##_from_values(rt_arena* arena, CTYPE const* values, size_t len) { \

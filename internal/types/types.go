@@ -132,7 +132,8 @@ const (
 )
 
 type checker struct {
-	info *Info
+	info      *Info
+	loopDepth int
 }
 
 type localInfo struct {
@@ -464,16 +465,30 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 				return typeError(stmt.Condition.Pos(), "for condition must be bool, got %s", conditionType)
 			}
 		}
+		c.loopDepth++
 		bodyScope := newScope(loopScope)
 		for _, inner := range stmt.Body.Statements {
 			if err := c.checkStmt(fn, bodyScope, inner); err != nil {
+				c.loopDepth--
 				return err
 			}
 		}
 		if stmt.Post != nil {
 			if err := c.checkStmt(fn, loopScope, stmt.Post); err != nil {
+				c.loopDepth--
 				return err
 			}
+		}
+		c.loopDepth--
+		return nil
+	case *ast.BreakStmt:
+		if c.loopDepth == 0 {
+			return typeError(stmt.Start, "break outside of a loop")
+		}
+		return nil
+	case *ast.ContinueStmt:
+		if c.loopDepth == 0 {
+			return typeError(stmt.Start, "continue outside of a loop")
 		}
 		return nil
 	case *ast.ExprStmt:
@@ -583,14 +598,30 @@ func (c *checker) checkKernelStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Stat
 				return typeError(stmt.Condition.Pos(), "for condition must be bool, got %s", conditionType)
 			}
 		}
+		c.loopDepth++
 		bodyScope := newScope(loopScope)
 		for _, inner := range stmt.Body.Statements {
 			if err := c.checkKernelStmt(fn, bodyScope, inner); err != nil {
+				c.loopDepth--
 				return err
 			}
 		}
 		if stmt.Post != nil {
-			return c.checkKernelStmt(fn, loopScope, stmt.Post)
+			if err := c.checkKernelStmt(fn, loopScope, stmt.Post); err != nil {
+				c.loopDepth--
+				return err
+			}
+		}
+		c.loopDepth--
+		return nil
+	case *ast.BreakStmt:
+		if c.loopDepth == 0 {
+			return typeError(stmt.Start, "break outside of a loop")
+		}
+		return nil
+	case *ast.ContinueStmt:
+		if c.loopDepth == 0 {
+			return typeError(stmt.Start, "continue outside of a loop")
 		}
 		return nil
 	case *ast.ReturnStmt:

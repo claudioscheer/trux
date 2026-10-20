@@ -161,6 +161,22 @@ func (s *ReturnStmt) Pos() token.Position { return s.Start }
 
 func (*ReturnStmt) statementNode() {}
 
+type BreakStmt struct {
+	Start token.Position
+}
+
+func (s *BreakStmt) Pos() token.Position { return s.Start }
+
+func (*BreakStmt) statementNode() {}
+
+type ContinueStmt struct {
+	Start token.Position
+}
+
+func (s *ContinueStmt) Pos() token.Position { return s.Start }
+
+func (*ContinueStmt) statementNode() {}
+
 type AssignStmt struct {
 	Start token.Position
 	Name  string

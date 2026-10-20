@@ -25,8 +25,35 @@ type funcUsage struct {
 }
 
 type funcEmitter struct {
-	usage *funcUsage
-	temp  int
+	usage  *funcUsage
+	temp   int
+	loops  []string
+	loopID int
+}
+
+func (e *funcEmitter) pushLoop() string {
+	label := fmt.Sprintf("trux_continue_%d", e.loopID)
+	e.loopID++
+	e.loops = append(e.loops, label)
+	return label
+}
+
+func (e *funcEmitter) popLoop() {
+	e.loops = e.loops[:len(e.loops)-1]
+}
+
+func loopHasContinue(stmts []ir.Stmt) bool {
+	for _, stmt := range stmts {
+		switch stmt := stmt.(type) {
+		case *ir.ContinueStmt:
+			return true
+		case *ir.IfStmt:
+			if loopHasContinue(stmt.Then) || loopHasContinue(stmt.Else) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type emittedExpr struct {
@@ -193,7 +220,7 @@ func emitKernelFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
 		fmt.Fprintf(out, "%s %s", paramType, mangleIdent(param.Name))
 	}
 	fmt.Fprintln(out, ") {")
-	if err := emitKernelStmts(out, fn.Body, 1, opts); err != nil {
+	if err := emitKernelStmts(out, fn.Body, 1, opts, &loopStack{}); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "}")
@@ -333,16 +360,28 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 				fmt.Fprintf(out, "%s        }\n", indent)
 			}
 		}
+		label := e.pushLoop()
 		if err := e.emitStmts(out, stmt.Body, level+2, opts); err != nil {
 			return err
+		}
+		if loopHasContinue(stmt.Body) {
+			fmt.Fprintf(out, "%s%s:\n", indent+"        ", label)
+			if stmt.Post == nil {
+				fmt.Fprintf(out, "%s(void)0;\n", indent+"        ")
+			}
 		}
 		if stmt.Post != nil {
 			if err := e.emitStmt(out, stmt.Post, level+2, opts); err != nil {
 				return err
 			}
 		}
+		e.popLoop()
 		fmt.Fprintf(out, "%s    }\n", indent)
 		fmt.Fprintf(out, "%s}\n", indent)
+	case *ir.BreakStmt:
+		fmt.Fprintf(out, "%sbreak;\n", indent)
+	case *ir.ContinueStmt:
+		fmt.Fprintf(out, "%sgoto %s;\n", indent, e.loops[len(e.loops)-1])
 	case *ir.PrintStmt:
 		if len(stmt.Args) != len(stmt.Types) {
 			return fmt.Errorf("print arg/type count mismatch")
@@ -1403,16 +1442,32 @@ func emitOptionalBound(expr ir.Expr, usage *funcUsage) (string, string, error) {
 	return "true", value, nil
 }
 
-func emitKernelStmts(out *bytes.Buffer, stmts []ir.Stmt, level int, opts Options) error {
+type loopStack struct {
+	labels []string
+	next   int
+}
+
+func (s *loopStack) push() string {
+	label := fmt.Sprintf("trux_continue_%d", s.next)
+	s.next++
+	s.labels = append(s.labels, label)
+	return label
+}
+
+func (s *loopStack) pop() {
+	s.labels = s.labels[:len(s.labels)-1]
+}
+
+func emitKernelStmts(out *bytes.Buffer, stmts []ir.Stmt, level int, opts Options, loops *loopStack) error {
 	for _, stmt := range stmts {
-		if err := emitKernelStmt(out, stmt, level, opts); err != nil {
+		if err := emitKernelStmt(out, stmt, level, opts, loops); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts Options) error {
+func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts Options, loops *loopStack) error {
 	indent := strings.Repeat("    ", level)
 	emitLine(out, indent, stmtPos(stmt), opts.SourceRoot)
 	switch stmt := stmt.(type) {
@@ -1448,7 +1503,7 @@ func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts Options) er
 			return err
 		}
 		fmt.Fprintf(out, "%sif (%s) {\n", indent, trimParens(condition))
-		if err := emitKernelStmts(out, stmt.Then, level+1, opts); err != nil {
+		if err := emitKernelStmts(out, stmt.Then, level+1, opts, loops); err != nil {
 			return err
 		}
 		if len(stmt.Else) == 0 {
@@ -1456,14 +1511,14 @@ func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts Options) er
 			break
 		}
 		fmt.Fprintf(out, "%s} else {\n", indent)
-		if err := emitKernelStmts(out, stmt.Else, level+1, opts); err != nil {
+		if err := emitKernelStmts(out, stmt.Else, level+1, opts, loops); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%s}\n", indent)
 	case *ir.ForStmt:
 		fmt.Fprintf(out, "%s{\n", indent)
 		if stmt.Init != nil {
-			if err := emitKernelStmt(out, stmt.Init, level+1, opts); err != nil {
+			if err := emitKernelStmt(out, stmt.Init, level+1, opts, loops); err != nil {
 				return err
 			}
 		}
@@ -1476,16 +1531,28 @@ func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts Options) er
 			}
 			fmt.Fprintf(out, "%s    for (; %s;) {\n", indent, trimParens(condition))
 		}
-		if err := emitKernelStmts(out, stmt.Body, level+2, opts); err != nil {
+		label := loops.push()
+		if err := emitKernelStmts(out, stmt.Body, level+2, opts, loops); err != nil {
 			return err
 		}
+		if loopHasContinue(stmt.Body) {
+			fmt.Fprintf(out, "%s%s:\n", indent+"        ", label)
+			if stmt.Post == nil {
+				fmt.Fprintf(out, "%s(void)0;\n", indent+"        ")
+			}
+		}
 		if stmt.Post != nil {
-			if err := emitKernelStmt(out, stmt.Post, level+2, opts); err != nil {
+			if err := emitKernelStmt(out, stmt.Post, level+2, opts, loops); err != nil {
 				return err
 			}
 		}
+		loops.pop()
 		fmt.Fprintf(out, "%s    }\n", indent)
 		fmt.Fprintf(out, "%s}\n", indent)
+	case *ir.BreakStmt:
+		fmt.Fprintf(out, "%sbreak;\n", indent)
+	case *ir.ContinueStmt:
+		fmt.Fprintf(out, "%sgoto %s;\n", indent, loops.labels[len(loops.labels)-1])
 	default:
 		return fmt.Errorf("unsupported kernel statement %T", stmt)
 	}
@@ -1866,6 +1933,8 @@ func collectStmtNestedCollectionFamilies(stmt ir.Stmt, seen map[string]bool, fam
 		return collectExprNestedCollectionFamilies(stmt.Body, seen, families)
 	case *ir.ExprStmt:
 		return collectExprNestedCollectionFamilies(stmt.Expr, seen, families)
+	case *ir.BreakStmt, *ir.ContinueStmt:
+		return nil
 	default:
 		return fmt.Errorf("unsupported IR statement %T", stmt)
 	}
@@ -2000,6 +2069,10 @@ func stmtPos(stmt ir.Stmt) token.Position {
 	case *ir.IfStmt:
 		return stmt.Pos
 	case *ir.ForStmt:
+		return stmt.Pos
+	case *ir.BreakStmt:
+		return stmt.Pos
+	case *ir.ContinueStmt:
 		return stmt.Pos
 	case *ir.PrintStmt:
 		return stmt.Pos

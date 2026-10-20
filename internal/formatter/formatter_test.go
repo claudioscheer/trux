@@ -51,6 +51,16 @@ pub func add(a int, b int) int {
 	}
 }
 
+func TestFormatKeepsBreakAndContinue(t *testing.T) {
+	got, err := Format("main.tx", "package main\nfunc main() int {\nfor {break\ncontinue\n}\nreturn 0\n}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "break") || !strings.Contains(got, "continue") {
+		t.Fatalf("formatted = %q, want break and continue", got)
+	}
+}
+
 func TestFormatKeepsLogicalOperators(t *testing.T) {
 	got, err := Format("main.tx", "package main\nfunc main() int {\nlet flag bool=true&&false||true\nreturn 0\n}\n")
 	if err != nil {

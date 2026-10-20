@@ -22,6 +22,8 @@ const (
 	If         Type = "IF"
 	Else       Type = "ELSE"
 	For        Type = "FOR"
+	Break      Type = "BREAK"
+	Continue   Type = "CONTINUE"
 	IntType    Type = "INT_TYPE"
 	FloatType  Type = "FLOAT_TYPE"
 	StringType Type = "STRING_TYPE"
@@ -74,25 +76,27 @@ type Token struct {
 }
 
 var keywords = map[string]Type{
-	"package": Package,
-	"import":  Import,
-	"pub":     Pub,
-	"kernel":  Kernel,
-	"func":    Func,
-	"return":  Return,
-	"let":     Let,
-	"mut":     Mut,
-	"if":      If,
-	"else":    Else,
-	"for":     For,
-	"int":     IntType,
-	"float":   FloatType,
-	"string":  StringType,
-	"bool":    BoolType,
-	"true":    True,
-	"false":   False,
-	"in":      In,
-	"list":    List,
+	"package":  Package,
+	"import":   Import,
+	"pub":      Pub,
+	"kernel":   Kernel,
+	"func":     Func,
+	"return":   Return,
+	"let":      Let,
+	"mut":      Mut,
+	"if":       If,
+	"else":     Else,
+	"for":      For,
+	"break":    Break,
+	"continue": Continue,
+	"int":      IntType,
+	"float":    FloatType,
+	"string":   StringType,
+	"bool":     BoolType,
+	"true":     True,
+	"false":    False,
+	"in":       In,
+	"list":     List,
 }
 
 func LookupIdent(ident string) Type {

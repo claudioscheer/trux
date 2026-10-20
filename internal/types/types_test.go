@@ -1391,6 +1391,26 @@ func sameTypes(got []ast.Type, want []ast.Type) bool {
 	return true
 }
 
+func TestCheckRejectsBreakAndContinueOutsideLoop(t *testing.T) {
+	_, err := Check(mustParse(t, `package main
+func main() int {
+    break
+    return 0
+}`))
+	if err == nil || !strings.Contains(err.Error(), "break outside of a loop") {
+		t.Fatalf("error = %v, want break outside", err)
+	}
+
+	_, err = Check(mustParse(t, `package main
+func main() int {
+    continue
+    return 0
+}`))
+	if err == nil || !strings.Contains(err.Error(), "continue outside of a loop") {
+		t.Fatalf("error = %v, want continue outside", err)
+	}
+}
+
 func TestCheckRejectsNonBoolLogicalOperands(t *testing.T) {
 	_, err := Check(mustParse(t, `package main
 func main() int {

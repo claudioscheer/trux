@@ -639,6 +639,105 @@ func main() int {
 	}
 }
 
+func TestRunFileBreakAndContinue(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+import "io"
+
+func main() int {
+    let i int = 0
+    let seen int = 0
+    for ; i < 5; i = i + 1 {
+        if i == 2 {
+            break
+        }
+        seen = seen + 1
+    }
+    print(seen)
+    print(i)
+
+    let j int = 0
+    let kept int = 0
+    for ; j < 4; j = j + 1 {
+        if j == 1 {
+            continue
+        }
+        kept = kept + 1
+    }
+    print(kept)
+    print(j)
+
+    let n int = 0
+    for let x int = 0; x < 3; x = x + 1 {
+        for let y int = 0; y < 3; y = y + 1 {
+            if y == 1 {
+                break
+            }
+            n = n + 1
+        }
+    }
+    print(n)
+
+    let m int = 0
+    for let x int = 0; x < 2; x = x + 1 {
+        for let y int = 0; y < 3; y = y + 1 {
+            if y == 1 {
+                continue
+            }
+            m = m + 1
+        }
+    }
+    print(m)
+
+    let k int = 0
+    for ; io.readInt() == 1; k = k + 1 {
+        if k == 0 {
+            continue
+        }
+    }
+    print(k)
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFileWithOptions(&out, path, runOptions{Stdin: strings.NewReader("1\n1\n0\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "2\n2\n3\n4\n3\n4\n2\n" {
+		t.Fatalf("output = %q, want break and continue counts", out.String())
+	}
+}
+
+func TestCompileFileEmitsBreakAndContinueInKernel(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+
+kernel func fill(out gpu.Buffer[int], n int) {
+    for let i int = 0; i < n; i = i + 1 {
+        if i == 1 {
+            continue
+        }
+        if i == 3 {
+            break
+        }
+        out[0] = i
+    }
+}
+
+func main() int {
+    return 0
+}`)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.CSource, "break;") || !strings.Contains(result.CSource, "goto trux_continue_") || !strings.Contains(result.CSource, "trux_continue_0:") {
+		t.Fatalf("generated source missing loop control:\n%s", result.CSource)
+	}
+}
+
 func TestRunFileShortCircuitsLogicalOperators(t *testing.T) {
 	requireCC(t)
 

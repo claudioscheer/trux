@@ -301,9 +301,29 @@ func (p *Parser) parseStatement() (ast.Statement, error) {
 		return p.parseIfStmt()
 	case p.check(token.For):
 		return p.parseForStmt()
+	case p.check(token.Break):
+		return p.parseBreakStmt()
+	case p.check(token.Continue):
+		return p.parseContinueStmt()
 	default:
 		return p.parseAssignOrExprStmt()
 	}
+}
+
+func (p *Parser) parseBreakStmt() (ast.Statement, error) {
+	start, err := p.expect(token.Break)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.BreakStmt{Start: start.Pos}, nil
+}
+
+func (p *Parser) parseContinueStmt() (ast.Statement, error) {
+	start, err := p.expect(token.Continue)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.ContinueStmt{Start: start.Pos}, nil
 }
 
 func (p *Parser) parseLetStmt() (ast.Statement, error) {

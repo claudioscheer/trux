@@ -44,6 +44,8 @@ int main(void) {
     if (rt_mul_i64(INT64_MIN, 1) != INT64_MIN) return 1;
     if (rt_mul_i64(INT64_MAX, 1) != INT64_MAX) return 1;
     if (rt_div_i64(INT64_MIN, 1) != INT64_MIN) return 1;
+    if (rt_rem_i64(17, 5) != 2) return 1;
+    if (rt_rem_i64(-17, 5) != -2) return 1;
     return 0;
 }
 `)
@@ -60,6 +62,8 @@ func TestCheckedIntegerArithmeticFailsOnOverflow(t *testing.T) {
 		{name: "mul", stmt: "(void)rt_mul_i64(INT64_MAX, 2);", want: "integer overflow in *"},
 		{name: "div_overflow", stmt: "(void)rt_div_i64(INT64_MIN, -1);", want: "integer overflow in /"},
 		{name: "div_zero", stmt: "(void)rt_div_i64(1, 0);", want: "integer division by zero"},
+		{name: "rem_zero", stmt: "(void)rt_rem_i64(1, 0);", want: "integer remainder by zero"},
+		{name: "rem_overflow", stmt: "(void)rt_rem_i64(INT64_MIN, -1);", want: "integer overflow in %"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

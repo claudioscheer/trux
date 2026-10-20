@@ -2031,6 +2031,8 @@ func checkedArithmeticHelper(operator string) (string, bool) {
 		return "rt_mul_i64", true
 	case "/":
 		return "rt_div_i64", true
+	case "%":
+		return "rt_rem_i64", true
 	default:
 		return "", false
 	}

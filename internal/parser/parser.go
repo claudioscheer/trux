@@ -773,7 +773,7 @@ func (p *Parser) precedence(typ token.Type) int {
 		return 0
 	case token.Plus, token.Minus:
 		return 1
-	case token.Asterisk, token.Slash:
+	case token.Asterisk, token.Slash, token.Percent:
 		return 2
 	default:
 		return -1
@@ -844,7 +844,7 @@ func describe(tok token.Token) string {
 func isLiteralToken(typ token.Type) bool {
 	switch typ {
 	case token.Assign, token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
-		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Not,
+		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Percent, token.Not,
 		token.Comma, token.Colon, token.Dot, token.Semicolon, token.LParen, token.RParen, token.LBrace, token.RBrace, token.LBracket, token.RBracket:
 		return true
 	default:

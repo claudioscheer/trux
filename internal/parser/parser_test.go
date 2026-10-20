@@ -379,6 +379,23 @@ func main() int {
 	}
 }
 
+func TestParsesRemainderPrecedence(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let n int = 10 % 3 * 2
+    return n
+}`)
+
+	expr := program.Functions[0].Body.Statements[0].(*ast.LetStmt).Value.(*ast.BinaryExpr)
+	if expr.Operator != "*" {
+		t.Fatalf("root operator = %q, want *", expr.Operator)
+	}
+	left, ok := expr.Left.(*ast.BinaryExpr)
+	if !ok || left.Operator != "%" {
+		t.Fatalf("left = %#v, want remainder", expr.Left)
+	}
+}
+
 func TestParsesPrefixOperators(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

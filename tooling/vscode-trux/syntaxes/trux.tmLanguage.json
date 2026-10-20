@@ -204,7 +204,7 @@
       "patterns": [
         {
           "name": "keyword.operator.trux",
-          "match": "==|!=|<=|>=|[!+\\-*/=<>]"
+          "match": "==|!=|<=|>=|[!+%\\-*/=<>]"
         }
       ]
     },

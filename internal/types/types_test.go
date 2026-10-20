@@ -1391,6 +1391,17 @@ func sameTypes(got []ast.Type, want []ast.Type) bool {
 	return true
 }
 
+func TestCheckRejectsFloatRemainder(t *testing.T) {
+	_, err := Check(mustParse(t, `package main
+func main() int {
+    let bad float = 1.5 % 2.0
+    return 0
+}`))
+	if err == nil || !strings.Contains(err.Error(), "requires int operands") {
+		t.Fatalf("error = %v, want int operands", err)
+	}
+}
+
 func TestCheckPrefixOperators(t *testing.T) {
 	info, err := Check(mustParse(t, `package main
 func main() int {

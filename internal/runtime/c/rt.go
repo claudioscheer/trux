@@ -147,6 +147,16 @@ static RT_UNUSED int64_t rt_div_i64_at(int64_t left, int64_t right, const char* 
     return left / right;
 }
 
+static RT_UNUSED int64_t rt_rem_i64_at(int64_t left, int64_t right, const char* file, int line) {
+    if (right == 0) {
+        rt_arithmetic_fail("remainder by zero", file, line);
+    }
+    if (left == INT64_MIN && right == -1) {
+        rt_arithmetic_fail("overflow in %", file, line);
+    }
+    return left % right;
+}
+
 #ifdef TRUX_RUNTIME_CUDA
 __device__ static int64_t rt_add_i64_device(int64_t left, int64_t right) {
     if ((right > 0 && left > INT64_MAX - right) || (right < 0 && left < INT64_MIN - right)) {
@@ -186,6 +196,13 @@ __device__ static int64_t rt_div_i64_device(int64_t left, int64_t right) {
     }
     return left / right;
 }
+
+__device__ static int64_t rt_rem_i64_device(int64_t left, int64_t right) {
+    if (right == 0 || (left == INT64_MIN && right == -1)) {
+        asm("trap;");
+    }
+    return left % right;
+}
 #endif
 
 #if defined(TRUX_RUNTIME_CUDA) && defined(__CUDA_ARCH__)
@@ -193,11 +210,13 @@ __device__ static int64_t rt_div_i64_device(int64_t left, int64_t right) {
 #define rt_sub_i64(LEFT, RIGHT) rt_sub_i64_device((LEFT), (RIGHT))
 #define rt_mul_i64(LEFT, RIGHT) rt_mul_i64_device((LEFT), (RIGHT))
 #define rt_div_i64(LEFT, RIGHT) rt_div_i64_device((LEFT), (RIGHT))
+#define rt_rem_i64(LEFT, RIGHT) rt_rem_i64_device((LEFT), (RIGHT))
 #else
 #define rt_add_i64(LEFT, RIGHT) rt_add_i64_at((LEFT), (RIGHT), __FILE__, __LINE__)
 #define rt_sub_i64(LEFT, RIGHT) rt_sub_i64_at((LEFT), (RIGHT), __FILE__, __LINE__)
 #define rt_mul_i64(LEFT, RIGHT) rt_mul_i64_at((LEFT), (RIGHT), __FILE__, __LINE__)
 #define rt_div_i64(LEFT, RIGHT) rt_div_i64_at((LEFT), (RIGHT), __FILE__, __LINE__)
+#define rt_rem_i64(LEFT, RIGHT) rt_rem_i64_at((LEFT), (RIGHT), __FILE__, __LINE__)
 #endif
 
 static RT_UNUSED size_t rt_arena_align_up(size_t size) {

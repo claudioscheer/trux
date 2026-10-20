@@ -639,6 +639,85 @@ func main() int {
 	}
 }
 
+func TestRunFileCompilesAndExecutesRemainder(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func main() int {
+    print(17 % 5)
+    print((10 % 3) * 2)
+    return 0
+}`)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "2\n2\n" {
+		t.Fatalf("output = %q, want 2 and 2", out.String())
+	}
+}
+
+func TestRunFileRemainderRejectsZeroAndOverflow(t *testing.T) {
+	requireCC(t)
+
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "zero",
+			src: `package main
+func main() int {
+    print(10 % 0)
+    return 0
+}`,
+			want: "trux runtime error: integer remainder by zero",
+		},
+		{
+			name: "overflow",
+			src: `package main
+func main() int {
+    let min int = (0 - 9223372036854775807) - 1
+    let minusOne int = 0 - 1
+    print(min % minusOne)
+    return 0
+}`,
+			want: "trux runtime error: integer overflow in %",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempSource(t, tt.src)
+			var out bytes.Buffer
+			err := runFile(&out, path)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %s", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompileFileEmitsRemainderInKernel(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+
+kernel func fill(out gpu.Buffer[int], n int) {
+    out[0] = n % 3
+}
+
+func main() int {
+    return 0
+}`)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.CSource, "rt_rem_i64(") {
+		t.Fatalf("generated source missing remainder helper:\n%s", result.CSource)
+	}
+}
+
 func TestRunFileCompilesAndExecutesPrefixOperators(t *testing.T) {
 	requireCC(t)
 

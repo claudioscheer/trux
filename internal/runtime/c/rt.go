@@ -66,9 +66,12 @@ typedef struct rt_list_allocation {
     struct rt_list_allocation* next;
 } rt_list_allocation;
 
+typedef struct rt_context rt_context;
+
 typedef struct {
     rt_arena_chunk* chunks;
     rt_list_allocation* lists;
+    rt_context* owner;
 } rt_arena;
 
 typedef struct {
@@ -77,9 +80,10 @@ typedef struct {
     rt_list_allocation* lists;
 } rt_arena_mark;
 
-typedef struct {
+struct rt_context {
     rt_arena* arena;
-} rt_context;
+    rt_arena_chunk* chunk_pool;
+};
 
 typedef struct {
     size_t start;
@@ -269,6 +273,43 @@ static RT_UNUSED rt_arena_chunk* rt_arena_new_chunk(size_t min_cap) {
 static RT_UNUSED void rt_arena_init(rt_arena* arena) {
     arena->chunks = NULL;
     arena->lists = NULL;
+    arena->owner = NULL;
+}
+
+static RT_UNUSED void rt_arena_init_frame(rt_arena* arena, rt_context* ctx) {
+    rt_arena_init(arena);
+    arena->owner = ctx;
+}
+
+static RT_UNUSED void rt_context_free_chunks(rt_context* ctx) {
+    if (ctx == NULL) {
+        return;
+    }
+    rt_arena_chunk* chunk = ctx->chunk_pool;
+    while (chunk != NULL) {
+        rt_arena_chunk* next = chunk->next;
+        free(chunk);
+        chunk = next;
+    }
+    ctx->chunk_pool = NULL;
+}
+
+static RT_UNUSED rt_arena_chunk* rt_arena_take_chunk(rt_arena* arena, size_t min_cap) {
+    if (arena->owner != NULL) {
+        rt_arena_chunk** link = &arena->owner->chunk_pool;
+        rt_arena_chunk* chunk = arena->owner->chunk_pool;
+        while (chunk != NULL) {
+            if (chunk->cap >= min_cap) {
+                *link = chunk->next;
+                chunk->next = NULL;
+                chunk->used = 0;
+                return chunk;
+            }
+            link = &chunk->next;
+            chunk = chunk->next;
+        }
+    }
+    return rt_arena_new_chunk(min_cap);
 }
 
 static RT_UNUSED void rt_arena_reset(rt_arena* arena) {
@@ -287,7 +328,13 @@ static RT_UNUSED void rt_arena_deinit(rt_arena* arena) {
     rt_arena_chunk* chunk = arena->chunks;
     while (chunk != NULL) {
         rt_arena_chunk* next = chunk->next;
-        free(chunk);
+        chunk->used = 0;
+        if (arena->owner != NULL) {
+            chunk->next = arena->owner->chunk_pool;
+            arena->owner->chunk_pool = chunk;
+        } else {
+            free(chunk);
+        }
         chunk = next;
     }
     arena->chunks = NULL;
@@ -333,7 +380,7 @@ static RT_UNUSED void* rt_arena_alloc(rt_arena* arena, size_t size) {
 
     rt_arena_chunk* chunk = arena->chunks;
     if (chunk == NULL || aligned_size > chunk->cap - chunk->used) {
-        chunk = rt_arena_new_chunk(aligned_size);
+        chunk = rt_arena_take_chunk(arena, aligned_size);
         chunk->next = arena->chunks;
         arena->chunks = chunk;
     }

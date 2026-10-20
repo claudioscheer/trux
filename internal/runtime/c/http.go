@@ -618,8 +618,9 @@ static RT_UNUSED void rt_http_handle_connection(int fd, rt_http_handler_fn handl
             break;
         }
 
-        rt_context ctx = {&arena};
+        rt_context ctx = {&arena, NULL};
         handler(&ctx, &arena, (int64_t)(intptr_t)&req);
+        rt_context_free_chunks(&ctx);
         if (!req.responded) {
             rt_http_send_simple(fd, 500, "handler did not respond\n", req.close_after_response);
         }

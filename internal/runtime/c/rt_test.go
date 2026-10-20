@@ -563,6 +563,75 @@ int main(void) {
 `, "trux runtime error: csv row has 1 columns, want 2")
 }
 
+func TestFrameChunkPoolReusesChunksAndStaysContextLocal(t *testing.T) {
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+static int recurse(rt_context* ctx, int n) {
+    rt_arena frame;
+    rt_arena_init_frame(&frame, ctx);
+    unsigned char* bytes = (unsigned char*)rt_arena_alloc(&frame, 16);
+    if (bytes == NULL) {
+        rt_arena_deinit(&frame);
+        return 0;
+    }
+    bytes[0] = (unsigned char)n;
+    int ok = 1;
+    if (n > 0) {
+        ok = recurse(ctx, n - 1);
+    }
+    if (bytes[0] != (unsigned char)n) {
+        ok = 0;
+    }
+    rt_arena_deinit(&frame);
+    return ok;
+}
+
+int main(void) {
+    rt_context pooled = {0};
+    size_t before = rt_test_malloc_calls;
+    int i;
+    for (i = 0; i < 40; i++) {
+        rt_arena frame;
+        rt_arena_init_frame(&frame, &pooled);
+        if (rt_arena_alloc(&frame, 64) == NULL) return 1;
+        rt_arena_deinit(&frame);
+    }
+    size_t pooled_mallocs = rt_test_malloc_calls - before;
+    rt_context_free_chunks(&pooled);
+
+    before = rt_test_malloc_calls;
+    for (i = 0; i < 40; i++) {
+        rt_arena frame;
+        rt_arena_init(&frame);
+        if (rt_arena_alloc(&frame, 64) == NULL) return 1;
+        rt_arena_deinit(&frame);
+    }
+    size_t fresh_mallocs = rt_test_malloc_calls - before;
+    if (!(pooled_mallocs < fresh_mallocs)) {
+        fprintf(stderr, "pooled %zu fresh %zu\n", pooled_mallocs, fresh_mallocs);
+        return 2;
+    }
+
+    rt_context first_ctx = {0};
+    rt_context second_ctx = {0};
+    rt_arena frame;
+    rt_arena_init_frame(&frame, &first_ctx);
+    void* first = rt_arena_alloc(&frame, 32);
+    rt_arena_deinit(&frame);
+    rt_arena_init_frame(&frame, &second_ctx);
+    void* second = rt_arena_alloc(&frame, 32);
+    if (second == first) return 3;
+    rt_arena_deinit(&frame);
+    rt_context_free_chunks(&first_ctx);
+    rt_context_free_chunks(&second_ctx);
+
+    rt_context recursive = {0};
+    if (!recurse(&recursive, 8)) return 4;
+    rt_context_free_chunks(&recursive);
+    return 0;
+}
+`)
+}
+
 func countingRuntimeSource() string {
 	const stdlibInclude = "#include <stdlib.h>\n"
 	const mallocHooks = `#include <stdlib.h>

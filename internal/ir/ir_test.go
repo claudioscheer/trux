@@ -534,6 +534,37 @@ func sameTypes(got []ast.Type, want []ast.Type) bool {
 	return true
 }
 
+func TestBuildRecordsNestedCollectionTypes(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let rows list[list[int]] = list[list[int]]{list[int]{1, 2}, list[int]{3}}
+    let grid [][]float = make([][]float, 2)
+    print(len(rows), len(grid))
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	built, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawList bool
+	var sawSlice bool
+	for _, typ := range built.UsedTypes {
+		if typ.String() == "list[list[int]]" {
+			sawList = true
+		}
+		if typ.String() == "[][]float" {
+			sawSlice = true
+		}
+	}
+	if !sawList || !sawSlice {
+		t.Fatalf("used types = %v, want list[list[int]] and [][]float", built.UsedTypes)
+	}
+}
+
 func mustParse(t *testing.T, src string) *ast.Program {
 	t.Helper()
 

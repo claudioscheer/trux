@@ -45,6 +45,51 @@ func main() int {
 	}
 }
 
+func TestDiagnosticsForLibraryFileWithoutMain(t *testing.T) {
+	diagnostics := diagnosticsFor("file:///tmp/math.tx", `package math
+func add(a int, b int) int {
+    return a + "no"
+}`)
+
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostic count = %d, want 1: %#v", len(diagnostics), diagnostics)
+	}
+	if !strings.Contains(diagnostics[0].Message, "cannot") && !strings.Contains(diagnostics[0].Message, "operator") {
+		t.Fatalf("message = %q, want a type error", diagnostics[0].Message)
+	}
+}
+
+func TestDiagnosticsForLegalLibraryFile(t *testing.T) {
+	diagnostics := diagnosticsFor("file:///tmp/math.tx", `package math
+func add(a int, b int) int {
+    return a + b
+}`)
+	if len(diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v, want none", diagnostics)
+	}
+}
+
+func TestDiagnosticsForTestFile(t *testing.T) {
+	legal := diagnosticsFor("file:///tmp/math.test.tx", `package math
+func testAdd() {
+    assert(1 + 1 == 2, "sum")
+}`)
+	if len(legal) != 0 {
+		t.Fatalf("legal test diagnostics = %#v, want none", legal)
+	}
+
+	bad := diagnosticsFor("file:///tmp/math.test.tx", `package math
+func testAdd() {
+    let value int = "no"
+}`)
+	if len(bad) != 1 {
+		t.Fatalf("diagnostic count = %d, want 1: %#v", len(bad), bad)
+	}
+	if !strings.Contains(bad[0].Message, "cannot assign") {
+		t.Fatalf("message = %q, want assignment error", bad[0].Message)
+	}
+}
+
 func TestDiagnosticsTypeChecksImportedPrograms(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := filepath.Join(dir, "main.tx")

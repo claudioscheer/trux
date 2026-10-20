@@ -258,11 +258,14 @@ func diagnosticsForDocuments(uri string, text string, documents map[string]strin
 		return []Diagnostic{diagnosticFromError(text, err)}
 	}
 
-	if !hasMain(program) {
-		return nil
+	if isTestFile(path) {
+		if err := prepareTestFile(program); err != nil {
+			return []Diagnostic{diagnosticFromError(text, err)}
+		}
 	}
 
-	if len(program.Imports) == 0 {
+	if len(program.Imports) == 0 || isTestFile(path) {
+		ensureMain(program)
 		if _, err := semtypes.Check(program); err != nil {
 			return []Diagnostic{diagnosticFromError(text, err)}
 		}
@@ -275,11 +278,83 @@ func diagnosticsForDocuments(uri string, text string, documents map[string]strin
 	if err != nil {
 		return []Diagnostic{diagnosticFromError(text, err)}
 	}
+	ensureMain(result.Program)
 	if _, err := semtypes.Check(result.Program); err != nil {
 		return []Diagnostic{diagnosticFromError(text, err)}
 	}
 
 	return nil
+}
+
+func isTestFile(path string) bool {
+	return strings.HasSuffix(path, ".test.tx")
+}
+
+func prepareTestFile(program *ast.Program) error {
+	for _, fn := range program.Functions {
+		if !strings.HasPrefix(fn.Name, "test") {
+			continue
+		}
+		if fn.Kernel {
+			return fmt.Errorf("%s:%d:%d: test function %s must not be a kernel", fn.NamePos.File, fn.NamePos.Line, fn.NamePos.Column, fn.Name)
+		}
+		if len(fn.Params) != 0 {
+			return fmt.Errorf("%s:%d:%d: test function %s must not have parameters", fn.NamePos.File, fn.NamePos.Line, fn.NamePos.Column, fn.Name)
+		}
+		if fn.ReturnType != nil {
+			return fmt.Errorf("%s:%d:%d: test function %s must not declare a return type", fn.NamePos.File, fn.NamePos.Line, fn.NamePos.Column, fn.Name)
+		}
+		if blockHasReturn(fn.Body.Statements) {
+			return fmt.Errorf("%s:%d:%d: test function %s must not return explicitly", fn.NamePos.File, fn.NamePos.Line, fn.NamePos.Column, fn.Name)
+		}
+		fn.ReturnType = ast.IntType
+		fn.Body.Statements = append(fn.Body.Statements, &ast.ReturnStmt{
+			Start: fn.Body.End,
+			Value: &ast.IntLiteral{Start: fn.Body.End, Value: "0"},
+		})
+	}
+	return nil
+}
+
+func blockHasReturn(stmts []ast.Statement) bool {
+	for _, stmt := range stmts {
+		switch stmt := stmt.(type) {
+		case *ast.ReturnStmt:
+			return true
+		case *ast.IfStmt:
+			if blockHasReturn(stmt.Then.Statements) {
+				return true
+			}
+			if stmt.Else != nil && blockHasReturn(stmt.Else.Statements) {
+				return true
+			}
+		case *ast.ForStmt:
+			if blockHasReturn(stmt.Body.Statements) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ensureMain(program *ast.Program) {
+	if hasMain(program) {
+		return
+	}
+	pos := token.Position{Line: 1, Column: 1}
+	program.Functions = append(program.Functions, &ast.FuncDecl{
+		Pos:        pos,
+		NamePos:    pos,
+		Name:       "main",
+		ReturnType: ast.IntType,
+		Body: ast.Block{
+			Start: pos,
+			End:   pos,
+			Statements: []ast.Statement{
+				&ast.ReturnStmt{Start: pos, Value: &ast.IntLiteral{Start: pos, Value: "0"}},
+			},
+		},
+	})
 }
 
 func documentSources(documents map[string]string) map[string]string {

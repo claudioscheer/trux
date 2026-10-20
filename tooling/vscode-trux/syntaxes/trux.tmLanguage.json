@@ -164,7 +164,7 @@
       "patterns": [
         {
           "name": "keyword.control.trux",
-          "match": "\\b(if|else|for|return)\\b"
+          "match": "\\b(if|else|for|return|break|continue)\\b"
         },
         {
           "name": "keyword.declaration.trux",

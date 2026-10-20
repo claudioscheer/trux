@@ -85,6 +85,18 @@ type ForStmt struct {
 
 func (*ForStmt) stmtNode() {}
 
+type BreakStmt struct {
+	Pos token.Position
+}
+
+func (*BreakStmt) stmtNode() {}
+
+type ContinueStmt struct {
+	Pos token.Position
+}
+
+func (*ContinueStmt) stmtNode() {}
+
 type PrintStmt struct {
 	Args  []Expr
 	Pos   token.Position
@@ -663,6 +675,10 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 			}
 		}
 		return &ForStmt{Pos: stmt.Pos(), Init: init, Condition: condition, Post: post, Body: body}, nil
+	case *ast.BreakStmt:
+		return &BreakStmt{Pos: stmt.Pos()}, nil
+	case *ast.ContinueStmt:
+		return &ContinueStmt{Pos: stmt.Pos()}, nil
 	case *ast.ExprStmt:
 		if call, ok := stmt.Expr.(*ast.CallExpr); ok {
 			if _, ok := b.info.AssertCalls[call]; ok {

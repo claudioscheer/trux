@@ -379,6 +379,29 @@ func main() int {
 	}
 }
 
+func TestParsesLogicalPrecedence(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let flag bool = 1 == 1 && 2 == 2 || 3 == 4
+    return 0
+}`)
+
+	root := program.Functions[0].Body.Statements[0].(*ast.LetStmt).Value.(*ast.BinaryExpr)
+	if root.Operator != "||" {
+		t.Fatalf("root operator = %q, want ||", root.Operator)
+	}
+	left := root.Left.(*ast.BinaryExpr)
+	if left.Operator != "&&" {
+		t.Fatalf("left operator = %q, want &&", left.Operator)
+	}
+	if _, ok := left.Left.(*ast.BinaryExpr); !ok {
+		t.Fatalf("comparison = %T, want binary", left.Left)
+	}
+	if _, ok := left.Right.(*ast.BinaryExpr); !ok {
+		t.Fatalf("comparison = %T, want binary", left.Right)
+	}
+}
+
 func TestParsesRemainderPrecedence(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

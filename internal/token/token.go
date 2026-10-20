@@ -44,6 +44,8 @@ const (
 	Asterisk     Type = "*"
 	Slash        Type = "/"
 	Percent      Type = "%"
+	And          Type = "&&"
+	Or           Type = "||"
 
 	Comma     Type = ","
 	Colon     Type = ":"

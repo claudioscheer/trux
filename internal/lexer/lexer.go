@@ -93,6 +93,18 @@ func (l *Lexer) NextToken() token.Token {
 	case '%':
 		l.advance()
 		return token.Token{Type: token.Percent, Lexeme: "%", Pos: pos}
+	case '&':
+		l.advance()
+		if l.match('&') {
+			return token.Token{Type: token.And, Lexeme: "&&", Pos: pos}
+		}
+		return token.Token{Type: token.Illegal, Lexeme: "&", Pos: pos}
+	case '|':
+		l.advance()
+		if l.match('|') {
+			return token.Token{Type: token.Or, Lexeme: "||", Pos: pos}
+		}
+		return token.Token{Type: token.Illegal, Lexeme: "|", Pos: pos}
 	case ',':
 		l.advance()
 		return token.Token{Type: token.Comma, Lexeme: ",", Pos: pos}

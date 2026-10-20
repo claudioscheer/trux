@@ -427,7 +427,7 @@ func isPrefixOperand(prevprev token.Token, prev token.Token, curr token.Token) b
 func isOperator(typ token.Type) bool {
 	switch typ {
 	case token.Assign, token.Equal, token.NotEqual, token.Not, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
-		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Percent, token.In:
+		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Percent, token.And, token.Or, token.In:
 		return true
 	default:
 		return false

@@ -51,6 +51,16 @@ pub func add(a int, b int) int {
 	}
 }
 
+func TestFormatKeepsLogicalOperators(t *testing.T) {
+	got, err := Format("main.tx", "package main\nfunc main() int {\nlet flag bool=true&&false||true\nreturn 0\n}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "let flag bool = true && false || true") {
+		t.Fatalf("formatted = %q, want spaced logical operators", got)
+	}
+}
+
 func TestFormatKeepsRemainder(t *testing.T) {
 	got, err := Format("main.tx", "package main\nfunc main() int {\nlet n int=10%3\nreturn n\n}\n")
 	if err != nil {

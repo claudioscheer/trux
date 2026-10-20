@@ -809,6 +809,9 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		return emittedExpr{prelude: operand.prelude, value: emitUnaryValue(expr.Operator, expr.Type(), operand.value)}, nil
 	case *ir.BinaryExpr:
+		if expr.Operator == "&&" || expr.Operator == "||" {
+			return e.emitShortCircuit(expr, targetArena)
+		}
 		left, err := e.emitOrderedOperand(expr.Left, targetArena)
 		if err != nil {
 			return emittedExpr{}, err
@@ -887,6 +890,34 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 type tempExpr struct {
 	name string
 	decl string
+}
+
+func (e *funcEmitter) emitShortCircuit(expr *ir.BinaryExpr, targetArena string) (emittedExpr, error) {
+	left, err := e.emitOrderedOperand(expr.Left, targetArena)
+	if err != nil {
+		return emittedExpr{}, err
+	}
+	right, err := e.emitOrderedOperand(expr.Right, targetArena)
+	if err != nil {
+		return emittedExpr{}, err
+	}
+	tmp, err := e.newTemp(ast.BoolType, left.value)
+	if err != nil {
+		return emittedExpr{}, err
+	}
+	cond := tmp.name
+	if expr.Operator == "||" {
+		cond = "!(" + tmp.name + ")"
+	}
+	prelude := append([]string{}, left.prelude...)
+	prelude = append(prelude, tmp.decl)
+	prelude = append(prelude, "if ("+cond+") {")
+	for _, line := range right.prelude {
+		prelude = append(prelude, "    "+line)
+	}
+	prelude = append(prelude, "    "+tmp.name+" = "+right.value+";")
+	prelude = append(prelude, "}")
+	return emittedExpr{prelude: prelude, value: tmp.name}, nil
 }
 
 func (e *funcEmitter) newTemp(typ ast.Type, value string) (tempExpr, error) {

@@ -163,6 +163,73 @@ func (s *scope) lookup(name string) (localInfo, bool) {
 	return localInfo{}, false
 }
 
+type originSnap struct {
+	levels []map[string]Origin
+}
+
+func snapshotOrigins(s *scope) originSnap {
+	var snap originSnap
+	for scope := s; scope != nil; scope = scope.parent {
+		level := make(map[string]Origin, len(scope.locals))
+		for name, local := range scope.locals {
+			level[name] = local.origin
+		}
+		snap.levels = append(snap.levels, level)
+	}
+	return snap
+}
+
+func restoreOrigins(s *scope, snap originSnap) {
+	i := 0
+	for scope := s; scope != nil; scope = scope.parent {
+		for name, origin := range snap.levels[i] {
+			local := scope.locals[name]
+			local.origin = origin
+			scope.locals[name] = local
+		}
+		i++
+	}
+}
+
+func joinOrigins(s *scope, left originSnap, right originSnap) {
+	i := 0
+	for scope := s; scope != nil; scope = scope.parent {
+		for name, local := range scope.locals {
+			local.origin = joinOrigin(left.levels[i][name], right.levels[i][name])
+			scope.locals[name] = local
+		}
+		i++
+	}
+}
+
+func joinOrigin(left Origin, right Origin) Origin {
+	if left == right || right == "" {
+		return left
+	}
+	if left == "" {
+		return right
+	}
+	if originCopiesOut(left) || originCopiesOut(right) {
+		if left == OriginFrameOwned || right == OriginFrameOwned {
+			return OriginFrameOwned
+		}
+		return OriginScratch
+	}
+	if left == OriginBorrowed || right == OriginBorrowed {
+		return OriginBorrowed
+	}
+	return left
+}
+
+func originCopiesOut(origin Origin) bool {
+	switch origin {
+	case OriginScratch, OriginFrameOwned, OriginUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *scope) assign(name string, local localInfo) bool {
 	for scope := s; scope != nil; scope = scope.parent {
 		if _, ok := scope.locals[name]; ok {
@@ -434,12 +501,15 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		if !ast.TypeEqual(conditionType, ast.BoolType) {
 			return typeError(stmt.Condition.Pos(), "if condition must be bool, got %s", conditionType)
 		}
+		before := snapshotOrigins(locals)
 		thenScope := newScope(locals)
 		for _, inner := range stmt.Then.Statements {
 			if err := c.checkStmt(fn, thenScope, inner); err != nil {
 				return err
 			}
 		}
+		afterThen := snapshotOrigins(locals)
+		restoreOrigins(locals, before)
 		if stmt.Else != nil {
 			elseScope := newScope(locals)
 			for _, inner := range stmt.Else.Statements {
@@ -447,7 +517,10 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 					return err
 				}
 			}
+			joinOrigins(locals, afterThen, snapshotOrigins(locals))
+			return nil
 		}
+		joinOrigins(locals, before, afterThen)
 		return nil
 	case *ast.ForStmt:
 		loopScope := newScope(locals)
@@ -465,6 +538,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 				return typeError(stmt.Condition.Pos(), "for condition must be bool, got %s", conditionType)
 			}
 		}
+		before := snapshotOrigins(loopScope)
 		c.loopDepth++
 		bodyScope := newScope(loopScope)
 		for _, inner := range stmt.Body.Statements {
@@ -480,6 +554,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 			}
 		}
 		c.loopDepth--
+		joinOrigins(loopScope, before, snapshotOrigins(loopScope))
 		return nil
 	case *ast.BreakStmt:
 		if c.loopDepth == 0 {

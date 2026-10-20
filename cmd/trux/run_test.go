@@ -93,6 +93,46 @@ func main() int {
 	}
 }
 
+func TestRunFileKeepsBranchAssignedLoopStringAliveForCaller(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func pick(flag bool) string {
+    let acc string = ""
+    let i int = 0
+    for ; i < 4; i = i + 1 {
+        if flag {
+            acc = acc + "x"
+        } else {
+            acc = "ok"
+        }
+    }
+    return acc
+}
+
+func main() int {
+    let value string = pick(true)
+    let junk string = "01230123012301230123012301230123" + "01230123012301230123012301230123"
+    print(value)
+    print(len(value))
+    print(len(junk))
+    let other string = pick(false)
+    let junkOther string = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" + "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+    print(other)
+    print(len(junkOther))
+    return 0
+}`)
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	want := "xxxx\n4\n64\nok\n64\n"
+	if out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
+	}
+}
+
 func TestRunFileKeepsTempStringReturnAliveForCaller(t *testing.T) {
 	requireCC(t)
 

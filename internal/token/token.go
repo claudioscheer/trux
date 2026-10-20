@@ -43,6 +43,7 @@ const (
 	Minus        Type = "-"
 	Asterisk     Type = "*"
 	Slash        Type = "/"
+	Percent      Type = "%"
 
 	Comma     Type = ","
 	Colon     Type = ":"

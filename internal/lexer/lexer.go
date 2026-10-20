@@ -90,6 +90,9 @@ func (l *Lexer) NextToken() token.Token {
 	case '/':
 		l.advance()
 		return token.Token{Type: token.Slash, Lexeme: "/", Pos: pos}
+	case '%':
+		l.advance()
+		return token.Token{Type: token.Percent, Lexeme: "%", Pos: pos}
 	case ',':
 		l.advance()
 		return token.Token{Type: token.Comma, Lexeme: ",", Pos: pos}

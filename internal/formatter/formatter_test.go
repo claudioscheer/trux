@@ -51,6 +51,16 @@ pub func add(a int, b int) int {
 	}
 }
 
+func TestFormatKeepsRemainder(t *testing.T) {
+	got, err := Format("main.tx", "package main\nfunc main() int {\nlet n int=10%3\nreturn n\n}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "let n int = 10 % 3") {
+		t.Fatalf("formatted = %q, want spaced remainder", got)
+	}
+}
+
 func TestFormatKeepsPrefixOperatorsTight(t *testing.T) {
 	src := "package main\nfunc main() int {\nlet n int=-1\nlet flag bool=!false\nreturn 0\n}\n"
 	got, err := Format("main.tx", src)

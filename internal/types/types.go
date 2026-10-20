@@ -1320,6 +1320,11 @@ func binaryType(pos token.Position, operator string, leftType ast.Type, rightTyp
 			return ast.FloatType, nil
 		}
 		return nil, typeError(pos, "operator %q requires matching numeric operands or string operands, got %s and %s", operator, leftType, rightType)
+	case "%":
+		if ast.TypeEqual(leftType, ast.IntType) && ast.TypeEqual(rightType, ast.IntType) {
+			return ast.IntType, nil
+		}
+		return nil, typeError(pos, "operator %q requires int operands, got %s and %s", operator, leftType, rightType)
 	case "-", "*", "/":
 		if ast.TypeEqual(leftType, ast.IntType) && ast.TypeEqual(rightType, ast.IntType) {
 			return ast.IntType, nil

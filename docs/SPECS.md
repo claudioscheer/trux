@@ -65,7 +65,7 @@ Supported collection types:
 list[T]
 ```
 
-Collection element types are limited to scalar types. Nested collections are rejected.
+Collection element types may be scalars or further collections. Nested lists, slices, and arrays are supported. `examples/jagged_lists.tx` and `examples/nested_slices.tx` cover that shape. `gpu.Buffer` elements stay `int` or `float`.
 
 Supported GPU device buffer types:
 
@@ -194,6 +194,8 @@ Arithmetic operators:
 ```
 
 Arithmetic requires matching numeric operands. The compiler does not implicitly promote `int` to `float`.
+
+Integer `+`, `-`, `*`, and `/` trap on signed overflow. Integer `/` also traps on division by zero. Both failures are Trux runtime errors on the host. Float arithmetic follows IEEE 754. Float division by zero produces an infinity rather than a Trux runtime error.
 
 Comparison operators:
 
@@ -550,7 +552,6 @@ using comparisons with incompatible operands
 using in with non-string operands
 if or for conditions that are not bool
 assignment to undefined variables
-nested collection element types
 array literals with the wrong element count
 collection literal elements with the wrong type
 index expressions whose index is not int
@@ -592,21 +593,9 @@ trux emit-c main.tx
 
 ## Future Ideas
 
+`pub func` and package-qualified calls are implemented. See [MODULES.md](MODULES.md).
+
 These ideas are not implemented and should not drive current language usage:
 
 - recursive directory-based packages
 - multi-file C output
-
-Possible package/export syntax:
-
-```trux
-package math
-
-pub func add(a int, b int) int {
-  return a + b
-}
-
-func double(x int) int {
-  return x * 2
-}
-```

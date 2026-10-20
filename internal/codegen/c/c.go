@@ -20,9 +20,10 @@ const (
 )
 
 type funcEmitter struct {
-	temp   int
-	loops  []string
-	loopID int
+	temp    int
+	loops   []string
+	loopID  int
+	scratch string
 }
 
 func (e *funcEmitter) pushLoop() string {
@@ -34,6 +35,110 @@ func (e *funcEmitter) pushLoop() string {
 
 func (e *funcEmitter) popLoop() {
 	e.loops = e.loops[:len(e.loops)-1]
+}
+
+func functionNeedsFrame(fn *ir.Func) bool {
+	return stmtsNeedFrame(fn.Body)
+}
+
+func stmtsNeedFrame(stmts []ir.Stmt) bool {
+	for _, stmt := range stmts {
+		if stmt != nil && stmtNeedsFrame(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtNeedsFrame(stmt ir.Stmt) bool {
+	switch stmt := stmt.(type) {
+	case *ir.LetStmt:
+		return exprNeedsFrame(stmt.Value)
+	case *ir.ReturnStmt:
+		return exprNeedsFrame(stmt.Value)
+	case *ir.AssignStmt:
+		return exprNeedsFrame(stmt.Value)
+	case *ir.IndexAssignStmt, *ir.AppendStmt:
+		return true
+	case *ir.IfStmt:
+		return exprNeedsFrame(stmt.Condition) || stmtsNeedFrame(stmt.Then) || stmtsNeedFrame(stmt.Else)
+	case *ir.ForStmt:
+		return stmtNeedsFrame(stmt.Init) || exprNeedsFrame(stmt.Condition) || stmtsNeedFrame(stmt.Body) || stmtNeedsFrame(stmt.Post)
+	case *ir.BreakStmt, *ir.ContinueStmt, *ir.GPUSyncStmt:
+		return false
+	case *ir.PrintStmt:
+		for _, arg := range stmt.Args {
+			if exprNeedsFrame(arg) {
+				return true
+			}
+		}
+		return false
+	case *ir.AssertStmt:
+		return exprNeedsFrame(stmt.Condition) || exprNeedsFrame(stmt.Message)
+	case *ir.WriteFileStmt:
+		return exprNeedsFrame(stmt.Path) || exprNeedsFrame(stmt.Contents)
+	case *ir.WriteCSVStmt:
+		return exprNeedsFrame(stmt.Path) || exprNeedsFrame(stmt.Cells) || exprNeedsFrame(stmt.Columns)
+	case *ir.WritePPMStmt:
+		return exprNeedsFrame(stmt.Path) || exprNeedsFrame(stmt.Pixels) || exprNeedsFrame(stmt.Width) || exprNeedsFrame(stmt.Height)
+	case *ir.GPUCopyStmt:
+		return exprNeedsFrame(stmt.First) || exprNeedsFrame(stmt.Second)
+	case *ir.GPUFreeStmt:
+		return exprNeedsFrame(stmt.Buffer)
+	case *ir.GPULaunchStmt:
+		return true
+	case *ir.TimeSleepStmt:
+		return exprNeedsFrame(stmt.Millis)
+	case *ir.HTTPServeStmt:
+		return true
+	case *ir.HTTPRespondStmt:
+		return exprNeedsFrame(stmt.Request) || exprNeedsFrame(stmt.Status) || exprNeedsFrame(stmt.ContentType) || exprNeedsFrame(stmt.Body)
+	case *ir.ExprStmt:
+		return exprNeedsFrame(stmt.Expr)
+	default:
+		return true
+	}
+}
+
+func exprNeedsFrame(expr ir.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch expr := expr.(type) {
+	case *ir.IdentExpr, *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.GPUCoordExpr, *ir.TimeNowExpr:
+		return false
+	case *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr:
+		return true
+	case *ir.ImageDimensionExpr:
+		return exprNeedsFrame(expr.Path)
+	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr:
+		return true
+	case *ir.CallExpr:
+		if isDynamicType(expr.Type()) {
+			return true
+		}
+		for _, arg := range expr.Args {
+			if exprNeedsFrame(arg) {
+				return true
+			}
+		}
+		return false
+	case *ir.BinaryExpr:
+		if expr.Operator == "+" && ast.TypeEqual(expr.Type(), ast.StringType) {
+			return true
+		}
+		return exprNeedsFrame(expr.Left) || exprNeedsFrame(expr.Right)
+	case *ir.UnaryExpr:
+		return exprNeedsFrame(expr.Operand)
+	case *ir.LenExpr:
+		return exprNeedsFrame(expr.Value)
+	case *ir.IndexExpr:
+		return exprNeedsFrame(expr.Collection) || exprNeedsFrame(expr.Index)
+	case *ir.SliceExpr:
+		return exprNeedsFrame(expr.Collection) || exprNeedsFrame(expr.Start) || exprNeedsFrame(expr.End)
+	default:
+		return true
+	}
 }
 
 func loopHasContinue(stmts []ir.Stmt) bool {
@@ -152,10 +257,15 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
 	fmt.Fprintln(out, "    (void)trux_ctx;")
 	fmt.Fprintln(out, "    (void)trux_result_arena;")
 
-	fmt.Fprintln(out, "    rt_arena trux_frame;")
-	fmt.Fprintln(out, "    rt_arena_init_frame(&trux_frame, trux_ctx);")
+	needsFrame := functionNeedsFrame(fn)
+	scratch := resultArena
+	if needsFrame {
+		fmt.Fprintln(out, "    rt_arena trux_frame;")
+		fmt.Fprintln(out, "    rt_arena_init_frame(&trux_frame, trux_ctx);")
+		scratch = frameArena
+	}
 	fmt.Fprintf(out, "    %s trux_return_value;\n", returnType)
-	emitter := &funcEmitter{}
+	emitter := &funcEmitter{scratch: scratch}
 	for _, stmt := range fn.Body {
 		if err := emitter.emitStmt(out, stmt, 1, opts); err != nil {
 			return err
@@ -163,7 +273,9 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
 	}
 	fmt.Fprintln(out, "    rt_runtime_fail(\"missing return\");")
 	fmt.Fprintln(out, "trux_return:")
-	fmt.Fprintln(out, "    rt_arena_deinit(&trux_frame);")
+	if needsFrame {
+		fmt.Fprintln(out, "    rt_arena_deinit(&trux_frame);")
+	}
 	fmt.Fprintln(out, "    return trux_return_value;")
 	fmt.Fprintln(out, "}")
 	return nil
@@ -238,14 +350,14 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		if err != nil {
 			return err
 		}
-		value, err := e.emitOrderedExpr(stmt.Value, frameArena)
+		value, err := e.emitOrderedExpr(stmt.Value, e.scratch)
 		if err != nil {
 			return err
 		}
 		e.writePrelude(out, indent, value.prelude)
 		fmt.Fprintf(out, "%s%s %s = %s;\n", indent, typ, mangleIdent(stmt.Name), value.value)
 	case *ir.ReturnStmt:
-		targetArena := frameArena
+		targetArena := e.scratch
 		_, directClone := stmt.Value.(*ir.CloneExpr)
 		if directClone {
 			targetArena = resultArena
@@ -267,18 +379,18 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		fmt.Fprintf(out, "%strux_return_value = %s;\n", indent, result)
 		fmt.Fprintf(out, "%sgoto trux_return;\n", indent)
 	case *ir.AssignStmt:
-		value, err := e.emitOrderedExpr(stmt.Value, frameArena)
+		value, err := e.emitOrderedExpr(stmt.Value, e.scratch)
 		if err != nil {
 			return err
 		}
 		e.writePrelude(out, indent, value.prelude)
 		fmt.Fprintf(out, "%s%s = %s;\n", indent, mangleIdent(stmt.Name), value.value)
 	case *ir.IndexAssignStmt:
-		collection, err := e.emitOrderedOperand(stmt.Target.Collection, frameArena)
+		collection, err := e.emitOrderedOperand(stmt.Target.Collection, e.scratch)
 		if err != nil {
 			return err
 		}
-		index, err := e.emitOrderedOperand(stmt.Target.Index, frameArena)
+		index, err := e.emitOrderedOperand(stmt.Target.Index, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -365,7 +477,7 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 			return fmt.Errorf("print arg/type count mismatch")
 		}
 		for i, argExpr := range stmt.Args {
-			arg, err := e.emitOrderedExpr(argExpr, frameArena)
+			arg, err := e.emitOrderedExpr(argExpr, e.scratch)
 			if err != nil {
 				return err
 			}
@@ -391,7 +503,7 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		}
 		e.writePrelude(out, indent, condition.prelude)
 		fmt.Fprintf(out, "%sif (!(%s)) {\n", indent, condition.value)
-		message, err := e.emitOrderedExpr(stmt.Message, frameArena)
+		message, err := e.emitOrderedExpr(stmt.Message, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -405,7 +517,7 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		)
 		fmt.Fprintf(out, "%s}\n", indent)
 	case *ir.AppendStmt:
-		list, err := e.emitOrderedOperand(stmt.List, frameArena)
+		list, err := e.emitOrderedOperand(stmt.List, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -422,11 +534,11 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		e.writePrelude(out, indent, value.prelude)
 		fmt.Fprintf(out, "%s%s(%s, %s);\n", indent, appendFn, list.value, value.value)
 	case *ir.WriteFileStmt:
-		path, err := e.emitOrderedOperand(stmt.Path, frameArena)
+		path, err := e.emitOrderedOperand(stmt.Path, e.scratch)
 		if err != nil {
 			return err
 		}
-		contents, err := e.emitOrderedOperand(stmt.Contents, frameArena)
+		contents, err := e.emitOrderedOperand(stmt.Contents, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -434,15 +546,15 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		e.writePrelude(out, indent, contents.prelude)
 		fmt.Fprintf(out, "%srt_write_file(%s, %s);\n", indent, path.value, contents.value)
 	case *ir.WriteCSVStmt:
-		path, err := e.emitOrderedOperand(stmt.Path, frameArena)
+		path, err := e.emitOrderedOperand(stmt.Path, e.scratch)
 		if err != nil {
 			return err
 		}
-		cells, err := e.emitOrderedOperand(stmt.Cells, frameArena)
+		cells, err := e.emitOrderedOperand(stmt.Cells, e.scratch)
 		if err != nil {
 			return err
 		}
-		columns, err := e.emitOrderedOperand(stmt.Columns, frameArena)
+		columns, err := e.emitOrderedOperand(stmt.Columns, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -451,19 +563,19 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		e.writePrelude(out, indent, columns.prelude)
 		fmt.Fprintf(out, "%srt_write_csv(%s, %s, %s);\n", indent, path.value, cells.value, columns.value)
 	case *ir.WritePPMStmt:
-		path, err := e.emitOrderedOperand(stmt.Path, frameArena)
+		path, err := e.emitOrderedOperand(stmt.Path, e.scratch)
 		if err != nil {
 			return err
 		}
-		pixels, err := e.emitOrderedOperand(stmt.Pixels, frameArena)
+		pixels, err := e.emitOrderedOperand(stmt.Pixels, e.scratch)
 		if err != nil {
 			return err
 		}
-		width, err := e.emitOrderedOperand(stmt.Width, frameArena)
+		width, err := e.emitOrderedOperand(stmt.Width, e.scratch)
 		if err != nil {
 			return err
 		}
-		height, err := e.emitOrderedOperand(stmt.Height, frameArena)
+		height, err := e.emitOrderedOperand(stmt.Height, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -473,11 +585,11 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		e.writePrelude(out, indent, height.prelude)
 		fmt.Fprintf(out, "%srt_write_ppm(%s, %s, %s, %s);\n", indent, path.value, pixels.value, width.value, height.value)
 	case *ir.GPUCopyStmt:
-		first, err := e.emitOrderedOperand(stmt.First, frameArena)
+		first, err := e.emitOrderedOperand(stmt.First, e.scratch)
 		if err != nil {
 			return err
 		}
-		second, err := e.emitOrderedOperand(stmt.Second, frameArena)
+		second, err := e.emitOrderedOperand(stmt.Second, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -501,7 +613,7 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 			fmt.Fprintf(out, "%srt_gpu_copy_to_host_%s(%s, %s);\n", indent, name, first.value, second.value)
 		}
 	case *ir.GPUFreeStmt:
-		buffer, err := e.emitOrderedOperand(stmt.Buffer, frameArena)
+		buffer, err := e.emitOrderedOperand(stmt.Buffer, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -516,7 +628,7 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 	case *ir.GPULaunchStmt:
 		dims := make([]emittedExpr, 0, len(stmt.Dims))
 		for _, dim := range stmt.Dims {
-			value, err := e.emitOrderedOperand(dim, frameArena)
+			value, err := e.emitOrderedOperand(dim, e.scratch)
 			if err != nil {
 				return err
 			}
@@ -543,22 +655,22 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		fmt.Fprintf(out, "%s%s<<<dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s), dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s)>>>(%s);\n", indent, mangleKernel(stmt.KernelName), dimValues[0], dimValues[1], dimValues[2], dimValues[3], dimValues[4], dimValues[5], strings.Join(argValues, ", "))
 		fmt.Fprintf(out, "%srt_cuda_check(cudaGetLastError(), \"launch\");\n", indent)
 	case *ir.TimeSleepStmt:
-		millis, err := e.emitOrderedOperand(stmt.Millis, frameArena)
+		millis, err := e.emitOrderedOperand(stmt.Millis, e.scratch)
 		if err != nil {
 			return err
 		}
 		e.writePrelude(out, indent, millis.prelude)
 		fmt.Fprintf(out, "%srt_time_sleep_millis(%s);\n", indent, millis.value)
 	case *ir.HTTPServeStmt:
-		host, err := e.emitOrderedOperand(stmt.Host, frameArena)
+		host, err := e.emitOrderedOperand(stmt.Host, e.scratch)
 		if err != nil {
 			return err
 		}
-		port, err := e.emitOrderedOperand(stmt.Port, frameArena)
+		port, err := e.emitOrderedOperand(stmt.Port, e.scratch)
 		if err != nil {
 			return err
 		}
-		workers, err := e.emitOrderedOperand(stmt.Workers, frameArena)
+		workers, err := e.emitOrderedOperand(stmt.Workers, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -567,19 +679,19 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		e.writePrelude(out, indent, workers.prelude)
 		fmt.Fprintf(out, "%srt_http_serve(%s, %s, %s, %s);\n", indent, host.value, port.value, workers.value, mangleFunc(stmt.HandlerName))
 	case *ir.HTTPRespondStmt:
-		request, err := e.emitOrderedOperand(stmt.Request, frameArena)
+		request, err := e.emitOrderedOperand(stmt.Request, e.scratch)
 		if err != nil {
 			return err
 		}
-		status, err := e.emitOrderedOperand(stmt.Status, frameArena)
+		status, err := e.emitOrderedOperand(stmt.Status, e.scratch)
 		if err != nil {
 			return err
 		}
-		contentType, err := e.emitOrderedOperand(stmt.ContentType, frameArena)
+		contentType, err := e.emitOrderedOperand(stmt.ContentType, e.scratch)
 		if err != nil {
 			return err
 		}
-		body, err := e.emitOrderedOperand(stmt.Body, frameArena)
+		body, err := e.emitOrderedOperand(stmt.Body, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -589,7 +701,7 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		e.writePrelude(out, indent, body.prelude)
 		fmt.Fprintf(out, "%srt_http_respond(%s, %s, %s, %s);\n", indent, request.value, status.value, contentType.value, body.value)
 	case *ir.ExprStmt:
-		expr, err := e.emitOrderedExpr(stmt.Expr, frameArena)
+		expr, err := e.emitOrderedExpr(stmt.Expr, e.scratch)
 		if err != nil {
 			return err
 		}
@@ -649,7 +761,7 @@ func emitCondition(expr ir.Expr) (string, error) {
 }
 
 func (e *funcEmitter) emitCondition(expr ir.Expr) (emittedExpr, error) {
-	condition, err := e.emitOrderedExpr(expr, frameArena)
+	condition, err := e.emitOrderedExpr(expr, e.scratch)
 	if err != nil {
 		return emittedExpr{}, err
 	}
@@ -698,7 +810,7 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		return emittedExpr{prelude: values.prelude, value: fmt.Sprintf("%s(%s, %s, %d)", ctor, targetArena, values.value, len(expr.Elements))}, nil
 	case *ir.MakeExpr:
-		length, err := e.emitOrderedOperand(expr.Len, frameArena)
+		length, err := e.emitOrderedOperand(expr.Len, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
@@ -708,7 +820,7 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		return emittedExpr{prelude: length.prelude, value: fmt.Sprintf("%s(%s, %s)", makeFn, targetArena, length.value)}, nil
 	case *ir.CloneExpr:
-		value, err := e.emitOrderedOperand(expr.Value, frameArena)
+		value, err := e.emitOrderedOperand(expr.Value, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
@@ -718,23 +830,23 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		return emittedExpr{prelude: value.prelude, value: cloned}, nil
 	case *ir.ReadFileExpr:
-		path, err := e.emitOrderedOperand(expr.Path, frameArena)
+		path, err := e.emitOrderedOperand(expr.Path, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
 		return emittedExpr{prelude: path.prelude, value: fmt.Sprintf("rt_read_file(%s, %s)", targetArena, path.value)}, nil
 	case *ir.ReadCSVExpr:
-		path, err := e.emitOrderedOperand(expr.Path, frameArena)
+		path, err := e.emitOrderedOperand(expr.Path, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
-		columns, err := e.emitOrderedOperand(expr.Columns, frameArena)
+		columns, err := e.emitOrderedOperand(expr.Columns, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
 		return emittedExpr{prelude: joinPreludes(path, columns), value: fmt.Sprintf("rt_read_csv(%s, %s, %s)", targetArena, path.value, columns.value)}, nil
 	case *ir.ImageDimensionExpr:
-		path, err := e.emitOrderedOperand(expr.Path, frameArena)
+		path, err := e.emitOrderedOperand(expr.Path, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
@@ -747,13 +859,13 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 			return emittedExpr{}, fmt.Errorf("unsupported image dimension expression %s", expr.Kind)
 		}
 	case *ir.ReadPPMExpr:
-		path, err := e.emitOrderedOperand(expr.Path, frameArena)
+		path, err := e.emitOrderedOperand(expr.Path, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
 		return emittedExpr{prelude: path.prelude, value: fmt.Sprintf("rt_read_ppm(%s, %s)", targetArena, path.value)}, nil
 	case *ir.HTTPRequestStringExpr:
-		request, err := e.emitOrderedOperand(expr.Request, frameArena)
+		request, err := e.emitOrderedOperand(expr.Request, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
@@ -767,7 +879,7 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		case semtypes.HTTPCallBody:
 			return emittedExpr{prelude: request.prelude, value: fmt.Sprintf("rt_http_body(%s, %s)", targetArena, request.value)}, nil
 		case semtypes.HTTPCallHeader:
-			name, err := e.emitOrderedOperand(expr.Name, frameArena)
+			name, err := e.emitOrderedOperand(expr.Name, e.scratch)
 			if err != nil {
 				return emittedExpr{}, err
 			}
@@ -776,7 +888,7 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 			return emittedExpr{}, fmt.Errorf("unsupported HTTP request string expression %s", expr.Kind)
 		}
 	case *ir.GPUAllocExpr:
-		length, err := e.emitOrderedOperand(expr.Len, frameArena)
+		length, err := e.emitOrderedOperand(expr.Len, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
@@ -788,12 +900,12 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		return emittedExpr{prelude: length.prelude, value: fmt.Sprintf("rt_gpu_alloc_%s(%s)", name, length.value)}, nil
 	case *ir.CallExpr:
 		args := make([]emittedExpr, 0, len(expr.Args)+1)
-		callResultArena := frameArena
+		callResultArena := e.scratch
 		if isDynamicType(expr.Type()) {
 			callResultArena = targetArena
 		}
 		for _, arg := range expr.Args {
-			argArena := frameArena
+			argArena := e.scratch
 			if isDynamicType(expr.Type()) && ast.TypeEqual(arg.Type(), ast.StringType) {
 				argArena = callResultArena
 			}
@@ -834,7 +946,7 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		return emittedExpr{prelude: joinPreludes(left, right), value: value}, nil
 	case *ir.LenExpr:
-		value, err := e.emitOrderedOperand(expr.Value, frameArena)
+		value, err := e.emitOrderedOperand(expr.Value, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
@@ -850,7 +962,7 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		if err != nil {
 			return emittedExpr{}, err
 		}
-		index, err := e.emitOrderedOperand(expr.Index, frameArena)
+		index, err := e.emitOrderedOperand(expr.Index, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
 		}
@@ -975,7 +1087,7 @@ func (e *funcEmitter) emitOrderedOptionalBound(expr ir.Expr) (string, emittedExp
 	if expr == nil {
 		return "false", emittedExpr{value: "0"}, nil
 	}
-	value, err := e.emitOrderedOperand(expr, frameArena)
+	value, err := e.emitOrderedOperand(expr, e.scratch)
 	if err != nil {
 		return "", emittedExpr{}, err
 	}
@@ -983,7 +1095,7 @@ func (e *funcEmitter) emitOrderedOptionalBound(expr ir.Expr) (string, emittedExp
 }
 
 func (e *funcEmitter) emitKernelLaunchArg(expr ir.Expr) (emittedExpr, error) {
-	value, err := e.emitOrderedOperand(expr, frameArena)
+	value, err := e.emitOrderedOperand(expr, e.scratch)
 	if err != nil {
 		return emittedExpr{}, err
 	}
@@ -1091,11 +1203,11 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 	case *ir.ReadLineExpr:
 		return fmt.Sprintf("rt_read_line(%s)", targetArena), nil
 	case *ir.ReadIntExpr:
-		return "rt_read_int(&trux_frame)", nil
+		return fmt.Sprintf("rt_read_int(%s)", targetArena), nil
 	case *ir.ReadFloatExpr:
-		return "rt_read_float(&trux_frame)", nil
+		return fmt.Sprintf("rt_read_float(%s)", targetArena), nil
 	case *ir.ReadBoolExpr:
-		return "rt_read_bool(&trux_frame)", nil
+		return fmt.Sprintf("rt_read_bool(%s)", targetArena), nil
 	case *ir.ReadFileExpr:
 		path, err := emitExpr(expr.Path, frameArena)
 		if err != nil {

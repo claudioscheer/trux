@@ -13,6 +13,7 @@ type Program struct {
 	Functions   []*Func
 	Kernels     []*Func
 	UsesHTTP    bool
+	UsedTypes   []ast.Type
 }
 
 type Func struct {
@@ -553,12 +554,35 @@ func (e *SliceExpr) Ownership() types.Origin { return e.Origin }
 func (*SliceExpr) exprNode() {}
 
 func Build(program *ast.Program, info *types.Info) (*Program, error) {
-	builder := builder{info: info}
-	return builder.buildProgram(program)
+	builder := builder{info: info, used: &usedTypes{seen: map[string]bool{}}}
+	out, err := builder.buildProgram(program)
+	if err != nil {
+		return nil, err
+	}
+	out.UsedTypes = builder.used.list
+	return out, nil
+}
+
+type usedTypes struct {
+	list []ast.Type
+	seen map[string]bool
+}
+
+func (u *usedTypes) note(typ ast.Type) {
+	if u == nil || typ == nil {
+		return
+	}
+	key := typ.String()
+	if u.seen[key] {
+		return
+	}
+	u.seen[key] = true
+	u.list = append(u.list, typ)
 }
 
 type builder struct {
 	info *types.Info
+	used *usedTypes
 }
 
 func (b builder) buildProgram(program *ast.Program) (*Program, error) {
@@ -579,6 +603,7 @@ func (b builder) buildProgram(program *ast.Program) (*Program, error) {
 }
 
 func (b builder) buildFunc(fn *ast.FuncDecl) (*Func, error) {
+	b.used.note(fn.ReturnType)
 	out := &Func{
 		Name:       fn.Name,
 		Pos:        fn.Pos,
@@ -586,6 +611,7 @@ func (b builder) buildFunc(fn *ast.FuncDecl) (*Func, error) {
 		ReturnType: fn.ReturnType,
 	}
 	for _, param := range fn.Params {
+		b.used.note(param.Type)
 		out.Params = append(out.Params, Param{Name: param.Name, Type: param.Type, Mutable: param.Mutable})
 	}
 	for _, stmt := range fn.Body.Statements {
@@ -602,6 +628,7 @@ func (b builder) buildFunc(fn *ast.FuncDecl) (*Func, error) {
 func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 	switch stmt := stmt.(type) {
 	case *ast.LetStmt:
+		b.used.note(stmt.Type)
 		value, err := b.buildExpr(stmt.Value)
 		if err != nil {
 			return nil, err
@@ -792,6 +819,7 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 	if !ok {
 		origin = types.OriginUnknown
 	}
+	b.used.note(typ)
 
 	switch expr := expr.(type) {
 	case *ast.IntLiteral:

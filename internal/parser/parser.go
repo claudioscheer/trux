@@ -769,12 +769,16 @@ func (p *Parser) parseExpressionList(end token.Type) ([]ast.Expression, error) {
 
 func (p *Parser) precedence(typ token.Type) int {
 	switch typ {
-	case token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual, token.In:
+	case token.Or:
 		return 0
-	case token.Plus, token.Minus:
+	case token.And:
 		return 1
-	case token.Asterisk, token.Slash, token.Percent:
+	case token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual, token.In:
 		return 2
+	case token.Plus, token.Minus:
+		return 3
+	case token.Asterisk, token.Slash, token.Percent:
+		return 4
 	default:
 		return -1
 	}
@@ -844,7 +848,7 @@ func describe(tok token.Token) string {
 func isLiteralToken(typ token.Type) bool {
 	switch typ {
 	case token.Assign, token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
-		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Percent, token.Not,
+		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Percent, token.And, token.Or, token.Not,
 		token.Comma, token.Colon, token.Dot, token.Semicolon, token.LParen, token.RParen, token.LBrace, token.RBrace, token.LBracket, token.RBracket:
 		return true
 	default:

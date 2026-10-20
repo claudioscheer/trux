@@ -639,6 +639,97 @@ func main() int {
 	}
 }
 
+func TestRunFileShortCircuitsLogicalOperators(t *testing.T) {
+	requireCC(t)
+
+	tests := []struct {
+		name  string
+		src   string
+		stdin string
+		want  string
+	}{
+		{
+			name: "and skips read",
+			src: `package main
+import "io"
+func main() int {
+    print(io.readInt() == 1 && io.readInt() == 2)
+    return 0
+}`,
+			stdin: "0\n",
+			want:  "false\n",
+		},
+		{
+			name: "or skips read",
+			src: `package main
+import "io"
+func main() int {
+    print(io.readInt() == 1 || io.readInt() == 2)
+    return 0
+}`,
+			stdin: "1\n",
+			want:  "true\n",
+		},
+		{
+			name: "and reads both",
+			src: `package main
+import "io"
+func main() int {
+    print(io.readInt() == 1 && io.readInt() == 2)
+    return 0
+}`,
+			stdin: "1\n9\n",
+			want:  "false\n",
+		},
+		{
+			name: "or reads both",
+			src: `package main
+import "io"
+func main() int {
+    print(io.readInt() == 0 || io.readInt() == 2)
+    return 0
+}`,
+			stdin: "5\n2\n",
+			want:  "true\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempSource(t, tt.src)
+			var out bytes.Buffer
+			err := runFileWithOptions(&out, path, runOptions{Stdin: strings.NewReader(tt.stdin)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != tt.want {
+				t.Fatalf("output = %q, want %q", out.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestCompileFileEmitsLogicalOperatorsInKernel(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+
+kernel func fill(out gpu.Buffer[int], n int, enabled bool) {
+    if enabled && n > 0 || !enabled {
+        out[0] = 1
+    }
+}
+
+func main() int {
+    return 0
+}`)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.CSource, "&&") || !strings.Contains(result.CSource, "||") {
+		t.Fatalf("generated source missing logical operators:\n%s", result.CSource)
+	}
+}
+
 func TestRunFileCompilesAndExecutesRemainder(t *testing.T) {
 	requireCC(t)
 

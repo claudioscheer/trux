@@ -1391,6 +1391,17 @@ func sameTypes(got []ast.Type, want []ast.Type) bool {
 	return true
 }
 
+func TestCheckRejectsNonBoolLogicalOperands(t *testing.T) {
+	_, err := Check(mustParse(t, `package main
+func main() int {
+    let bad bool = 1 && 2
+    return 0
+}`))
+	if err == nil || !strings.Contains(err.Error(), "requires bool operands") {
+		t.Fatalf("error = %v, want bool operands", err)
+	}
+}
+
 func TestCheckRejectsFloatRemainder(t *testing.T) {
 	_, err := Check(mustParse(t, `package main
 func main() int {

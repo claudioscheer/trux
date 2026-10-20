@@ -185,6 +185,9 @@ func (p *Parser) parseParams() ([]ast.Param, error) {
 		if !p.match(token.Comma) {
 			return params, nil
 		}
+		if p.check(token.RParen) {
+			return params, nil
+		}
 	}
 }
 
@@ -416,38 +419,41 @@ func (p *Parser) parseForStmt() (ast.Statement, error) {
 	var condition ast.Expression
 	var post ast.Statement
 
-	if !p.check(token.LBrace) {
-		first, err := p.parseForInitStmt()
+	switch {
+	case p.check(token.LBrace):
+	case p.forHeaderHasSemicolon():
+		init, err = p.parseForInitStmt()
 		if err != nil {
 			return nil, err
 		}
-
-		if p.check(token.LBrace) {
-			exprStmt, ok := first.(*ast.ExprStmt)
-			if !ok {
-				return nil, p.errorf(p.current(), `expected %q after for init statement`, string(token.Semicolon))
-			}
-			condition = exprStmt.Expr
-		} else {
-			init = first
-			if _, err := p.expect(token.Semicolon); err != nil {
+		if _, err = p.expect(token.Semicolon); err != nil {
+			return nil, err
+		}
+		if !p.check(token.Semicolon) {
+			condition, err = p.parseExpression(0)
+			if err != nil {
 				return nil, err
 			}
-			if !p.check(token.Semicolon) {
-				condition, err = p.parseExpression(0)
-				if err != nil {
-					return nil, err
-				}
-			}
-			if _, err := p.expect(token.Semicolon); err != nil {
+		}
+		if _, err = p.expect(token.Semicolon); err != nil {
+			return nil, err
+		}
+		if !p.check(token.LBrace) {
+			post, err = p.parseForPostStmt()
+			if err != nil {
 				return nil, err
 			}
-			if !p.check(token.LBrace) {
-				post, err = p.parseForPostStmt()
-				if err != nil {
-					return nil, err
-				}
+		}
+	default:
+		if p.check(token.Let) {
+			if _, err = p.parseLetStmt(); err != nil {
+				return nil, err
 			}
+			return nil, p.errorf(p.current(), `expected %q after for init statement`, string(token.Semicolon))
+		}
+		condition, err = p.parseExpression(0)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -460,6 +466,30 @@ func (p *Parser) parseForStmt() (ast.Statement, error) {
 	}
 
 	return &ast.ForStmt{Start: start.Pos, Init: init, Condition: condition, Post: post, Body: body}, nil
+}
+
+func (p *Parser) forHeaderHasSemicolon() bool {
+	depth := 0
+	for i := p.pos; i < len(p.tokens); i++ {
+		switch p.tokens[i].Type {
+		case token.LParen, token.LBracket, token.LBrace:
+			if p.tokens[i].Type == token.LBrace && depth == 0 {
+				return false
+			}
+			depth++
+		case token.RParen, token.RBracket, token.RBrace:
+			if depth > 0 {
+				depth--
+			}
+		case token.Semicolon:
+			if depth == 0 {
+				return true
+			}
+		case token.EOF:
+			return false
+		}
+	}
+	return false
 }
 
 func (p *Parser) parseForInitStmt() (ast.Statement, error) {
@@ -770,14 +800,6 @@ func (p *Parser) advance() token.Token {
 
 func (p *Parser) current() token.Token {
 	return p.tokens[p.pos]
-}
-
-func (p *Parser) peek() token.Token {
-	if p.pos+1 >= len(p.tokens) {
-		return p.current()
-	}
-
-	return p.tokens[p.pos+1]
 }
 
 func (p *Parser) errorf(tok token.Token, format string, args ...any) error {

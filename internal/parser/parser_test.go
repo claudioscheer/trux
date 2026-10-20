@@ -339,6 +339,61 @@ func main() int {
 	}
 }
 
+func TestParsesForHeaderEdges(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let i int = 0
+    for ; i < 3; i = i + 1 {
+        print(i)
+    }
+    for let n int = 0; n < 3; {
+        i = i + 1
+    }
+    return i
+}`)
+
+	mainFn := program.Functions[0]
+	emptyInit, ok := mainFn.Body.Statements[1].(*ast.ForStmt)
+	if !ok || emptyInit.Init != nil || emptyInit.Condition == nil || emptyInit.Post == nil {
+		t.Fatalf("empty init for = %#v", emptyInit)
+	}
+	emptyPost, ok := mainFn.Body.Statements[2].(*ast.ForStmt)
+	if !ok || emptyPost.Init == nil || emptyPost.Condition == nil || emptyPost.Post != nil {
+		t.Fatalf("empty post for = %#v", emptyPost)
+	}
+}
+
+func TestParsesTrailingCommaInParameterList(t *testing.T) {
+	program := mustParse(t, `package main
+func push(mut xs list[int], value int,) int {
+    return value
+}
+
+func main() int {
+    return 0
+}`)
+
+	params := program.Functions[0].Params
+	if len(params) != 2 || params[0].Name != "xs" || !params[0].Mutable || params[1].Name != "value" {
+		t.Fatalf("params = %#v, want xs and value", params)
+	}
+}
+
+func TestParsesTrailingCommaInExpressionList(t *testing.T) {
+	program := mustParse(t, `package main
+func main() int {
+    let xs [3]int = [3]int{1, 2, 3,}
+    print(xs[0], xs[1],)
+    return 0
+}`)
+
+	letStmt := program.Functions[0].Body.Statements[0].(*ast.LetStmt)
+	literal := letStmt.Value.(*ast.ArrayLiteral)
+	if len(literal.Elements) != 3 {
+		t.Fatalf("element count = %d, want 3", len(literal.Elements))
+	}
+}
+
 func TestParsesElseIfAsNestedElseBlock(t *testing.T) {
 	program := mustParse(t, `package main
 func main() int {

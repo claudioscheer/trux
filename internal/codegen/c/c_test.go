@@ -44,15 +44,12 @@ func main() int {
 		"int64_t trux_f_3_add(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_1_a, int64_t trux_v_1_b);",
 		"int64_t trux_f_4_main(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"int64_t trux_f_3_add(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_1_a, int64_t trux_v_1_b) {",
-		"rt_arena trux_frame;",
-		"rt_arena_init_frame(&trux_frame, trux_ctx);",
 		"int64_t trux_return_value;",
 		"trux_return_value = rt_add_i64(trux_v_1_a, trux_v_1_b);",
 		"goto trux_return;",
 		"trux_return:",
-		"rt_arena_deinit(&trux_frame);",
 		"return trux_return_value;",
-		"int64_t trux_v_1_x = trux_f_3_add(trux_ctx, &trux_frame, 1, 2);",
+		"int64_t trux_v_1_x = trux_f_3_add(trux_ctx, trux_result_arena, 1, 2);",
 		"rt_print_int(trux_v_1_x);",
 		"rt_print_newline();",
 		"int main(void) {",
@@ -319,8 +316,8 @@ func main() int {
 	wantParts := []string{
 		"int64_t trux_f_5_frame(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"int64_t trux_f_3_ctx(rt_context* trux_ctx, rt_arena* trux_result_arena);",
-		"int64_t trux_tmp_0 = trux_f_5_frame(trux_ctx, &trux_frame);",
-		"int64_t trux_tmp_1 = trux_f_3_ctx(trux_ctx, &trux_frame);",
+		"int64_t trux_tmp_0 = trux_f_5_frame(trux_ctx, trux_result_arena);",
+		"int64_t trux_tmp_1 = trux_f_3_ctx(trux_ctx, trux_result_arena);",
 		"trux_return_value = rt_add_i64(trux_tmp_0, trux_tmp_1);",
 	}
 	for _, part := range wantParts {
@@ -355,7 +352,7 @@ func main() int {
 	wantParts := []string{
 		"int64_t trux_f_12_kernel_scale(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"__global__ void trux_k_5_scale(int64_t* trux_v_3_out, int64_t trux_v_1_n);",
-		"trux_return_value = trux_f_12_kernel_scale(trux_ctx, &trux_frame);",
+		"trux_return_value = trux_f_12_kernel_scale(trux_ctx, trux_result_arena);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -1034,6 +1031,33 @@ func main() int {
 	def := "__global__ void trux_k_4_fill(int64_t* trux_v_3_out, int64_t trux_v_1_n) {"
 	if !strings.Contains(cSource, proto) || !strings.Contains(cSource, def) {
 		t.Fatalf("kernel prototype and definition diverged:\n%s", cSource)
+	}
+}
+
+func TestGenerateElidesFrameForBorrowedSliceReturn(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+func mid(xs []int) []int {
+    return xs[1:2]
+}
+
+func owned(xs []int) []int {
+    return clone(xs[1:2])
+}
+
+func main() int {
+    let xs [3]int = [3]int{1, 2, 3}
+    let borrowed []int = mid(xs[:])
+    let copied []int = owned(xs[:])
+    print(borrowed[0], copied[0])
+    return 0
+}`)
+	mid := generatedFunctionBody(t, cSource, "mid")
+	if strings.Contains(mid, "rt_arena_init_frame") {
+		t.Fatalf("borrowed return should not create a frame:\n%s", mid)
+	}
+	owned := generatedFunctionBody(t, cSource, "owned")
+	if !strings.Contains(owned, "rt_arena_init_frame") || !strings.Contains(owned, "rt_arena_deinit") {
+		t.Fatalf("owned return should create a frame:\n%s", owned)
 	}
 }
 

@@ -23,39 +23,33 @@ import "time"
 //   2 = 180 degrees
 //   3 = 270 degrees clockwise
 //
-// Each GPU thread handles one output pixel. It maps that output row/column back
-// to the input row/column, then copies the three RGB channels together.
-kernel func rotateKernel(input gpu.Buffer[int], output gpu.Buffer[int], width int, height int, outWidth int, pixelCount int, turns int) {
-  let pixel int = gpu.globalX()
+// Each GPU thread handles one output pixel. pixel is the coordinate supplied
+// by gpu.launch1d. The thread maps that output row/column back to the input
+// row/column, then copies the three RGB channels together.
+kernel func rotateKernel(pixel int, input gpu.Buffer[int], output gpu.Buffer[int], width int, height int, outWidth int, turns int) {
+  let row int = pixel / outWidth
+  let col int = pixel - row * outWidth
+  let sourceRow int = row
+  let sourceCol int = col
 
-  // The launch rounds up to a whole number of CUDA blocks, so the last block
-  // can contain extra threads. Those threads land beyond pixelCount and must
-  // skip all memory reads/writes.
-  if pixel < pixelCount {
-    let row int = pixel / outWidth
-    let col int = pixel - row * outWidth
-    let sourceRow int = row
-    let sourceCol int = col
-
-    if turns == 1 {
-      sourceRow = height - 1 - col
-      sourceCol = row
-    } else if turns == 2 {
-      sourceRow = height - 1 - row
-      sourceCol = width - 1 - col
-    } else if turns == 3 {
-      sourceRow = col
-      sourceCol = width - 1 - row
-    }
-
-    let sourcePixel int = sourceRow * width + sourceCol
-    let dst int = pixel * 3
-    let src int = sourcePixel * 3
-
-    output[dst] = input[src]
-    output[dst + 1] = input[src + 1]
-    output[dst + 2] = input[src + 2]
+  if turns == 1 {
+    sourceRow = height - 1 - col
+    sourceCol = row
+  } else if turns == 2 {
+    sourceRow = height - 1 - row
+    sourceCol = width - 1 - col
+  } else if turns == 3 {
+    sourceRow = col
+    sourceCol = width - 1 - row
   }
+
+  let sourcePixel int = sourceRow * width + sourceCol
+  let dst int = pixel * 3
+  let src int = sourcePixel * 3
+
+  output[dst] = input[src]
+  output[dst + 1] = input[src + 1]
+  output[dst + 2] = input[src + 2]
 }
 
 // checksum gives a small deterministic value to compare CPU and GPU buffers.
@@ -174,28 +168,16 @@ func main() int {
   }
   let cpuEnd int = time.monotonicNanos()
 
-  // GPU version. Device buffers are explicit in this first GPU model:
-  // allocate device memory, copy host pixels to the GPU, launch a kernel,
-  // synchronize, copy the result back, then free the device buffers.
+  // GPU version. gpu.from copies the source pixels. The output buffer is only
+  // allocated. launch1d runs one thread per output pixel.
   let gpuStart int = time.monotonicNanos()
-  let dInput gpu.Buffer[int] = gpu.alloc(componentCount)
+  let dInput gpu.Buffer[int] = gpu.from(pixels)
   let dOutput gpu.Buffer[int] = gpu.alloc(componentCount)
 
-  gpu.copyToDevice(pixels, dInput)
-
-  // One thread rotates one pixel. A 256-thread block is a common 1D default.
-  // gridSize uses integer ceiling division so every pixel is covered:
-  //
-  //   ceil(pixelCount / blockSize) = (pixelCount + blockSize - 1) / blockSize
-  //
-  // Extra threads in the final block are harmless because the kernel checks
-  // pixel < pixelCount before touching memory.
-  let blockSize int = 256
-  let gridSize int = (pixelCount + blockSize - 1) / blockSize
-  gpu.launch(rotateKernel, gridSize, 1, 1, blockSize, 1, 1, dInput, dOutput, width, height, outWidth, pixelCount, normalizedTurns)
+  gpu.launch1d(rotateKernel, pixelCount, dInput, dOutput, width, height, outWidth, normalizedTurns)
 
   gpu.sync()
-  gpu.copyToHost(dOutput, gpuOut)
+  gpu.to(dOutput, gpuOut)
   let gpuEnd int = time.monotonicNanos()
 
   let mismatches int = 0

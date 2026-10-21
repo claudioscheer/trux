@@ -38,6 +38,10 @@ const (
 	CallGPUFree            CallKind = "gpuFree"
 	CallGPUSync            CallKind = "gpuSync"
 	CallGPULaunch          CallKind = "gpuLaunch"
+	CallGPULaunch1D        CallKind = "gpuLaunch1d"
+	CallGPULaunch2D        CallKind = "gpuLaunch2d"
+	CallGPUFrom            CallKind = "gpuFrom"
+	CallGPUTo              CallKind = "gpuTo"
 	CallGPUCoord           CallKind = "gpuCoord"
 )
 
@@ -264,7 +268,11 @@ var packages = []Package{
 			{Package: "gpu", Name: "copyToHost", Kind: CallGPUCopyToHost, Detail: "copy a device buffer to a host slice", StatementOnly: true, SignatureText: "gpu.copyToHost(device gpu.Buffer[T], host []T)"},
 			{Package: "gpu", Name: "free", Kind: CallGPUFree, Detail: "free a device buffer", StatementOnly: true, SignatureText: "gpu.free(device gpu.Buffer[T])"},
 			{Package: "gpu", Name: "sync", Kind: CallGPUSync, Detail: "synchronize the CUDA device", StatementOnly: true},
+			{Package: "gpu", Name: "from", Kind: CallGPUFrom, Detail: "allocate a device buffer and copy a host slice into it", SignatureText: "gpu.from(host []T) gpu.Buffer[T]"},
+			{Package: "gpu", Name: "to", Kind: CallGPUTo, Detail: "copy a device buffer into a host slice", StatementOnly: true, SignatureText: "gpu.to(device gpu.Buffer[T], host []T)"},
 			{Package: "gpu", Name: "launch", Kind: CallGPULaunch, Detail: "launch a GPU kernel", StatementOnly: true, SignatureText: "gpu.launch(kernel, gridX int, gridY int, gridZ int, blockX int, blockY int, blockZ int, args...)"},
+			{Package: "gpu", Name: "launch1d", Kind: CallGPULaunch1D, Detail: "launch a kernel over n elements", StatementOnly: true, SignatureText: "gpu.launch1d(kernel, n int, args...)"},
+			{Package: "gpu", Name: "launch2d", Kind: CallGPULaunch2D, Detail: "launch a kernel over a width by height grid", StatementOnly: true, SignatureText: "gpu.launch2d(kernel, width int, height int, args...)"},
 			{Package: "gpu", Name: "globalX", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "global GPU x coordinate"},
 			{Package: "gpu", Name: "globalY", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "global GPU y coordinate"},
 			{Package: "gpu", Name: "globalZ", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "global GPU z coordinate"},

@@ -9,31 +9,17 @@ import "time"
 //
 //   element(row, col) = buffer[row * n + col]
 //
-// Each GPU thread computes one output cell. The launch in main uses a 2D grid,
-// so globalY is the output row and globalX is the output column.
-kernel func matmulKernel(a gpu.Buffer [int], b gpu.Buffer [int], out gpu.Buffer [int], n int) {
-  let row int = gpu.globalY()
-  let col int = gpu.globalX()
+// Each GPU thread computes one output cell. row and col are the thread
+// coordinates supplied by gpu.launch2d, which also skips threads outside the
+// matrix. The source uses flat indexing because GPU buffers are 1D.
+kernel func matmulKernel(row int, col int, a gpu.Buffer[int], b gpu.Buffer[int], out gpu.Buffer[int], n int) {
+  let sum int = 0
 
-  // The launch rounds up to cover n x n cells with 16x16 blocks, which means
-  // some threads may land outside the matrix. Those threads must do no work.
-  if row < n {
-    if col < n {
-      let sum int = 0
-
-      // Standard matrix multiplication:
-      //
-      //   out[row][col] = sum(a[row][k] * b[k][col])
-      //
-      // The source uses flat indexing because Trux GPU buffers are 1D device
-      // memory handles.
-      for let k int = 0; k < n; k = k + 1 {
-        sum = sum + a[row * n + k] * b[k * n + col]
-      }
-
-      out[row * n + col] = sum
-    }
+  for let k int = 0; k < n; k = k + 1 {
+    sum = sum + a[row * n + k] * b[k * n + col]
   }
+
+  out[row * n + col] = sum
 }
 
 // checksum gives a compact deterministic way to compare large result buffers
@@ -112,47 +98,19 @@ func main() int {
   }
   let cpuEnd int = time.monotonicNanos()
 
-  // GPU path. Device memory is explicit: allocate buffers, copy host input to
-  // the device, launch the kernel, synchronize, and copy the result back.
+  // GPU path. gpu.from copies each input once. The output buffer starts empty,
+  // so it is only allocated. launch2d covers the n by n matrix.
   let gpuStart int = time.monotonicNanos()
-  let dA gpu.Buffer[int] = gpu.alloc(total)
-  let dB gpu.Buffer[int] = gpu.alloc(total)
+  let dA gpu.Buffer[int] = gpu.from(a)
+  let dB gpu.Buffer[int] = gpu.from(b)
   let dOut gpu.Buffer[int] = gpu.alloc(total)
 
-  gpu.copyToDevice(a, dA)
-  gpu.copyToDevice(b, dB)
-
-  // Launch geometry:
-  //
-  //   grid  = gridSize x gridSize x 1 blocks
-  //   block = blockSize x blockSize x 1 threads
-  //
-  // CUDA launches work as grid dimensions multiplied by block dimensions. The
-  // matrix is n x n, but the launch does not have to be exactly n x n.
-  //
-  // A 16x16 block has 256 threads. That is a common, practical default for 2D
-  // problems because it gives each block enough work while staying well below
-  // CUDA's usual 1024-thread block limit.
-  //
-  // gridSize uses integer ceiling division:
-  //
-  //   ceil(n / blockSize) = (n + blockSize - 1) / blockSize
-  //
-  // If n is not an exact multiple of blockSize, this creates a small padded
-  // edge beyond the real matrix. The kernel's row/col bounds checks skip those
-  // extra edge threads.
-  //
-  // 16x16 is not magic. Serious CUDA code benchmarks block shapes such as 8x8,
-  // 16x16, 32x8, or 32x16 because the best choice depends on the GPU and the
-  // kernel's memory/register behavior.
-  let blockSize int = 16
-  let gridSize int = (n + blockSize - 1) / blockSize
-  gpu.launch(matmulKernel, gridSize, gridSize, 1, blockSize, blockSize, 1, dA, dB, dOut, n)
+  gpu.launch2d(matmulKernel, n, n, dA, dB, dOut, n)
 
   // The explicit sync makes the timing include kernel execution before the copy
-  // back starts. copyToHost is also synchronous for the copied data.
+  // back starts. gpu.to waits for that copy as well.
   gpu.sync()
-  gpu.copyToHost(dOut, gpuOut)
+  gpu.to(dOut, gpuOut)
   let gpuEnd int = time.monotonicNanos()
 
   // Full correctness check. Checksums catch many mistakes, but this loop proves

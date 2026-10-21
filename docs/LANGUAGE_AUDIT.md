@@ -39,7 +39,7 @@ Collections are `[N]T`, `[]T`, and `list[T]`. Element types may themselves be co
 
 Expressions are literals, names, calls, `package.function(...)`, parentheses, `+ - * /`, comparisons, `needle in haystack`, indexing, slicing, collection literals, `make([]T, n)`, `clone`, and `len`.
 
-Statements are `let`, assignment, indexed assignment, `return`, `if` / `else if` / `else`, `for`, `print`, `assert`, `append`, and the statement-only standard calls (`io.writeFile`, `csv.write`, `image.writePpm`, `time.sleepMillis`, `gpu.copyToDevice`, `gpu.copyToHost`, `gpu.launch`, `gpu.sync`, `gpu.free`, `http.serve`, `http.respond`).
+Statements are `let`, assignment, indexed assignment, `return`, `if` / `else if` / `else`, `for`, `print`, `assert`, `append`, and the statement-only standard calls (`io.writeFile`, `csv.write`, `image.writePpm`, `time.sleepMillis`, `gpu.copyToDevice`, `gpu.copyToHost`, `gpu.to`, `gpu.launch`, `gpu.launch1d`, `gpu.launch2d`, `gpu.sync`, `gpu.free`, `http.serve`, `http.respond`).
 
 `for` has three forms: `for {`, `for condition {`, and `for init; condition; post {`. The init may be `let` or an assignment. The post may not be `let`.
 

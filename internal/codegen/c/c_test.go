@@ -334,6 +334,74 @@ func main() int {
 	}
 }
 
+func TestGenerateShapedLaunchInjectsCoordinates(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "gpu"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    out[i] = i
+}
+
+kernel func paint(row int, col int, out gpu.Buffer[int], width int) {
+    out[row * width + col] = row + col
+}
+
+func main() int {
+    let host []int = make([]int, 4)
+    let device gpu.Buffer[int] = gpu.from(host)
+    gpu.launch1d(fill, 4, device)
+    gpu.launch2d(paint, 2, 2, device, 2)
+    gpu.to(device, host)
+    gpu.free(device)
+    return 0
+}`)
+
+	wantParts := []string{
+		"__global__ void trux_k_4_fill(int64_t trux_dim_x, int64_t* trux_v_3_out)",
+		"int64_t trux_v_1_i = ((int64_t)(blockIdx.x * blockDim.x + threadIdx.x));",
+		"if (trux_v_1_i < trux_dim_x)",
+		"trux_k_4_fill<<<dim3((unsigned int)(((4) + 255) / 256), 1u, 1u), dim3(256u, 1u, 1u)>>>(4, trux_v_6_device.data)",
+		"__global__ void trux_k_5_paint(int64_t trux_dim_x, int64_t trux_dim_y, int64_t* trux_v_3_out, int64_t trux_v_5_width)",
+		"int64_t trux_v_3_row = ((int64_t)(blockIdx.y * blockDim.y + threadIdx.y));",
+		"int64_t trux_v_3_col = ((int64_t)(blockIdx.x * blockDim.x + threadIdx.x));",
+		"if (trux_v_3_row < trux_dim_y && trux_v_3_col < trux_dim_x)",
+		"trux_k_5_paint<<<dim3((unsigned int)(((2) + 15) / 16), (unsigned int)(((2) + 15) / 16), 1u), dim3(16u, 16u, 1u)>>>(2, 2, trux_v_6_device.data, 2)",
+		"rt_gpu_copy_to_device_int(",
+		"rt_gpu_copy_to_host_int(",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
+func TestShapedLaunchRejectsMixedShapes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.tx")
+	src := `package main
+import "gpu"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    out[i] = 1
+}
+
+func main() int {
+    let out gpu.Buffer[int] = gpu.alloc(1)
+    gpu.launch1d(fill, 1, out)
+    gpu.launch(fill, 1, 1, 1, 1, 1, 1, out)
+    gpu.free(out)
+    return 0
+}`
+	result, err := modules.LoadWithSources(path, map[string]string{path: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = semtypes.Check(result.Program)
+	if err == nil || !strings.Contains(err.Error(), "different shapes") {
+		t.Fatalf("error = %v, want mixed launch shapes", err)
+	}
+}
+
 func TestGenerateManglesKernelsAwayFromFunctions(t *testing.T) {
 	cSource := mustGenerateC(t, `package main
 import "gpu"

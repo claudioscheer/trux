@@ -13,25 +13,18 @@ import "time"
 // neighbors. Border cells are copied unchanged so the CPU and GPU stay on the
 // same edge rule. Each thread writes one cell of nextGrid and only reads
 // currentGrid.
-kernel func jacobiKernel(currentGrid gpu.Buffer[int], nextGrid gpu.Buffer[int], width int, height int) {
-  let row int = gpu.globalY()
-  let col int = gpu.globalX()
+kernel func jacobiKernel(row int, col int, currentGrid gpu.Buffer[int], nextGrid gpu.Buffer[int], width int, height int) {
+  let index int = row * width + col
 
-  if row < height {
-    if col < width {
-      let index int = row * width + col
-
-      if row == 0 || col == 0 || row == height - 1 || col == width - 1 {
-        nextGrid[index] = currentGrid[index]
-      } else {
-        let sum int = currentGrid[index]
-        sum = sum + currentGrid[(row - 1) * width + col]
-        sum = sum + currentGrid[(row + 1) * width + col]
-        sum = sum + currentGrid[index - 1]
-        sum = sum + currentGrid[index + 1]
-        nextGrid[index] = sum / 5
-      }
-    }
+  if row == 0 || col == 0 || row == height - 1 || col == width - 1 {
+    nextGrid[index] = currentGrid[index]
+  } else {
+    let sum int = currentGrid[index]
+    sum = sum + currentGrid[(row - 1) * width + col]
+    sum = sum + currentGrid[(row + 1) * width + col]
+    sum = sum + currentGrid[index - 1]
+    sum = sum + currentGrid[index + 1]
+    nextGrid[index] = sum / 5
   }
 }
 
@@ -121,27 +114,23 @@ func main() int {
   }
   let cpuEnd int = time.monotonicNanos()
 
-  // GPU path. The host copies the source once, then launches one kernel per
-  // step into the other device buffer and swaps the two handles. The result
-  // is copied back once, after every launch has finished.
+  // GPU path. gpu.from copies the source once. Each step launches over the
+  // whole grid; row and col are the thread coordinates, and the block size
+  // stays inside the compiler. The two device buffers still swap by hand,
+  // because one step must not read a cell another thread is writing.
   let gpuStart int = time.monotonicNanos()
-  let dCurrent gpu.Buffer[int] = gpu.alloc(total)
+  let dCurrent gpu.Buffer[int] = gpu.from(source)
   let dNext gpu.Buffer[int] = gpu.alloc(total)
-  gpu.copyToDevice(source, dCurrent)
-
-  let blockSize int = 16
-  let gridX int = (width + blockSize - 1) / blockSize
-  let gridY int = (height + blockSize - 1) / blockSize
 
   for let step int = 0; step < steps; step = step + 1 {
-    gpu.launch(jacobiKernel, gridX, gridY, 1, blockSize, blockSize, 1, dCurrent, dNext, width, height)
+    gpu.launch2d(jacobiKernel, width, height, dCurrent, dNext, width, height)
     let swap gpu.Buffer[int] = dCurrent
     dCurrent = dNext
     dNext = swap
   }
 
   gpu.sync()
-  gpu.copyToHost(dCurrent, gpuOut)
+  gpu.to(dCurrent, gpuOut)
   let gpuEnd int = time.monotonicNanos()
 
   let mismatches int = 0

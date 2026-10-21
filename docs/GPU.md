@@ -20,26 +20,27 @@ import "gpu"
 
 let n int = 1024
 let host []int = make([]int, n)
-let device gpu.Buffer[int] = gpu.alloc(n)
+let device gpu.Buffer[int] = gpu.from(host)
 
-gpu.copyToDevice(host, device)
-gpu.copyToHost(device, host)
+gpu.to(device, host)
 gpu.free(device)
 ```
 
-Device buffers are not host slices. Host code cannot index a `gpu.Buffer`; it must copy data back to a host slice first.
+`gpu.from` allocates a device buffer and copies the host slice in. `gpu.to` copies it back. `gpu.alloc`, `gpu.copyToDevice`, and `gpu.copyToHost` remain for a buffer that should start empty, or for a copy that is separate from allocation. Device buffers are not host slices. Host code cannot index a `gpu.Buffer`.
+
+Multi-step kernels should keep the device buffers and launch again, instead of copying on every step.
 
 ## Kernels
 
-Kernels are declared with `kernel func` and do not return values.
+Kernels are declared with `kernel func` and do not return values. For `gpu.launch1d`, the first parameter is the element index. For `gpu.launch2d`, the first parameter is the row and the second is the column. Threads outside the launch extents do nothing, so the body does not repeat that check.
 
 ```trux
-kernel func fill(out gpu.Buffer[int], n int) {
-  let i int = gpu.globalX()
+kernel func fill(i int, out gpu.Buffer[int]) {
+  out[i] = 42
+}
 
-  if i < n {
-    out[i] = 42
-  }
+kernel func paint(row int, col int, out gpu.Buffer[int], width int) {
+  out[row * width + col] = row + col
 }
 ```
 
@@ -47,12 +48,29 @@ Kernel code is restricted. It supports scalar locals, arithmetic, comparisons, `
 
 ## Launching
 
-Launch geometry is explicit and mirrors CUDA's grid/block model:
+```trux
+let device gpu.Buffer[int] = gpu.from(host)
+gpu.launch1d(fill, n, device)
+gpu.launch2d(paint, width, height, device, width)
+gpu.to(device, host)
+gpu.free(device)
+```
+
+A 1D launch uses 256-thread blocks. A 2D launch uses 16 by 16 blocks. `gpu.launch` is still available when the grid and block need to be chosen by hand:
 
 ```trux
-gpu.launch(fill, gridX, gridY, gridZ, blockX, blockY, blockZ, out, n)
+kernel func fillAt(out gpu.Buffer[int], n int) {
+  let i int = gpu.globalX()
+  if i < n {
+    out[i] = 42
+  }
+}
+
+gpu.launch(fillAt, gridX, 1, 1, 256, 1, 1, out, n)
 gpu.sync()
 ```
+
+That form does not inject coordinates. The kernel reads them itself.
 
 Coordinate helpers inside kernels:
 
@@ -71,10 +89,10 @@ gpu.blockDimY()
 gpu.blockDimZ()
 ```
 
-`gpu.copyToHost` is synchronous for the copied data. `gpu.sync()` is available when source code needs an explicit synchronization point, such as timing a kernel.
+`gpu.to` and `gpu.copyToHost` wait until the copied data is back on the host. `gpu.sync()` is available when source code needs an explicit synchronization point, such as timing a kernel.
 
 Integer arithmetic inside a kernel uses the same overflow and division checks as host code. On device, a failing check traps the kernel. That trap does not print a Trux runtime error message.
 
 ## Example
 
-`examples/gpu_matrix_multiply.tx` runs square matrix multiplication twice in the same Trux program: once on the CPU and once with a Trux GPU kernel. It computes launch geometry from `n`, then prints CPU and GPU checksums, mismatch count, and elapsed time from the `time` package.
+`examples/gpu_matrix_multiply.tx` runs square matrix multiplication twice in the same Trux program: once on the CPU and once with `gpu.launch2d`. `examples/performance_stencil.tx` repeats a Jacobi step on two device buffers. Both print CPU and GPU checksums, a mismatch count, and elapsed time from the `time` package.

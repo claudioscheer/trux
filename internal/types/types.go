@@ -38,6 +38,7 @@ type Info struct {
 	IOCalls       map[*ast.CallExpr]IOCallSig
 	HTTPCalls     map[*ast.CallExpr]HTTPCallSig
 	GPUCalls      map[*ast.CallExpr]GPUCallSig
+	KernelAxes    map[string]int
 }
 
 type AppendSig struct {
@@ -100,6 +101,9 @@ const (
 	GPUCallFree         GPUCallKind = "free"
 	GPUCallSync         GPUCallKind = "sync"
 	GPUCallLaunch       GPUCallKind = "launch"
+	GPUCallLaunch1D     GPUCallKind = "launch1d"
+	GPUCallLaunch2D     GPUCallKind = "launch2d"
+	GPUCallFrom         GPUCallKind = "from"
 	GPUCallGlobalX      GPUCallKind = "globalX"
 	GPUCallGlobalY      GPUCallKind = "globalY"
 	GPUCallGlobalZ      GPUCallKind = "globalZ"
@@ -285,6 +289,7 @@ func Check(program *ast.Program) (*Info, error) {
 			IOCalls:       map[*ast.CallExpr]IOCallSig{},
 			HTTPCalls:     map[*ast.CallExpr]HTTPCallSig{},
 			GPUCalls:      map[*ast.CallExpr]GPUCallSig{},
+			KernelAxes:    map[string]int{},
 		},
 	}
 
@@ -1353,7 +1358,9 @@ func (c *checker) checkGPUCall(locals *scope, expr *ast.CallExpr, allowStatement
 	switch expr.Callee {
 	case "alloc":
 		return nil, "", typeError(expr.Start, "gpu.alloc must be assigned to an explicitly typed gpu.Buffer")
-	case "copyToDevice", "copyToHost":
+	case "from":
+		return c.checkGPUFrom(locals, expr)
+	case "copyToDevice", "copyToHost", "to":
 		if !allowStatementOnly {
 			return nil, "", typeError(expr.Start, "gpu.%s can only be used as a statement", expr.Callee)
 		}
@@ -1368,25 +1375,28 @@ func (c *checker) checkGPUCall(locals *scope, expr *ast.CallExpr, allowStatement
 		if err != nil {
 			return nil, "", err
 		}
-		var host ast.Type
-		var device ast.Type
-		if expr.Callee == "copyToDevice" {
-			host, device = left, right
-		} else {
+		kind := GPUCallKind(expr.Callee)
+		host, device := left, right
+		hostExpr, deviceExpr := expr.Args[0], expr.Args[1]
+		if expr.Callee != "copyToDevice" {
+			if expr.Callee == "to" {
+				kind = GPUCallCopyToHost
+			}
 			device, host = left, right
+			deviceExpr, hostExpr = expr.Args[0], expr.Args[1]
 		}
 		hostSlice, ok := host.(*ast.SliceType)
 		if !ok {
-			return nil, "", typeError(expr.Args[0].Pos(), "gpu.%s host argument must be slice, got %s", expr.Callee, host)
+			return nil, "", typeError(hostExpr.Pos(), "gpu.%s host argument must be slice, got %s", expr.Callee, host)
 		}
 		deviceBuffer, ok := device.(*ast.GPUBufferType)
 		if !ok {
-			return nil, "", typeError(expr.Args[1].Pos(), "gpu.%s device argument must be gpu.Buffer, got %s", expr.Callee, device)
+			return nil, "", typeError(deviceExpr.Pos(), "gpu.%s device argument must be gpu.Buffer, got %s", expr.Callee, device)
 		}
 		if !ast.TypeEqual(hostSlice.Elem, deviceBuffer.Elem) {
 			return nil, "", typeError(expr.Start, "gpu.%s element type mismatch: host has %s, device has %s", expr.Callee, hostSlice.Elem, deviceBuffer.Elem)
 		}
-		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallKind(expr.Callee)}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: kind}
 		return ast.StringType, OriginUnknown, nil
 	case "free", "sync":
 		if !allowStatementOnly {
@@ -1412,7 +1422,11 @@ func (c *checker) checkGPUCall(locals *scope, expr *ast.CallExpr, allowStatement
 		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallFree}
 		return ast.StringType, OriginUnknown, nil
 	case "launch":
-		return c.checkGPULaunch(locals, expr, allowStatementOnly)
+		return c.checkGPULaunch(locals, expr, allowStatementOnly, 0)
+	case "launch1d":
+		return c.checkGPULaunch(locals, expr, allowStatementOnly, 1)
+	case "launch2d":
+		return c.checkGPULaunch(locals, expr, allowStatementOnly, 2)
 	case "globalX", "globalY", "globalZ", "threadX", "threadY", "threadZ", "blockX", "blockY", "blockZ", "blockDimX", "blockDimY", "blockDimZ":
 		if len(expr.Args) != 0 {
 			return nil, "", typeError(expr.Start, "gpu.%s expects 0 arguments, got %d", expr.Callee, len(expr.Args))
@@ -1424,45 +1438,98 @@ func (c *checker) checkGPUCall(locals *scope, expr *ast.CallExpr, allowStatement
 	}
 }
 
-func (c *checker) checkGPULaunch(locals *scope, expr *ast.CallExpr, allowStatementOnly bool) (ast.Type, Origin, error) {
-	if !allowStatementOnly {
-		return nil, "", typeError(expr.Start, "gpu.launch can only be used as a statement")
+func (c *checker) checkGPUFrom(locals *scope, expr *ast.CallExpr) (ast.Type, Origin, error) {
+	if len(expr.Args) != 1 {
+		return nil, "", typeError(expr.Start, "gpu.from expects 1 argument, got %d", len(expr.Args))
 	}
-	if len(expr.Args) < 7 {
-		return nil, "", typeError(expr.Start, "gpu.launch expects kernel, 6 launch dimensions, and kernel args")
+	hostType, err := c.checkExpr(locals, expr.Args[0], false)
+	if err != nil {
+		return nil, "", err
+	}
+	hostSlice, ok := hostType.(*ast.SliceType)
+	if !ok {
+		return nil, "", typeError(expr.Args[0].Pos(), "gpu.from expects a slice, got %s", hostType)
+	}
+	if !gpuScalarType(hostSlice.Elem) {
+		return nil, "", typeError(expr.Args[0].Pos(), "gpu.from element type must be int or float, got %s", hostSlice.Elem)
+	}
+	bufferType := &ast.GPUBufferType{Elem: hostSlice.Elem}
+	c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallFrom, BufferType: bufferType}
+	return bufferType, OriginOwned, nil
+}
+
+func (c *checker) checkGPULaunch(locals *scope, expr *ast.CallExpr, allowStatementOnly bool, axes int) (ast.Type, Origin, error) {
+	launchName := expr.Callee
+	if !allowStatementOnly {
+		return nil, "", typeError(expr.Start, "gpu.%s can only be used as a statement", launchName)
+	}
+	dimCount := 6
+	if axes > 0 {
+		dimCount = axes
+	}
+	if len(expr.Args) < 1+dimCount {
+		if axes == 0 {
+			return nil, "", typeError(expr.Start, "gpu.launch expects kernel, 6 launch dimensions, and kernel args")
+		}
+		return nil, "", typeError(expr.Start, "gpu.%s expects a kernel, %d extents, and kernel arguments", launchName, dimCount)
 	}
 	kernelIdent, ok := expr.Args[0].(*ast.IdentExpr)
 	if !ok {
-		return nil, "", typeError(expr.Args[0].Pos(), "gpu.launch first argument must be a kernel name")
+		return nil, "", typeError(expr.Args[0].Pos(), "gpu.%s first argument must be a kernel name", launchName)
 	}
 	kernel, ok := c.info.Kernels[kernelIdent.Name]
 	if !ok {
 		return nil, "", typeError(expr.Args[0].Pos(), "undefined kernel %q", kernelIdent.Name)
 	}
-	for i := 1; i <= 6; i++ {
+	for i := 1; i <= dimCount; i++ {
 		argType, err := c.checkExpr(locals, expr.Args[i], false)
 		if err != nil {
 			return nil, "", err
 		}
 		if !ast.TypeEqual(argType, ast.IntType) {
-			return nil, "", typeError(expr.Args[i].Pos(), "gpu.launch dimension %d has type %s, want int", i, argType)
+			return nil, "", typeError(expr.Args[i].Pos(), "gpu.%s extent %d has type %s, want int", launchName, i, argType)
 		}
 	}
-	kernelArgs := expr.Args[7:]
-	if len(kernelArgs) != len(kernel.Params) {
-		return nil, "", typeError(expr.Start, "gpu.launch kernel %s expects %d arguments, got %d", kernel.Name, len(kernel.Params), len(kernelArgs))
+	if axes > 0 {
+		if len(kernel.Params) < axes {
+			return nil, "", typeError(expr.Start, "gpu.%s kernel %s needs %d int coordinate parameters before its other arguments", launchName, kernel.Name, axes)
+		}
+		for i := 0; i < axes; i++ {
+			if !ast.TypeEqual(kernel.Params[i].Type, ast.IntType) {
+				return nil, "", typeError(expr.Start, "gpu.%s kernel %s coordinate parameter %q must be int, got %s", launchName, kernel.Name, kernel.Params[i].Name, kernel.Params[i].Type)
+			}
+		}
+	}
+	if prev, seen := c.info.KernelAxes[kernel.Name]; seen && prev != axes {
+		return nil, "", typeError(expr.Start, "kernel %q is launched with two different shapes", kernel.Name)
+	}
+	c.info.KernelAxes[kernel.Name] = axes
+
+	kernelArgs := expr.Args[1+dimCount:]
+	wantParams := kernel.Params
+	if axes > 0 {
+		wantParams = kernel.Params[axes:]
+	}
+	if len(kernelArgs) != len(wantParams) {
+		return nil, "", typeError(expr.Start, "gpu.%s kernel %s expects %d arguments, got %d", launchName, kernel.Name, len(wantParams), len(kernelArgs))
 	}
 	for i, arg := range kernelArgs {
 		argType, err := c.checkExpr(locals, arg, false)
 		if err != nil {
 			return nil, "", err
 		}
-		want := kernel.Params[i].Type
+		want := wantParams[i].Type
 		if !ast.TypeEqual(argType, want) {
 			return nil, "", typeError(arg.Pos(), "argument %d to kernel %s has type %s, want %s", i+1, kernel.Name, argType, want)
 		}
 	}
-	c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallLaunch, KernelName: kernel.Name, KernelSig: kernel}
+	kind := GPUCallLaunch
+	if axes == 1 {
+		kind = GPUCallLaunch1D
+	} else if axes == 2 {
+		kind = GPUCallLaunch2D
+	}
+	c.info.GPUCalls[expr] = GPUCallSig{Kind: kind, KernelName: kernel.Name, KernelSig: kernel}
 	return ast.StringType, OriginUnknown, nil
 }
 

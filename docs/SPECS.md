@@ -163,6 +163,10 @@ image.readPpm(path)
 time.nowUnixMillis()
 time.monotonicNanos()
 gpu.alloc(n)
+gpu.from(host)
+gpu.to(device, host)
+gpu.launch1d(kernel, n, args)
+gpu.launch2d(kernel, width, height, args)
 gpu.globalX()
 gpu.globalY()
 gpu.globalZ()
@@ -241,6 +245,10 @@ time.sleepMillis(ms)
 gpu.copyToDevice(host, device)
 gpu.copyToHost(device, host)
 gpu.launch(kernel, gridX, gridY, gridZ, blockX, blockY, blockZ, args...)
+gpu.launch1d(kernel, n, args...)
+gpu.launch2d(kernel, width, height, args...)
+gpu.from(host)
+gpu.to(device, host)
 gpu.sync()
 gpu.free(device)
 ```
@@ -372,40 +380,31 @@ let elapsed int = time.monotonicNanos() - start
 
 ## GPU
 
-GPU operations require `import "gpu"` and a CUDA toolchain. Device memory is explicit:
+GPU operations require `import "gpu"` and a CUDA toolchain. `gpu.from` copies a host slice to a new device buffer. `gpu.to` copies it back. `gpu.alloc`, `gpu.copyToDevice`, and `gpu.copyToHost` remain when those steps should be separate.
 
 ```trux
 import "gpu"
 
 let n int = 1024
 let host []int = make([]int, n)
-let device gpu.Buffer[int] = gpu.alloc(n)
+let device gpu.Buffer[int] = gpu.from(host)
 
-gpu.copyToDevice(host, device)
-gpu.copyToHost(device, host)
+gpu.launch1d(fill, n, device)
+gpu.to(device, host)
 gpu.free(device)
 ```
 
-Kernels are declared with `kernel func` and do not return values:
+Kernels are declared with `kernel func` and do not return values. `gpu.launch1d` fills the first parameter with the element index. `gpu.launch2d` fills the first parameter with the row and the second with the column. Threads outside the extents do nothing.
 
 ```trux
-kernel func fill(out gpu.Buffer[int], n int) {
-  let i int = gpu.globalX()
-
-  if i < n {
-    out[i] = 42
-  }
+kernel func fill(i int, out gpu.Buffer[int]) {
+  out[i] = 42
 }
 ```
 
 Kernels support scalar locals, arithmetic, comparisons, `if`, `for`, GPU buffer indexing, and GPU coordinate helpers. They do not support strings, lists, host slices, allocation, `print`, IO, time calls, or normal function calls.
 
-Launch geometry is explicit:
-
-```trux
-gpu.launch(fill, gridX, gridY, gridZ, blockX, blockY, blockZ, out, n)
-gpu.sync()
-```
+`gpu.launch` still takes an explicit grid and block, and does not inject coordinates. `gpu.sync` waits for the device.
 
 ## Collections
 

@@ -47,7 +47,7 @@ The compiler currently supports:
 - standard `image` package for first P3 PPM image reads/writes
 - standard `time` package for wall-clock timestamps, monotonic timing, and sleeping
 - standard `http` package for plaintext POSIX HTTP servers backed by a pthread worker pool
-- initial CUDA GPU support with explicit `gpu.Buffer[int|float]`, Trux `kernel func`, and `gpu.launch`
+- initial CUDA GPU support with `gpu.Buffer[int|float]`, Trux `kernel func`, and `gpu.launch1d` / `gpu.launch2d`
 
 Recursive directory-based packages, separate module compilation, and reusable package artifacts are not implemented.
 

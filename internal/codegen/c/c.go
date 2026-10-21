@@ -112,7 +112,7 @@ func exprNeedsFrame(expr ir.Expr) bool {
 		return true
 	case *ir.ImageDimensionExpr:
 		return exprNeedsFrame(expr.Path)
-	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr:
+	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr:
 		return true
 	case *ir.CallExpr:
 		if isDynamicType(expr.Type()) {
@@ -379,6 +379,8 @@ func exprPublishesFrame(expr ir.Expr, declared map[string]bool, tainted map[stri
 		return exprPublishesFrame(expr.Request, declared, tainted) || exprPublishesFrame(expr.Name, declared, tainted)
 	case *ir.GPUAllocExpr:
 		return exprPublishesFrame(expr.Len, declared, tainted)
+	case *ir.GPUFromExpr:
+		return exprPublishesFrame(expr.Host, declared, tainted)
 	default:
 		return true
 	}
@@ -402,7 +404,7 @@ func valueReferencesFrame(expr ir.Expr, tainted map[string]bool) bool {
 	switch expr := expr.(type) {
 	case *ir.IdentExpr:
 		return tainted[expr.Name]
-	case *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.GPUCoordExpr, *ir.TimeNowExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr, *ir.ImageDimensionExpr, *ir.GPUAllocExpr:
+	case *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.GPUCoordExpr, *ir.TimeNowExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr, *ir.ImageDimensionExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr:
 		return false
 	case *ir.BinaryExpr:
 		if expr.Operator == "+" && ast.TypeEqual(expr.Type(), ast.StringType) {
@@ -574,15 +576,29 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
 
 func emitKernelSignature(out *bytes.Buffer, fn *ir.Func, prototype bool) error {
 	fmt.Fprintf(out, "__global__ void %s(", mangleKernel(fn.Name))
-	for i, param := range fn.Params {
-		if i > 0 {
+	sep := false
+	writeParam := func(typ string, name string) {
+		if sep {
 			fmt.Fprint(out, ", ")
+		}
+		sep = true
+		fmt.Fprintf(out, "%s %s", typ, name)
+	}
+	if fn.Injected >= 1 {
+		writeParam("int64_t", "trux_dim_x")
+	}
+	if fn.Injected == 2 {
+		writeParam("int64_t", "trux_dim_y")
+	}
+	for i, param := range fn.Params {
+		if i < fn.Injected {
+			continue
 		}
 		paramType, err := emitKernelType(param.Type)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%s %s", paramType, mangleIdent(param.Name))
+		writeParam(paramType, mangleIdent(param.Name))
 	}
 	fmt.Fprint(out, ")")
 	if prototype {
@@ -601,8 +617,25 @@ func emitKernelFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
 		return err
 	}
 	fmt.Fprintln(out, " {")
-	if err := emitKernelStmts(out, fn.Body, 1, opts, &loopStack{}); err != nil {
+	bodyLevel := 1
+	if fn.Injected == 1 {
+		name := mangleIdent(fn.Params[0].Name)
+		fmt.Fprintf(out, "    int64_t %s = %s;\n", name, "((int64_t)(blockIdx.x * blockDim.x + threadIdx.x))")
+		fmt.Fprintf(out, "    if (%s < trux_dim_x) {\n", name)
+		bodyLevel = 2
+	} else if fn.Injected == 2 {
+		row := mangleIdent(fn.Params[0].Name)
+		col := mangleIdent(fn.Params[1].Name)
+		fmt.Fprintf(out, "    int64_t %s = %s;\n", row, "((int64_t)(blockIdx.y * blockDim.y + threadIdx.y))")
+		fmt.Fprintf(out, "    int64_t %s = %s;\n", col, "((int64_t)(blockIdx.x * blockDim.x + threadIdx.x))")
+		fmt.Fprintf(out, "    if (%s < trux_dim_y && %s < trux_dim_x) {\n", row, col)
+		bodyLevel = 2
+	}
+	if err := emitKernelStmts(out, fn.Body, bodyLevel, opts, &loopStack{}); err != nil {
 		return err
+	}
+	if fn.Injected > 0 {
+		fmt.Fprintln(out, "    }")
 	}
 	fmt.Fprintln(out, "}")
 	return nil
@@ -981,7 +1014,16 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 			e.writePrelude(out, indent, arg.prelude)
 			argValues = append(argValues, arg.value)
 		}
-		fmt.Fprintf(out, "%s%s<<<dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s), dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s)>>>(%s);\n", indent, mangleKernel(stmt.KernelName), dimValues[0], dimValues[1], dimValues[2], dimValues[3], dimValues[4], dimValues[5], strings.Join(argValues, ", "))
+		var launch string
+		switch stmt.Axes {
+		case 1:
+			launch = fmt.Sprintf("%s<<<dim3((unsigned int)(((%s) + 255) / 256), 1u, 1u), dim3(256u, 1u, 1u)>>>(%s)", mangleKernel(stmt.KernelName), dimValues[0], strings.Join(append([]string{dimValues[0]}, argValues...), ", "))
+		case 2:
+			launch = fmt.Sprintf("%s<<<dim3((unsigned int)(((%s) + 15) / 16), (unsigned int)(((%s) + 15) / 16), 1u), dim3(16u, 16u, 1u)>>>(%s)", mangleKernel(stmt.KernelName), dimValues[0], dimValues[1], strings.Join(append([]string{dimValues[0], dimValues[1]}, argValues...), ", "))
+		default:
+			launch = fmt.Sprintf("%s<<<dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s), dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s)>>>(%s)", mangleKernel(stmt.KernelName), dimValues[0], dimValues[1], dimValues[2], dimValues[3], dimValues[4], dimValues[5], strings.Join(argValues, ", "))
+		}
+		fmt.Fprintf(out, "%s%s;\n", indent, launch)
 		fmt.Fprintf(out, "%srt_cuda_check(cudaGetLastError(), \"launch\");\n", indent)
 	case *ir.TimeSleepStmt:
 		millis, err := e.emitOrderedOperand(stmt.Millis, e.scratch)
@@ -1227,6 +1269,23 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 			return emittedExpr{}, err
 		}
 		return emittedExpr{prelude: length.prelude, value: fmt.Sprintf("rt_gpu_alloc_%s(%s)", name, length.value)}, nil
+	case *ir.GPUFromExpr:
+		host, err := e.emitOrderedOperand(expr.Host, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		buf := expr.Type().(*ast.GPUBufferType)
+		elem, err := gpuElemName(buf.Elem)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		tmp, err := e.newTemp(expr.Type(), fmt.Sprintf("rt_gpu_alloc_%s((int64_t)%s.len)", elem, host.value))
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		prelude := append(append([]string{}, host.prelude...), tmp.decl)
+		prelude = append(prelude, fmt.Sprintf("rt_gpu_copy_to_device_%s(%s, %s);", elem, host.value, tmp.name))
+		return emittedExpr{prelude: prelude, value: tmp.name}, nil
 	case *ir.CallExpr:
 		args := make([]emittedExpr, 0, len(expr.Args)+1)
 		callResultArena := e.scratch
@@ -1438,7 +1497,7 @@ func exprHasSideEffect(expr ir.Expr) bool {
 	switch expr := expr.(type) {
 	case *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr,
 		*ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ImageDimensionExpr, *ir.ReadPPMExpr,
-		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.CallExpr:
+		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CallExpr:
 		return true
 	case *ir.ArrayLiteral:
 		for _, elem := range expr.Elements {
@@ -1615,6 +1674,8 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("rt_gpu_alloc_%s(%s)", name, length), nil
+	case *ir.GPUFromExpr:
+		return "", fmt.Errorf("gpu.from must be emitted in statement order")
 	case *ir.GPUCoordExpr:
 		return emitGPUCoord(expr.Kind)
 	case *ir.CallExpr:

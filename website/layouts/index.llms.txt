@@ -1,0 +1,26 @@
+{{- /* llms.txt (https://llmstxt.org): an index of the docs, linking the Markdown version of each page. */ -}}
+{{- $docs := site.GetPage "/docs" -}}
+{{- define "partials/inline/llms-link.txt" -}}
+- [{{ .Title }}]({{ (.OutputFormats.Get "markdown").Permalink }}){{ with .Description }}: {{ . }}{{ end }}
+{{- end -}}
+# Trux
+
+> Trux is a small, Go-inspired programming language that compiles to C, and to CUDA for GPU kernels. The compiler is written in Go. Source: https://github.com/claudioscheer/trux
+
+Every page below is the Markdown version of a page on {{ site.BaseURL }}. All pages in one file: {{ (site.Home.OutputFormats.Get "llmsfull").Permalink }}
+
+## Docs
+
+{{ partial "inline/llms-link.txt" $docs }}
+{{- range $docs.RegularPages.ByWeight }}
+{{ partial "inline/llms-link.txt" . }}
+{{- end }}
+{{- range $docs.Sections.ByWeight }}
+
+## {{ .Title }}
+
+{{ partial "inline/llms-link.txt" . }}
+{{- range .Pages.ByWeight }}
+{{ partial "inline/llms-link.txt" . }}
+{{- end }}
+{{- end }}

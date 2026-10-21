@@ -112,3 +112,29 @@ disableKinds = ["taxonomy", "term"]
     url = "https://github.com/claudioscheer/trux"
     identifier = "github"
     weight = 30
+
+# Every docs page is also published as Markdown (…/index.md) for pasting into
+# AI tools, plus llms.txt (an index) and llms-full.txt (all pages) at the root.
+# Templates: layouts/docs/{single,list}.markdown.md, layouts/index.llms*.txt,
+# and layouts/partials/page-markdown.md, which turns shortcodes into Markdown.
+[mediaTypes."text/markdown"]
+  suffixes = ["md"]
+[outputFormats.markdown]
+  mediaType = "text/markdown"
+  baseName = "index"
+  isPlainText = true
+  rel = "alternate"
+[outputFormats.llms]
+  mediaType = "text/plain"
+  baseName = "llms"
+  isPlainText = true
+  notAlternative = true
+[outputFormats.llmsfull]
+  mediaType = "text/plain"
+  baseName = "llms-full"
+  isPlainText = true
+  notAlternative = true
+[outputs]
+  home = ["html", "rss", "llms", "llmsfull"]
+  section = ["html", "rss", "markdown"]
+  page = ["html", "markdown"]

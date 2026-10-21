@@ -1,0 +1,13 @@
+{{- /* llms-full.txt: every docs page as Markdown, in sidebar order. */ -}}
+{{- $docs := site.GetPage "/docs" -}}
+{{- $pages := slice $docs | append $docs.RegularPages.ByWeight -}}
+{{- range $docs.Sections.ByWeight -}}
+  {{- $pages = $pages | append . | append .Pages.ByWeight -}}
+{{- end -}}
+{{- range $i, $p := $pages -}}
+{{ if $i }}
+
+---
+
+{{ end }}{{ partial "page-markdown.md" $p }}
+{{- end }}

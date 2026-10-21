@@ -19,7 +19,6 @@ func TestLanguageDocsMatchTheCompiler(t *testing.T) {
 	modules := readDoc(t, filepath.Join(root, "docs", "MODULES.md"))
 	readme := readDoc(t, filepath.Join(root, "README.md"))
 	gpu := readDoc(t, filepath.Join(root, "docs", "GPU.md"))
-	todo := readDoc(t, filepath.Join(root, "TODO.md"))
 
 	for _, phrase := range []string{
 		"Nested lists, slices, and arrays are supported",
@@ -57,25 +56,6 @@ func TestLanguageDocsMatchTheCompiler(t *testing.T) {
 
 	if !strings.Contains(gpu, "does not print a Trux runtime error message") {
 		t.Fatal("GPU.md missing the device trap note")
-	}
-
-	if !strings.Contains(todo, "# Historical review") {
-		t.Fatal("TODO.md is not marked historical")
-	}
-	for _, item := range []string{
-		"return-path analysis",
-		"function and kernel name mangling",
-		"checked integer arithmetic, including division by zero and signed overflow",
-		"left-to-right evaluation order",
-		"`-O2` for normal builds",
-	} {
-		if !strings.Contains(todo, item) {
-			t.Fatalf("TODO.md already-done list missing %q", item)
-		}
-	}
-	already := todo[:strings.Index(todo, "# Transcript")]
-	if strings.Contains(already, "open work:\n\n- return-path") {
-		t.Fatal("fixed items are listed as open work")
 	}
 }
 

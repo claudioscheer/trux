@@ -1,4 +1,9 @@
-# Trux
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/trux-wordmark-light.svg">
+    <img src="assets/logo/trux-wordmark.svg" alt="Trux" height="64">
+  </picture>
+</h1>
 
 **Trux is a small, Go-inspired programming language that compiles to C, and to CUDA for GPU kernels.**
 

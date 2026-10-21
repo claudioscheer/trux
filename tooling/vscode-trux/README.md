@@ -6,6 +6,7 @@ VS Code support for `.tx` Trux files.
 
 - Syntax highlighting for Trux keywords, types, strings, numbers, comments, functions, and operators.
 - Optional `Trux Dark` color theme tuned for the Trux grammar scopes.
+- A Trux file icon for `.tx` files, shown when your file icon theme has none.
 - Diagnostics, formatting, completion, and hover through `trux-lsp`.
 
 ## Language Server

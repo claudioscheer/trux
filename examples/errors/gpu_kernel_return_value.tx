@@ -1,0 +1,12 @@
+package main
+
+import "gpu"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+  out[i] = i
+  return 1
+}
+
+func main() int {
+  return 0
+}

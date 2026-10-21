@@ -1,0 +1,23 @@
+{{- /* "Copy page as Markdown" button, shown at the top of every docs page. It copies the page's Markdown output (…/index.md). */ -}}
+{{- with .OutputFormats.Get "markdown" }}
+<div class="page-md-actions mb-3 d-print-none">
+  <button type="button" class="btn btn-sm btn-outline-primary" data-md-url="{{ .RelPermalink }}" onclick="truxCopyMarkdown(this)" title="Copy this page as Markdown, e.g. to paste into an AI assistant">
+    <span class="material-icons size-20 align-middle">content_copy</span> <span class="label">Copy page as Markdown</span>
+  </button>
+</div>
+<script>
+  async function truxCopyMarkdown(btn) {
+    const label = btn.querySelector(".label");
+    const reset = () => setTimeout(() => (label.textContent = "Copy page as Markdown"), 2000);
+    try {
+      const res = await fetch(btn.dataset.mdUrl);
+      if (!res.ok) throw new Error(res.status);
+      await navigator.clipboard.writeText(await res.text());
+      label.textContent = "Copied!";
+    } catch (e) {
+      label.textContent = "Copy failed";
+    }
+    reset();
+  }
+</script>
+{{- end }}

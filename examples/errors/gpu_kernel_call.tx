@@ -1,0 +1,15 @@
+package main
+
+import "gpu"
+
+func square(x int) int {
+  return x * x
+}
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+  out[i] = square(i)
+}
+
+func main() int {
+  return 0
+}

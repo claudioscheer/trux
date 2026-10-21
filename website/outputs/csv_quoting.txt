@@ -1,0 +1,9 @@
+4 rows, header: item note qty
+widget: small, blue x3
+gadget: says "hi" x1
+bolt: (empty) x10
+item,note,qty
+widget,"small, blue",3
+gadget,"says ""hi""",1
+bolt,,10
+

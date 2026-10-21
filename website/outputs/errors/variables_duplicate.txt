@@ -1,0 +1,7 @@
+examples/errors/variables_duplicate.tx:5:3: duplicate local variable "total"
+3 | func main() int {
+4 |   let total int = 0
+5 |   let total int = 1
+  |   ^
+6 |   print(total)
+7 |   return 0

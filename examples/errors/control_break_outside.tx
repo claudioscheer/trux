@@ -1,0 +1,9 @@
+package main
+
+func main() int {
+  let n int = 1
+  if n > 0 {
+    break
+  }
+  return 0
+}

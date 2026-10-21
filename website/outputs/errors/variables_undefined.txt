@@ -1,0 +1,7 @@
+examples/errors/variables_undefined.tx:7:9: undefined variable "inner"
+5 |     let inner int = 1
+6 |   }
+7 |   print(inner)
+  |         ^
+8 |   return 0
+9 | }

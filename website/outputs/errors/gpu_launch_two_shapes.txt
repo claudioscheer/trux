@@ -1,0 +1,7 @@
+examples/errors/gpu_launch_two_shapes.tx:13:3: kernel "fill" is launched with two different shapes
+11 |   let device gpu.Buffer[int] = gpu.from(host)
+12 |   gpu.launch2d(fill, 4, 4, device)
+13 |   gpu.launch1d(fill, 4, 0, device)
+   |   ^
+14 |   gpu.free(device)
+15 |   return 0

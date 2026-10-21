@@ -1,0 +1,5 @@
+package text
+
+pub func prefix() string {
+  return "hello from "
+}

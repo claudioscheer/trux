@@ -1,0 +1,7 @@
+examples/errors/modules_transitive/program.tx:7:9: package "text" is not imported by examples/errors/modules_transitive/program.tx
+5 | func main() int {
+6 |   print(app.greet())
+7 |   print(text.prefix())
+  |         ^
+8 |   return 0
+9 | }

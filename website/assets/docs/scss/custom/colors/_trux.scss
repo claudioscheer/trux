@@ -1,0 +1,84 @@
+// Trux brand colors for the docs pages, selected with
+// params.docs.themeColor = "trux" in hugo.toml. Lotus Docs imports this file
+// in place of one of its built-in palettes (custom/colors/_blue.scss and so on),
+// after Bootstrap's variables and before Bootstrap itself.
+
+@import "../../../../scss/trux-brand";
+
+// Light mode: the brand blue, with a Tailwind-style blue ramp for tints.
+:root {
+    --primary: #{$trux-blue};             // hsl(224, 64%, 33%)
+    --primary-50: #EFF6FF;
+    --primary-100: #DBEAFE;
+    --primary-200: #{$trux-blue-lighter};
+    --primary-300: #{$trux-blue-light};
+    --primary-400: #60A5FA;
+    --primary-800: #{$trux-blue-dark};
+
+    --primary-hsl: 224, 64%, 33%;
+    --primary-50-hsl: 214, 100%, 97%;
+    --primary-100-hsl: 214, 95%, 93%;
+    --primary-200-hsl: 213, 97%, 87%;
+    --primary-300-hsl: 212, 96%, 78%;
+    --primary-800-hsl: 226, 57%, 21%;
+
+    // The header and sidebar logos are inlined SVGs that read this.
+    --trux-logo-mark: #{$trux-blue};
+}
+
+// Dark mode: the dark brand blue is too dark to read on the dark background,
+// so the primary color becomes the light brand blue. The theme already uses
+// the -200/-300 tints for most dark-mode text, which stay light.
+[data-dark-mode] {
+    --primary: #{$trux-blue-light};
+    --primary-hsl: 212, 96%, 78%;
+    --primary-800: #{$trux-blue-lighter};  // hover: lighter still
+    --primary-800-hsl: 213, 97%, 87%;
+
+    --bs-primary: #{$trux-blue-light};
+    --bs-primary-rgb: #{to-rgb($trux-blue-light)};
+    --bs-link-color: #{$trux-blue-light};
+    --bs-link-color-rgb: #{to-rgb($trux-blue-light)};
+    --bs-link-hover-color: #{$trux-blue-lighter};
+    --bs-link-hover-color-rgb: #{to-rgb($trux-blue-lighter)};
+
+    --trux-logo-mark: #{$trux-blue-light};
+
+    // Places where the theme puts white text on a primary fill: with a light
+    // fill the text has to be dark instead.
+    ::selection {
+        color: $trux-ink-on-light;
+    }
+    #toc a.active,
+    .back-to-top {
+        color: $trux-ink-on-light;
+    }
+    .back-to-top svg {
+        fill: $trux-ink-on-light;
+        stroke: $trux-ink-on-light;
+    }
+
+    // Bootstrap's outline button (the "Copy page as Markdown" button) is
+    // compiled with the light-mode blue.
+    .btn-outline-primary {
+        --bs-btn-color: #{$trux-blue-light};
+        --bs-btn-border-color: #{$trux-blue-light};
+        --bs-btn-hover-color: #{$trux-ink-on-light};
+        --bs-btn-hover-bg: #{$trux-blue-light};
+        --bs-btn-hover-border-color: #{$trux-blue-light};
+        --bs-btn-active-color: #{$trux-ink-on-light};
+        --bs-btn-active-bg: #{$trux-blue-lighter};
+        --bs-btn-active-border-color: #{$trux-blue-lighter};
+        --bs-btn-focus-shadow-rgb: #{to-rgb($trux-blue-light)};
+    }
+}
+
+// The compact logo mark is as tall as the "Trux" capitals, so at the theme's
+// 26px logo height the name would be half again as large as before. 20px keeps
+// the name close to its old size and the whole logo a little smaller.
+// (The mobile header's mark-only icon keeps the theme's size.)
+// "html" outranks the theme rule, which comes later with the same selector.
+html .page-wrapper .sidebar-wrapper .sidebar-brand > a svg,
+#top-header .logo-icon .big svg {
+    height: 20px;
+}

@@ -1,0 +1,9 @@
+package main
+
+import "io"
+
+func main() int {
+  let n int = io.readInt()
+  print(n * 2)
+  return 0
+}

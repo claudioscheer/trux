@@ -1,0 +1,7 @@
+examples/errors/gpu_launch1d_coordinate.tx:12:3: gpu.launch1d kernel scale coordinate parameter "out" must be int, got gpu.Buffer[float]
+10 |   let host []float = make([]float, 4)
+11 |   let device gpu.Buffer[float] = gpu.from(host)
+12 |   gpu.launch1d(scale, 4, device, 2.0)
+   |   ^
+13 |   gpu.free(device)
+14 |   return 0

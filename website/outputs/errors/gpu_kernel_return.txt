@@ -1,0 +1,7 @@
+examples/errors/gpu_kernel_return.tx:5:48: expected "{", got "int"
+3 | import "gpu"
+4 | 
+5 | kernel func square(i int, out gpu.Buffer[int]) int {
+  |                                                ^
+6 |   out[i] = i * i
+7 |   return 0

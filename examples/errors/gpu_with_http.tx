@@ -1,0 +1,18 @@
+package main
+
+import "gpu"
+import "http"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+  out[i] = i
+}
+
+func handle(request int) int {
+  http.respond(request, 200, "text/plain", "ok")
+  return 0
+}
+
+func main() int {
+  http.serve("127.0.0.1", 8080, 1, handle)
+  return 0
+}

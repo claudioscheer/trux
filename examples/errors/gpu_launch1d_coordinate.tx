@@ -1,0 +1,15 @@
+package main
+
+import "gpu"
+
+kernel func scale(out gpu.Buffer[float], factor float) {
+  out[0] = out[0] * factor
+}
+
+func main() int {
+  let host []float = make([]float, 4)
+  let device gpu.Buffer[float] = gpu.from(host)
+  gpu.launch1d(scale, 4, device, 2.0)
+  gpu.free(device)
+  return 0
+}

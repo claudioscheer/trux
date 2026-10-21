@@ -1,0 +1,7 @@
+package main
+
+func main() int {
+  let xs [3]int = [3]int{1, 2}
+  print(len(xs))
+  return 0
+}

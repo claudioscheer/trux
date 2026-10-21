@@ -1,0 +1,141 @@
+# Hugo configuration for the Trux documentation site (theme: Lotus Docs).
+# Build from this directory:  hugo        Preview:  hugo server
+baseURL = "https://claudioscheer.github.io/trux/"
+locale = "en-us"
+title = "Trux"
+enableEmoji = true
+enableGitInfo = false
+enableRobotsTXT = true
+disableKinds = ["taxonomy", "term"]
+
+[module]
+  [module.hugoVersion]
+    extended = true
+    min = "0.140.0"
+  [[module.imports]]
+    path = "github.com/colinwilson/lotusdocs"
+    disable = false
+  [[module.imports]]
+    path = "github.com/gohugoio/hugo-mod-bootstrap-scss/v5"
+    disable = false
+
+  # The site's own directories.
+  [[module.mounts]]
+    source = "content"
+    target = "content"
+  [[module.mounts]]
+    source = "layouts"
+    target = "layouts"
+  [[module.mounts]]
+    source = "static"
+    target = "static"
+  [[module.mounts]]
+    source = "data"
+    target = "data"
+  [[module.mounts]]
+    source = "assets"
+    target = "assets"
+  # Files from the rest of the repository that pages include verbatim:
+  # the design notes in docs/, the example programs, and their recorded output.
+  [[module.mounts]]
+    source = "../docs"
+    target = "assets/design-notes"
+  [[module.mounts]]
+    source = "../examples"
+    target = "assets/examples"
+  [[module.mounts]]
+    source = "outputs"
+    target = "assets/outputs"
+
+[markup]
+  defaultMarkdownHandler = "goldmark"
+  [markup.tableOfContents]
+    startLevel = 2
+    endLevel = 3
+  [markup.goldmark.renderer]
+    unsafe = true
+
+[params]
+  description = "Trux is a small, Go-inspired programming language that compiles to C, and to CUDA for GPU kernels."
+  [params.footer]
+    copyright = "Trux is released under the [MIT license](https://github.com/claudioscheer/trux/blob/main/LICENSE). Site built with [Hugo](https://gohugo.io) and [Lotus Docs](https://lotusdocs.dev)."
+
+  [params.social]
+    github = "claudioscheer/trux"
+
+  [params.docs]
+    title = "Trux"
+    themeColor = "trux"  # assets/docs/scss/custom/colors/_trux.scss
+    darkMode = true
+    prism = true
+    prismTheme = "lotusdocs"
+
+    repoURL = "https://github.com/claudioscheer/trux"
+    repoBranch = "main"
+    editPage = true
+    lastMod = false
+
+    sidebarIcons = true
+    breadcrumbs = true
+    backToTop = true
+    toc = true
+    tocMobile = true
+    scrollSpy = true
+    descriptions = true
+    titleIcon = false
+    navDesc = true
+    navDescTrunc = 40
+    listDescTrunc = 120
+    intLinkTooltip = false
+
+  [params.flexsearch]
+    enabled = true
+    tokenize = "forward"
+    maxResult = 8
+
+  # Fail the build on any internal link or #fragment that does not resolve.
+  [params.render_hooks.link]
+    errorLevel = "error"
+
+[menu]
+  [[menu.primary]]
+    name = "Docs"
+    url = "docs/"
+    identifier = "docs"
+    weight = 10
+  [[menu.primary]]
+    name = "Examples"
+    url = "docs/examples/"
+    identifier = "examples"
+    weight = 20
+  [[menu.primary]]
+    name = "GitHub"
+    url = "https://github.com/claudioscheer/trux"
+    identifier = "github"
+    weight = 30
+
+# Every docs page is also published as Markdown (…/index.md) for pasting into
+# AI tools, plus llms.txt (an index) and llms-full.txt (all pages) at the root.
+# Templates: layouts/docs/{single,list}.markdown.md, layouts/index.llms*.txt,
+# and layouts/partials/page-markdown.md, which turns shortcodes into Markdown.
+[mediaTypes."text/markdown"]
+  suffixes = ["md"]
+[outputFormats.markdown]
+  mediaType = "text/markdown"
+  baseName = "index"
+  isPlainText = true
+  rel = "alternate"
+[outputFormats.llms]
+  mediaType = "text/plain"
+  baseName = "llms"
+  isPlainText = true
+  notAlternative = true
+[outputFormats.llmsfull]
+  mediaType = "text/plain"
+  baseName = "llms-full"
+  isPlainText = true
+  notAlternative = true
+[outputs]
+  home = ["html", "rss", "llms", "llmsfull"]
+  section = ["html", "rss", "markdown"]
+  page = ["html", "markdown"]

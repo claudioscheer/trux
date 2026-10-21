@@ -1,0 +1,7 @@
+examples/errors/collections_append_array.tx:5:10: append expects list as first argument, got [3]int
+3 | func main() int {
+4 |   let xs [3]int = [3]int{1, 2, 3}
+5 |   append(xs, 4)
+  |          ^
+6 |   return 0
+7 | }

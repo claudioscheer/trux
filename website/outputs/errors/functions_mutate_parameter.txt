@@ -1,0 +1,7 @@
+examples/errors/functions_mutate_parameter.tx:4:10: cannot mutate parameter-owned collection
+2 | 
+3 | func addOne(xs list[int]) int {
+4 |   append(xs, 1)
+  |          ^
+5 |   return len(xs)
+6 | }

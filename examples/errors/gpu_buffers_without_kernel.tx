@@ -1,0 +1,11 @@
+package main
+
+import "gpu"
+
+func main() int {
+  let host []int = make([]int, 4)
+  let device gpu.Buffer[int] = gpu.from(host)
+  gpu.to(device, host)
+  gpu.free(device)
+  return 0
+}

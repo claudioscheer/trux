@@ -1,0 +1,7 @@
+examples/errors/program_main_params.tx:3:1: main must not have parameters
+1 | package main
+2 | 
+3 | func main(name string) int {
+  | ^
+4 |   print(name)
+5 |   return 0

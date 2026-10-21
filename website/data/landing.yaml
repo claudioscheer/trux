@@ -1,0 +1,90 @@
+# Landing page (https://claudioscheer.github.io/trux/), rendered by Lotus Docs.
+# Blocks are ordered by weight. Links are relative to the site root so they
+# keep the /trux/ prefix on GitHub Pages and in `hugo server`.
+
+hero:
+  enable: true
+  weight: 10
+  template: hero
+  badge:
+    text: v0.1.0
+    color: primary
+    pill: false
+    soft: true
+  title: "Trux"
+  subtitle: "A small, explicitly typed language that compiles to readable **C**, and to **CUDA** for GPU kernels. Overflow, bad indexes, and failed asserts stop the program with a clear error. Built to learn how a compiler works, end to end."
+  ctaButton:
+    icon: rocket_launch
+    btnText: "Get started"
+    url: "docs/getting-started/"
+  cta2Button:
+    icon: menu_book
+    btnText: "Tour the language"
+    url: "docs/guide/"
+  info: "**Open source**, MIT licensed. The compiler is written in Go."
+
+featureGrid:
+  enable: true
+  weight: 20
+  template: feature grid
+  title: "Where to go next"
+  subtitle: "Build the compiler, run hello.tx, then learn one feature at a time. Every feature page shows real output and the real errors."
+  items:
+    - title: Getting started
+      icon: rocket_launch
+      description: Clone, go build, and trux run examples/hello.tx. Needs Go and a C compiler.
+      ctaLink:
+        text: Install and build
+        url: docs/getting-started/install/
+    - title: Language guide
+      icon: menu_book
+      description: Every language feature, what it is, how to use it, and the errors you get when it goes wrong.
+      ctaLink:
+        text: Read the guide
+        url: docs/guide/
+    - title: GPU programming
+      icon: developer_board
+      description: Write kernel func in Trux, move data with gpu.from and gpu.to, launch over 1D or 2D grids, and know when gpu.sync matters.
+      ctaLink:
+        text: GPU guide
+        url: docs/guide/gpu/
+    - title: Standard library
+      icon: inventory_2
+      description: Small built-in packages for stdin and files (io), CSV (csv), PPM images (image), clocks (time), and HTTP servers (http).
+      ctaLink:
+        text: Packages
+        url: docs/stdlib/
+    - title: Examples
+      icon: code
+      description: Every program in examples/, with its source and the output it really prints.
+      ctaLink:
+        text: See examples
+        url: docs/examples/
+    - title: CLI reference
+      icon: terminal
+      description: trux run, build, emit-c, fmt, and test, with every flag and environment variable.
+      ctaLink:
+        text: Commands
+        url: docs/cli/
+    - title: How it works
+      icon: settings
+      description: Follow a program through the lexer, parser, type checker, typed IR, and the C/CUDA backend.
+      ctaLink:
+        text: Internals
+        url: docs/internals/
+    - title: Safety checks
+      icon: verified_user
+      description: Integer overflow, division by zero, and out-of-bounds indexing stop the program with a clear trux runtime error.
+      ctaLink:
+        text: Errors and failures
+        url: docs/guide/errors/
+    - title: FAQ
+      icon: help
+      description: What Trux does not have yet, and what common error messages mean.
+      ctaLink:
+        text: Troubleshooting
+        url: docs/faq/
+
+# The theme ships an "image compare" demo block; it is not used here.
+imageCompare:
+  enable: false

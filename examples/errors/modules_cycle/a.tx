@@ -1,0 +1,7 @@
+package a
+
+import "b.tx"
+
+pub func one() int {
+  return b.two() - 1
+}

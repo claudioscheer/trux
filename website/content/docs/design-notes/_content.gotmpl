@@ -1,0 +1,39 @@
+{{- /*
+  Publishes the design notes in the repository's docs/ directory as pages of
+  this section. The Markdown files stay where they are (so their GitHub paths
+  and links keep working); hugo.toml mounts docs/ at assets/design-notes.
+  The leading "# Title" line is dropped because the theme renders the title,
+  and links between notes ("ARENAS.md") are rewritten to site pages.
+*/ -}}
+{{- $notes := slice
+  (dict "file" "SPECS"       "slug" "specs"       "weight" 100  "title" "Language specification" "description" "The compact, complete reference for the current language.")
+  (dict "file" "ARENAS"      "slug" "arenas"      "weight" 200  "title" "Arenas"                 "description" "The arena memory model, borrowed and owned returns, mut, and clone.")
+  (dict "file" "MODULES"     "slug" "modules"     "weight" 300  "title" "Modules design"         "description" "How imports and packages are loaded and merged, and the plan toward separate compilation.")
+  (dict "file" "GPU"         "slug" "gpu"         "weight" 400  "title" "GPU design"             "description" "The CUDA model: device buffers, kernels, and launches.")
+  (dict "file" "IO"          "slug" "io"          "weight" 500  "title" "IO packages"            "description" "Why IO lives in the io and csv packages and how they are lowered.")
+  (dict "file" "HTTP"        "slug" "http"        "weight" 600  "title" "HTTP package"           "description" "The HTTP server's runtime model and limits.")
+  (dict "file" "IMAGE"       "slug" "image"       "weight" 700  "title" "Image package"          "description" "The PPM-based image package.")
+  (dict "file" "TIME"        "slug" "time"        "weight" 800  "title" "Time package"           "description" "Clocks and sleeping.")
+  (dict "file" "NAMING"      "slug" "naming"      "weight" 900  "title" "Naming"                 "description" "Lower camelCase for source names, and how internal names differ.")
+  (dict "file" "COMPILER"    "slug" "compiler"    "weight" 1000 "title" "Using cc or $CC"        "description" "Why the compiler never hardcodes gcc or clang.")
+  (dict "file" "OPEN_ISSUES" "slug" "open-issues" "weight" 1100 "title" "Open issues"            "description" "Known backend improvements.")
+-}}
+{{- range $notes }}
+  {{- $note := . }}
+  {{- with resources.Get (printf "design-notes/%s.md" .file) }}
+    {{- $body := replaceRE `\A#[^\n]*\n+` "" .Content 1 }}
+    {{- range $notes }}
+      {{- $body = replace $body (printf "](%s.md" .file) (printf "](/docs/design-notes/%s/" .slug) }}
+    {{- end }}
+    {{- $.AddPage (dict
+      "path" $note.slug
+      "title" $note.title
+      "description" $note.description
+      "weight" $note.weight
+      "params" (dict "icon" "description" "sourceFile" (printf "docs/%s.md" $note.file))
+      "content" (dict "mediaType" "text/markdown" "value" $body)
+    ) }}
+  {{- else }}
+    {{- errorf "design note docs/%s.md not found" .file }}
+  {{- end }}
+{{- end }}

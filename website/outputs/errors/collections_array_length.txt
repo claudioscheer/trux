@@ -1,0 +1,7 @@
+examples/errors/collections_array_length.tx:4:19: array literal for [3]int has 2 elements, want 3
+2 | 
+3 | func main() int {
+4 |   let xs [3]int = [3]int{1, 2}
+  |                   ^
+5 |   print(len(xs))
+6 |   return 0

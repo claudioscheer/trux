@@ -1,0 +1,7 @@
+examples/errors/gpu_alloc_untyped.tx:8:10: gpu.alloc must be assigned to an explicitly typed gpu.Buffer
+ 6 |   let n int = 8
+ 7 |   let host []int = make([]int, n)
+ 8 |   gpu.to(gpu.alloc(n), host)
+   |          ^
+ 9 |   return 0
+10 | }

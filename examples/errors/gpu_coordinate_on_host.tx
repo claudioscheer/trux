@@ -1,0 +1,9 @@
+package main
+
+import "gpu"
+
+func main() int {
+  let i int = gpu.globalX()
+  print(i)
+  return 0
+}

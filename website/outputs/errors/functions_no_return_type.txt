@@ -1,0 +1,7 @@
+examples/errors/functions_no_return_type.tx:3:1: function "hello" must declare return type
+1 | package main
+2 | 
+3 | func hello() {
+  | ^
+4 |   print("hi")
+5 | }

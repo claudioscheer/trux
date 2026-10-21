@@ -26,6 +26,7 @@ node_modules/
 *.tx.c
 tmp-*.tx
 trux-*
+!/assets/logo/trux-*
 
 tmp/
 out/
@@ -41,3 +42,9 @@ examples/projects/io_basics/copy.txt
 examples/projects/io_basics/output.csv
 examples/projects/file_notes/summary.txt
 examples/projects/csv_roster/out.csv
+examples/projects/csv_quoting/out.csv
+
+# Documentation site (Hugo) build output
+/website/public/
+/website/resources/_gen/
+.hugo_build.lock

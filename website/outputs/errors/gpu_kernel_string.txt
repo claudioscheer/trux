@@ -1,0 +1,7 @@
+examples/errors/gpu_kernel_string.tx:6:3: kernel local "name" has unsupported type string
+4 | 
+5 | kernel func label(i int, out gpu.Buffer[int]) {
+6 |   let name string = "thread"
+  |   ^
+7 |   out[i] = len(name)
+8 | }

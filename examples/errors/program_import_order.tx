@@ -1,0 +1,8 @@
+package main
+
+func main() int {
+  print("hello")
+  return 0
+}
+
+import "io"

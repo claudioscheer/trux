@@ -1,0 +1,7 @@
+examples/errors/modules_private/program.tx:6:9: cannot call private function "text.shout" from examples/errors/modules_private/program.tx; it is declared in examples/errors/modules_private/text.tx
+4 | 
+5 | func main() int {
+6 |   print(text.shout("hi"))
+  |         ^
+7 |   return 0
+8 | }

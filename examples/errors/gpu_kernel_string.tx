@@ -1,0 +1,12 @@
+package main
+
+import "gpu"
+
+kernel func label(i int, out gpu.Buffer[int]) {
+  let name string = "thread"
+  out[i] = len(name)
+}
+
+func main() int {
+  return 0
+}

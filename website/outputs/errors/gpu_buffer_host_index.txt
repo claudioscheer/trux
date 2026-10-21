@@ -1,0 +1,7 @@
+examples/errors/gpu_buffer_host_index.tx:8:9: cannot index gpu.Buffer[int]
+ 6 |   let host []int = make([]int, 4)
+ 7 |   let device gpu.Buffer[int] = gpu.from(host)
+ 8 |   print(device[0])
+   |         ^
+ 9 |   gpu.free(device)
+10 |   return 0

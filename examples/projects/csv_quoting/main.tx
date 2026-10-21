@@ -1,0 +1,23 @@
+package main
+
+import "io"
+import "csv"
+
+func main() int {
+  let cells list[string] = csv.read("examples/projects/csv_quoting/items.csv", 3)
+  let rows int = len(cells) / 3
+  print(rows, " rows, header: ", cells[0], " ", cells[1], " ", cells[2])
+
+  for let row int = 1; row < rows; row = row + 1 {
+    let note string = cells[row * 3 + 1]
+    if note == "" {
+      note = "(empty)"
+    }
+    print(cells[row * 3], ": ", note, " x", cells[row * 3 + 2])
+  }
+
+  csv.write("examples/projects/csv_quoting/out.csv", cells, 3)
+  print(io.readFile("examples/projects/csv_quoting/out.csv"))
+
+  return 0
+}

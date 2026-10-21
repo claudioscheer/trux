@@ -1,90 +1,100 @@
 ---
 title: "Types and values"
-description: "The scalar types, collections, literals, and the type rules."
+description: "int, float, string, bool, their literals, and why Trux never converts between them."
 icon: "category"
 weight: 200
 ---
 
 ## Scalar types
 
+**What it is.** Four built-in value types:
+
 | Type | Meaning | Literals | In generated C |
 | --- | --- | --- | --- |
-| `int` | 64-bit signed integer | `0`, `42`, `1000000` | `int64_t` |
-| `float` | 64-bit IEEE 754 floating point | `1.5`, `2.0`, `0.25` | `double` |
+| `int` | 64-bit signed integer | `0`, `42`, `-7` | `int64_t` |
+| `float` | 64-bit IEEE 754 number | `1.5`, `2.0`, `0.25` | `double` |
 | `string` | immutable sequence of bytes | `"hello"`, `"line\n"` | `rt_string` (pointer + length) |
 | `bool` | truth value | `true`, `false` | `bool` |
 
-```trux
-package main
+**Why.** A small, fixed set of types that map one-to-one onto C keeps the generated code predictable and fast.
 
-func main() int {
-  let count int = 3
-  let ratio float = 0.75
-  let name string = "trux"
-  let ready bool = true
+**How to use it.** Every variable states its type:
 
-  print(name, " ", count, " ", ratio, " ", ready)
-  return 0
-}
-```
+{{< include "examples/primitives.tx" "trux" >}}
 
-```text
-trux 3 0.75 true
-```
+{{< include "website/outputs/primitives.txt" "text" >}}
 
-### Number literals
+`print` writes floats with up to 15 significant digits and drops a trailing `.0`, so `print(2.0)` prints `2`.
 
-- Integer literals are decimal digits: `0`, `7`, `9223372036854775807`.
-- Float literals need digits on both sides of the dot: `1.0`, `0.5`. Forms such as `1.`, `.5`, `1e9`, or hex are not
-  supported.
-- Negative numbers use the unary minus operator: `-3`, `-2.5`.
+**When you don't need it.** For a group of values, use a [collection](/docs/guide/collections/). For GPU memory, use
+[`gpu.Buffer`](/docs/guide/gpu/#device-buffers).
 
-### String literals
+**Related:** [Variables](/docs/guide/variables/), [Operators](/docs/guide/operators/).
 
-Strings use double quotes and must fit on one line. Supported escapes:
+## Literals
 
-| Escape | Meaning |
-| --- | --- |
-| `\n` | newline |
-| `\t` | tab |
-| `\"` | double quote |
-| `\\` | backslash |
+**What it is.** The written forms of values.
 
-Any other escape is a compile error. A Trux string is a byte string (data pointer plus length), not a NUL-terminated
-C string. `len(s)` counts bytes.
+**Why.** Each literal has exactly one type, so the type of every expression is obvious from the code.
 
-### Printing floats
+**How to use it.**
 
-`print` writes floats with up to 15 significant digits and drops a trailing `.0`, so `print(2.0)` prints `2` and
-`print(1.0 / 3.0)` prints `0.333333333333333`.
+- Integers are decimal digits: `0`, `9223372036854775807`. Negative numbers use unary minus: `-3`.
+- Floats need digits on both sides of the dot: `1.0`, `0.5`. `1.`, `.5`, `1e9`, and hex are not supported.
+- Strings use double quotes, fit on one line, and support the escapes `\n`, `\t`, `\"`, and `\\`. `len(s)` counts
+  bytes.
 
-## No implicit conversions
+**Common mistakes.** Any other escape is a compile error:
 
-Trux never converts between types for you:
+{{< include "examples/errors/types_bad_escape.tx" "trux" >}}
 
-- `int` and `float` cannot be mixed in arithmetic or comparisons: `1 + 2.0` is rejected.
-- Conditions must be `bool`: `if 1 { ... }` is rejected.
-- There are currently **no conversion functions** between `int`, `float`, and `string`. The examples work around this,
-  for example `examples/gpu_matrix_multiply.tx` prints a seconds value by splitting an integer number of nanoseconds into
-  whole seconds and milliseconds.
+{{< include "website/outputs/errors/types_bad_escape.txt" "text" >}}
 
-## Collection types
+**Related:** [Strings as collections](/docs/guide/collections/#strings-as-collections).
 
-| Type | What it is |
-| --- | --- |
-| `[N]T` | fixed-size array of exactly `N` elements (`N` is a positive integer literal) |
-| `[]T` | slice: a view into an array, another slice, or a list |
-| `list[T]` | growable list; assigning or passing it shares the same list |
+## No implicit conversions {#no-implicit-conversions}
 
-Element types can be any type above, including other collections: `[2][2]int`, `[][]float`, and `list[list[int]]` are all
-valid. Collections are covered in [Arrays, slices, and lists](/docs/guide/collections/).
+**What it is.** Trux never changes a value's type for you. `int` and `float` cannot be mixed, and conditions must be
+`bool`.
 
-## GPU buffer type
+**Why.** Silent conversions hide precision loss and overflow. Here every conversion would have to be visible in the code,
+and the compiler catches the rest.
 
-`gpu.Buffer[int]` and `gpu.Buffer[float]` are handles to memory on an NVIDIA GPU. They only exist in programs that
-`import "gpu"`. See [GPU programming](/docs/guide/gpu/).
+**How to use it.** Keep each expression in one type: write `1.0 / 2.0` in float code, and `if count > 0`, not
+`if count`. There are currently **no conversion functions** between `int`, `float`, and `string`.
 
-## What's not there
+**Common mistakes.** Mixing `int` and `float` in arithmetic:
 
-Trux has no structs, maps, tuples, enums, pointers, function values, generics, or user-defined types. Top-level code is
-functions only.
+{{< include "examples/errors/types_mixed_numbers.tx" "trux" >}}
+
+{{< include "website/outputs/errors/types_mixed_numbers.txt" "text" >}}
+
+Using an integer literal where a float is expected:
+
+{{< include "website/outputs/errors/types_int_to_float.txt" "text" >}}
+
+Using a number as a condition:
+
+{{< include "examples/errors/types_if_int.tx" "trux" >}}
+
+{{< include "website/outputs/errors/types_if_int.txt" "text" >}}
+
+**When you don't need it.** If you need to print a computed float as whole units, keep the value in `int` (for example
+nanoseconds) and print parts of it, as `examples/gpu_matrix_multiply.tx` does for seconds.
+
+**Related:** [Operators](/docs/guide/operators/), [FAQ: what's missing](/docs/faq/#whats-missing).
+
+## Collection and buffer types
+
+**What it is.** Types built from other types: `[N]T` arrays, `[]T` slices, `list[T]` lists, and, in GPU programs,
+`gpu.Buffer[int]` and `gpu.Buffer[float]`.
+
+**Why.** They cover fixed data, views, growable data, and GPU memory without a general type system.
+
+**How to use it.** Element types can nest: `[2][2]int`, `[][]float`, `list[list[int]]`. See
+[Arrays, slices, and lists](/docs/guide/collections/) and [GPU programming](/docs/guide/gpu/).
+
+**When you don't need it.** There are no structs, maps, tuples, enums, pointers, function values, generics, or
+user-defined types. Use parallel lists or a flat list with computed indexes instead, as [`csv`](/docs/stdlib/csv/) does.
+
+**Related:** [Memory and ownership](/docs/guide/memory/).

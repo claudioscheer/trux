@@ -511,3 +511,9 @@ These programs time their work, so their output varies from machine to machine. 
 {{< include "examples/gpu_matrix_multiply.tx" "trux" >}}
 
 {{< /details >}}
+
+## Programs that fail on purpose
+
+[`examples/errors/`](https://github.com/claudioscheer/trux/tree/main/examples/errors) holds one small program per common
+mistake: compile errors, runtime errors, and two known compiler bugs. They are shown, with their recorded output, on the
+guide page of the feature they belong to. See [Errors and failures](/docs/guide/errors/).

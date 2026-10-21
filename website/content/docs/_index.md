@@ -1,43 +1,48 @@
 ---
 title: "Overview"
 linkTitle: "Overview"
-description: "Trux is a small, Go-inspired language that compiles to C, and to CUDA for GPU kernels."
+description: "Trux is a small, explicitly typed language that compiles to C, and to CUDA for GPU kernels."
 icon: "home"
 ---
 
-You write `.tx` files with explicit types and a familiar, curly-brace syntax. The `trux` compiler, written in Go, checks them,
-turns them into readable C, and hands that C to your system's C compiler (`cc`, or `nvcc` for GPU programs). The result is
-an ordinary native executable.
+**Trux is a small, explicitly typed language that compiles to readable C**, and to CUDA when a program has GPU kernels.
+The `trux` compiler, written in Go, checks your `.tx` files, generates C, and builds a native executable with `cc` (or
+`nvcc`).
+
+**Who it's for:** people who want to see how a compiler works end to end, and to write small CPU and GPU programs
+whose generated code they can read. It is a learning project, not a production language.
+
+**Fastest path to a running program** (needs [Go](https://go.dev/dl/) and a C compiler such as `cc`):
+
+```bash
+git clone https://github.com/claudioscheer/trux.git && cd trux
+go build -o bin/trux ./cmd/trux
+./bin/trux run examples/hello.tx
+```
 
 {{< include "examples/hello.tx" "trux" >}}
 
-```shell-session
-$ trux run examples/hello.tx
-3
-```
+{{< include "website/outputs/hello.txt" "text" >}}
 
-New here? Start with [Getting started](/docs/getting-started/), then take the [language guide](/docs/guide/) one page at a
-time. The [How it works](/docs/internals/) section explains the compiler itself and can wait until you are curious.
+Then follow [Your first program](/docs/getting-started/first-program/) and the [language guide](/docs/guide/).
 
-## What Trux is (and isn't)
+## What you get
 
-Trux is a **learning compiler**: the whole pipeline is built by hand so that each stage stays small enough to read end to end.
-It borrows syntax ideas from Go, but it is **not Go-compatible**.
+- **Explicit types**: `int`, `float`, `string`, `bool`, arrays `[N]T`, slices `[]T`, and lists `list[T]`. Nothing
+  converts implicitly.
+- **Checked at run time**: integer overflow, division by zero, out-of-bounds indexes, and failed `assert`s stop the
+  program with a `trux runtime error`.
+- **Arena memory**: no garbage collector and no `free` for host values; `mut` parameters and `clone` make every change
+  to shared data visible.
+- **Multi-file programs** with relative imports and `pub func`.
+- **Built-in tests**: `.test.tx` files and `trux test`.
+- **GPU kernels** written in Trux and compiled to CUDA.
+- A small standard library: `io`, `csv`, `image`, `time`, `http`, `gpu`.
 
-What you get today:
+**Not there yet:** structs, maps, generics, user-defined types, type inference, `int`/`float` conversions, closures,
+error values, and concurrency outside the HTTP server. See the [FAQ](/docs/faq/#whats-missing).
 
-- Four scalar types (`int`, `float`, `string`, `bool`) and three collection shapes: fixed arrays `[N]T`, slice views `[]T`, and growable lists `list[T]`.
-- Explicit everything: every variable and parameter has a written type, and `int` never silently becomes `float`.
-- Safety checks in the generated code: integer overflow, division by zero, and out-of-bounds indexing stop the program with a clear `trux runtime error`.
-- Arena-based memory with no garbage collector and no manual `free` for host values.
-- Multi-file programs with relative imports, `pub func` exports, and package-qualified calls.
-- Built-in unit tests (`.test.tx` files and `trux test`).
-- CUDA kernels written in Trux itself.
-
-What it doesn't have (yet): structs, maps, generics, user-defined types, type inference, int/float conversions, closures, and
-concurrency primitives outside the HTTP server. See the [FAQ](/docs/faq/) for details.
-
-## The pipeline at a glance
+## How it works
 
 ```mermaid
 flowchart LR
@@ -49,4 +54,4 @@ flowchart LR
     I --> J
 ```
 
-Read [Compiling to C and CUDA](/docs/internals/compilation/) for the full story.
+Each stage is small enough to read; [How it works](/docs/internals/) walks through them.

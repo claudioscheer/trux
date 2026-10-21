@@ -83,27 +83,22 @@ walks through it.
 
 ## When something is wrong
 
-Compile errors show the file, line, and column, with the offending line marked:
+Compile errors show the file, line, and column, with the offending line marked. Nothing is built:
+
+{{< include "examples/errors/types_int_to_float.tx" "trux" >}}
 
 ```shell-session
-$ trux run bad.tx
-bad.tx:4:15: cannot assign float to int
-2 |
-3 | func main() int {
-4 |   let x int = 1.5
-  |               ^
-5 |   return 0
-6 | }
+$ trux run examples/errors/types_int_to_float.tx
 ```
 
-Problems that can only be detected while the program runs (an index out of range, integer overflow, a failed `assert`)
-stop it with a `trux runtime error` message on stderr:
+{{< include "website/outputs/errors/types_int_to_float.txt" "text" >}}
 
-```text
-trux runtime error: index 5 out of bounds for length 3
-```
+(`trux` prints the file's full path; it is shortened here.) Problems that can only be found while the program runs, such
+as an index out of range, integer overflow, or a failed `assert`, stop it with a `trux runtime error` on stderr:
 
-The [FAQ](/docs/faq/) lists the most common errors and what they mean.
+{{< include "website/outputs/errors/collections_index_out_of_bounds.txt" "text" >}}
+
+[Errors and failures](/docs/guide/errors/) explains both kinds, and each guide page shows the errors for its features.
 
 ## Format your code
 
@@ -114,5 +109,5 @@ trux fmt -r           # format every .tx file under the current directory
 
 ## Where next
 
-- The [language guide](/docs/guide/) explains each feature with small examples.
+- The [language guide](/docs/guide/) explains each feature: what it is, how to use it, and how it fails.
 - The [examples gallery](/docs/examples/) has complete programs you can run from the repository.

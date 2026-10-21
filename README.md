@@ -9,7 +9,8 @@
 
 The compiler is written in Go and builds every stage by hand: lexer, parser, type checker, typed IR, and a C/CUDA
 backend. The generated C is compiled with your system's C compiler into an ordinary native executable. Trux is a
-learning project; it borrows syntax ideas from Go but is not Go-compatible.
+learning project for people who want to see how a compiler works end to end; it borrows syntax ideas from Go but is not
+Go-compatible.
 
 📖 **Documentation: <https://claudioscheer.github.io/trux/>**
 
@@ -96,7 +97,7 @@ The website covers everything from installation to compiler internals:
 | Section | |
 | --- | --- |
 | [Getting started](https://claudioscheer.github.io/trux/docs/getting-started/) | install, first program, editor setup |
-| [Language guide](https://claudioscheer.github.io/trux/docs/guide/) | types, functions, control flow, collections, memory, modules, tests, GPU |
+| [Language guide](https://claudioscheer.github.io/trux/docs/guide/) | every feature: what it is, how to use it, and the real errors it produces |
 | [Standard library](https://claudioscheer.github.io/trux/docs/stdlib/) | `io`, `csv`, `image`, `time`, `http`, `gpu` |
 | [Examples](https://claudioscheer.github.io/trux/docs/examples/) | every program in `examples/`, with its output |
 | [CLI reference](https://claudioscheer.github.io/trux/docs/cli/) | `run`, `build`, `emit-c`, `fmt`, `test` |
@@ -112,7 +113,7 @@ The site is built with [Hugo](https://gohugo.io) and the [Lotus Docs](https://lo
 ```text
 cmd/trux/            the trux command line tool
 internal/            compiler: lexer, parser, ast, modules, types, ir, codegen/c, runtime/c, formatter, stdlib
-examples/            runnable examples, module examples, and small projects
+examples/            runnable examples, module examples, small projects, and errors/ (programs that fail on purpose)
 tooling/             trux-lsp language server and the VS Code extension
 docs/                language specification and design notes
 website/             documentation site (Hugo + Lotus Docs): config, pages, recorded example outputs

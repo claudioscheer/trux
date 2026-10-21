@@ -5,10 +5,14 @@ icon: "folder_open"
 weight: 900
 ---
 
-A Trux program can be split across several `.tx` files. The compiler loads the entry file, follows its imports, and
+## Source imports
+
+**What it is.** `import "file.tx"` loads another Trux file. The compiler follows imports from the entry file and
 compiles everything into one program.
 
-## A two-file program
+**Why.** Larger programs stay readable when related functions live in their own files.
+
+**How to use it.**
 
 {{< tabs tabTotal="2" >}}
 {{% tab tabName="main.tx" %}}
@@ -23,45 +27,95 @@ compiles everything into one program.
 {{% /tab %}}
 {{< /tabs >}}
 
-```shell-session
-$ trux run examples/modules/basic/main.tx
-7
-```
+{{< include "website/outputs/modules_basic.txt" "text" >}}
 
-Three things make this work:
+- The path is relative to the **importing file's directory** and ends in `.tx`: `"math.tx"`, `"math/add.tx"`,
+  `"../shared/text.tx"`.
+- Callers use the file's **package name** (`package math`), not its file name, as the qualifier.
+- Each file is loaded once, however many times it is imported. `.test.tx` files are skipped.
 
-1. `import "math.tx"` loads the file `math.tx` from the **same directory as the importing file**.
-2. `math.tx` declares `package math`. The package name, not the file name, is what callers use as a qualifier.
-3. `add` is declared `pub func`, so importers can call it as `math.add(...)`.
+**Common mistakes.** A bare name that isn't a standard package:
 
-## Import rules
+{{< include "examples/errors/modules_bare_import.tx" "trux" >}}
 
-- Source imports are **relative paths** to `.tx` files, written as string literals: `import "math.tx"`,
-  `import "math/add.tx"`, `import "../shared/text.tx"`. Absolute paths, directories, and paths without `.tx` are errors.
-- Bare names are reserved for the standard packages: `import "io"`, `"csv"`, `"image"`, `"time"`, `"http"`, `"gpu"`.
-  Any other bare name is an error.
-- Imports go after `package` and before the first function, one per line. Grouped `import ( ... )` blocks are not
-  supported.
-- Each file is loaded once, even if it is reached through several import paths.
-- Import cycles are reported with the full chain of files.
-- `.test.tx` files are skipped when loading a normal program.
+{{< include "website/outputs/errors/modules_bare_import.txt" "text" >}}
 
-## Visibility: `pub func`
+Write `import "math.tx"` for a source file. Import cycles are rejected with the full chain:
+
+{{< include "website/outputs/errors/modules_cycle.txt" "text" >}}
+
+Errors in an imported file are reported with that file's path, line, and column.
+
+**When you don't need it.** A program that fits comfortably in one file. Imports are not a way to share code between
+projects: there are no package artifacts or search paths.
+
+**Related:** [Program structure: imports](/docs/guide/program-structure/#imports).
+
+## `pub func` {#pub-func}
+
+**What it is.** `pub func` makes a function callable from files that import its package, as `pkg.name(...)`. A plain
+`func` is private to its package.
+
+**Why.** Each package decides what it exposes. Helpers can change without breaking importers.
+
+**How to use it.**
 
 | Declared as | Callable from |
 | --- | --- |
 | `pub func f` | files that **directly** import its package, as `pkg.f(...)`; and, unqualified, from its own package |
-| `func f` | only its own package (same directory, same package name), unqualified |
+| `func f` | only its own package, unqualified |
 
-- A qualified call to a private function is rejected, even from inside the same package.
-- You can only call packages you import directly. If `main.tx` imports `app.tx` and `app.tx` imports `text.tx`,
-  `main.tx` cannot call `text.prefix()` unless it imports `text.tx` too (see `examples/modules/transitive`).
-- Different packages may each have a private function with the same name; the compiler keeps them apart.
+Different packages may each have a private function with the same name.
 
-## Packages spread over several files
+**Common mistakes.** Calling a private function from another package:
 
-Importing a file also loads its **sibling files in the same directory that declare the same package**. That lets you
-split one package across files:
+{{< tabs tabTotal="2" >}}
+{{% tab tabName="program.tx" %}}
+
+{{< include "examples/errors/modules_private/program.tx" "trux" >}}
+
+{{% /tab %}}
+{{% tab tabName="text.tx" %}}
+
+{{< include "examples/errors/modules_private/text.tx" "trux" >}}
+
+{{% /tab %}}
+{{< /tabs >}}
+
+{{< include "website/outputs/errors/modules_private.txt" "text" >}}
+
+A qualified call to a private function is rejected even inside its own package; call it unqualified there.
+
+**When you don't need it.** Functions used only inside their own package should stay private.
+
+**Related:** [Functions](/docs/guide/functions/).
+
+## Direct imports only
+
+**What it is.** A file can call only the packages it imports itself. Importing `app.tx`, which imports `text.tx`, does
+not give you `text`.
+
+**Why.** Every file's dependencies are listed at its top, so moving or deleting an import never silently breaks a
+different file.
+
+**How to use it.** Import each package you call. `examples/modules/transitive` shows the working version.
+
+**Common mistakes.** Calling a package that is only imported indirectly:
+
+{{< include "examples/errors/modules_transitive/program.tx" "trux" >}}
+
+{{< include "website/outputs/errors/modules_transitive.txt" "text" >}}
+
+Add `import "text.tx"` to the file.
+
+## Packages across several files
+
+**What it is.** Importing a file also loads its **sibling files in the same directory that declare the same package**,
+so one package can be split across files.
+
+**Why.** A package can grow without its importers having to list every file.
+
+**How to use it.**
 
 ```text
 examples/modules/same_package_math/
@@ -74,25 +128,13 @@ examples/modules/same_package_math/
 
 {{< include "examples/modules/same_package_math/main.tx" "trux" >}}
 
-Inside the `math` package, private functions are shared by all three files. Within one package group, every function
-name must be unique.
+{{< include "website/outputs/modules_same_package_math.txt" "text" >}}
 
-Several direct imports may declare the same package name (here `math/add.tx` and `math/mul.tx`). The qualifier `math`
-then covers the public functions of all of them, as long as those names don't clash.
+Private functions are shared by all files of the package, and every function name in the package must be unique.
+Several imports may declare the same package name; the qualifier then covers the public functions of all of them.
 
-{{% alert context="info" %}}
-
-**The entry file is special**
-
-The file you pass to `trux run` does **not** automatically load its siblings; only imported files do. And only the
-entry file may declare `main`.
-
-{{% /alert %}}
-
-## Error messages point at the right file
-
-Parse and type errors in an imported file are reported with that file's path, line, and column, so you can jump straight
-to the problem.
+**When you don't need it.** The entry file is special: it does **not** load its siblings, and only it may declare
+`main`.
 
 ## More examples
 
@@ -106,6 +148,5 @@ to the problem.
 
 ## Limits
 
-All loaded files are merged and compiled into **one** generated C file. Recursive directory packages, separate
-compilation, and reusable package artifacts are not implemented. The design and the planned evolution are described in
-[Modules design](/docs/design-notes/modules/).
+All files are merged into **one** generated C file. Directory packages, separate compilation, and reusable package
+artifacts are not implemented. See [Modules design](/docs/design-notes/modules/).

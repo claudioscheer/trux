@@ -96,7 +96,10 @@ full path of `nvcc`. A program with kernels cannot be built with `cc`.
 
 ### `cc failed: ...`
 
-`trux` couldn't find or run a C compiler. Install one (gcc or clang), or set `CC` to its path.
+Either `trux` couldn't find or run a C compiler (install gcc or clang, or set `CC` to its path), or the C compiler
+rejected the generated code. The second case is a compiler bug. Two are known: calling a
+[GPU coordinate helper in host code](/docs/guide/gpu/#coordinate-helpers), and using
+[GPU buffers in a program without a kernel](/docs/guide/gpu/#device-buffers).
 
 ### `http and gpu cannot be used in the same program yet`
 
@@ -117,7 +120,8 @@ All runtime errors start with `trux runtime error:` and exit with status `1`.
 | `cannot open file for reading notes.txt: No such file or directory` and similar | a file operation failed |
 | `csv row has 3 columns, want 2` | a CSV row didn't match the `columns` argument (see [`csv` errors](/docs/stdlib/csv/#errors)) |
 
-The overflow and assertion messages include the Trux file and line, for example `at main.tx:5`.
+The overflow, division, and assertion messages include the Trux file and line, for example `at main.tx:5`. Every
+message is explained, with a failing example, in [Errors and failures](/docs/guide/errors/) and on each guide page.
 
 ## The documentation site
 

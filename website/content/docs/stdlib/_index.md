@@ -46,4 +46,5 @@ Besides packages, a few **builtins** are always available without an import:
 ## Runtime errors
 
 Library calls fail loudly. Invalid input, a missing file, or a malformed CSV row stops the program with a message on
-stderr such as `trux runtime error: invalid int input` and exit status `1`. There is no error-return mechanism yet.
+stderr such as `trux runtime error: invalid int input` and exit status `1`. There is no error-return mechanism yet. Each
+package page shows its real error messages; [Errors and failures](/docs/guide/errors/) explains the format.

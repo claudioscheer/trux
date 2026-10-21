@@ -9,8 +9,13 @@ weight: 400
 import "http"
 ```
 
-The `http` package runs a plaintext HTTP server. Your program supplies one **handler function**; the runtime accepts
+**What it is.** A plaintext HTTP/1.1 server. Your program supplies one **handler function**; the runtime accepts
 connections, parses requests, and calls the handler from a pool of worker threads.
+
+**Why.** A small web service is a realistic program to write in Trux, and the worker pool is the only concurrency the
+language offers.
+
+**When you don't need it.** For HTTPS, put a TLS proxy in front. There is no HTTP client.
 
 ## A complete server
 
@@ -60,7 +65,12 @@ The server blocks forever; stop it with ++ctrl+c++.
 - `host` must be an IPv4 literal such as `"127.0.0.1"` or `"0.0.0.0"`.
 - `port` must be `1`-`65535`, and `workers` `1`-`1024`.
 - Request bodies are read using `Content-Length` and are capped at 1 MiB. Chunked request bodies are rejected.
-- A program cannot use `http` together with GPU kernels yet.
+- A program cannot use `http` together with GPU kernels yet:
+
+    {{< include "website/outputs/errors/gpu_with_http.txt" "text" >}}
+
+The `curl` session above was run by hand against `examples/projects/http_server`; it is not re-recorded by CI, because
+the server never exits.
 
 Programs that use `http` are compiled with `-pthread` and include the extra `trux_http_runtime.h` header. See
 [HTTP package](/docs/design-notes/http/) for the runtime model.

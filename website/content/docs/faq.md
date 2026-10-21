@@ -113,9 +113,9 @@ All runtime errors start with `trux runtime error:` and exit with status `1`.
 | `index 5 out of bounds for length 3` | indexing past the end (or a negative index) |
 | `slice 2:9 out of bounds for length 4` | slice bounds outside the collection, or start after end |
 | `assertion failed: <message>` | an `assert` condition was `false` |
-| `invalid int input`, `invalid float input`, `invalid bool input` | `io.readInt` and friends couldn't parse the line |
+| `invalid int input`, `invalid float input`, `invalid bool input` | [`io.readInt`](/docs/stdlib/io/#errors) and friends couldn't parse the line |
 | `cannot open file for reading notes.txt: No such file or directory` and similar | a file operation failed |
-| `csv row has 3 columns, want 2` | a CSV row didn't match the `columns` argument |
+| `csv row has 3 columns, want 2` | a CSV row didn't match the `columns` argument (see [`csv` errors](/docs/stdlib/csv/#errors)) |
 
 The overflow and assertion messages include the Trux file and line, for example `at main.tx:5`.
 

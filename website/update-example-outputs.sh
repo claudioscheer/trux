@@ -50,6 +50,7 @@ examples=(
   "interactive_counter|Ada\n7\n|run examples/projects/interactive_counter/main.tx"
   "file_notes|review IO examples\n|run examples/projects/file_notes/main.tx"
   "csv_roster|Cara\nops\n|run examples/projects/csv_roster/main.tx"
+  "csv_quoting||run examples/projects/csv_quoting/main.tx"
 )
 
 for entry in "${examples[@]}"; do
@@ -74,7 +75,8 @@ rm -rf "$emit_dir"
 
 # The example projects write these files; keep the checkout clean.
 rm -f examples/projects/io_basics/copy.txt examples/projects/io_basics/output.csv \
-  examples/projects/file_notes/summary.txt examples/projects/csv_roster/out.csv
+  examples/projects/file_notes/summary.txt examples/projects/csv_roster/out.csv \
+  examples/projects/csv_quoting/out.csv
 
 if [[ "$mode" == "check" ]]; then
   if ! diff -r "$out_dir" "$tmp_dir"; then

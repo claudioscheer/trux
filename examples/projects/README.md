@@ -9,6 +9,7 @@ printf 'Ada\n41\n' | trux run examples/projects/io_basics/main.tx
 printf 'Ada\n7\n' | trux run examples/projects/interactive_counter/main.tx
 printf 'review IO examples\n' | trux run examples/projects/file_notes/main.tx
 printf 'Cara\nops\n' | trux run examples/projects/csv_roster/main.tx
+trux run examples/projects/csv_quoting/main.tx
 trux run examples/projects/scorebook/main.tx
 trux test examples/projects/scorebook/scores.test.tx
 trux run examples/projects/rotate_image/main.tx

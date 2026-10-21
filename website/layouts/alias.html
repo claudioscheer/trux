@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html lang="en-us">
+	<head>
+		<title>{{ .Permalink }}</title>
+		<link rel="canonical" href="{{ .Permalink }}">
+		<meta name="robots" content="noindex">
+		<meta charset="utf-8">
+		{{- /* Keep the #fragment of old links (meta refresh drops it). */}}
+		<script>location.replace({{ .Permalink }} + location.hash);</script>
+		<meta http-equiv="refresh" content="0; url={{ .Permalink }}">
+	</head>
+</html>

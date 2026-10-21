@@ -388,7 +388,7 @@ $ trux run examples/projects/scorebook/main.tx
 
 ### io_basics
 
-stdin, file IO, and CSV in one program.
+stdin, file IO, and CSV in one program. See the [`io`](/docs/stdlib/io/) and [`csv`](/docs/stdlib/csv/) packages.
 
 {{< details summary="`examples/projects/io_basics/main.tx`" >}}
 
@@ -404,7 +404,7 @@ $ printf 'Ada\n41\n' | trux run examples/projects/io_basics/main.tx
 
 ### interactive_counter
 
-`io.readLine` and `io.readInt`.
+`io.readLine` and `io.readInt` from the [`io` package](/docs/stdlib/io/).
 
 {{< details summary="`examples/projects/interactive_counter/main.tx`" >}}
 
@@ -420,7 +420,7 @@ $ printf 'Ada\n7\n' | trux run examples/projects/interactive_counter/main.tx
 
 ### file_notes
 
-`io.readFile` and `io.writeFile`.
+`io.readFile` and `io.writeFile` from the [`io` package](/docs/stdlib/io/).
 
 {{< details summary="`examples/projects/file_notes/main.tx`" >}}
 
@@ -436,7 +436,7 @@ $ printf 'review IO examples\n' | trux run examples/projects/file_notes/main.tx
 
 ### csv_roster
 
-`csv.read`, `append`, and `csv.write`.
+`csv.read`, `append`, and `csv.write` from the [`csv` package](/docs/stdlib/csv/).
 
 {{< details summary="`examples/projects/csv_roster/main.tx`" >}}
 
@@ -449,6 +449,23 @@ $ printf 'Cara\nops\n' | trux run examples/projects/csv_roster/main.tx
 ```
 
 {{< include "website/outputs/csv_roster.txt" "text" >}}
+
+### csv_quoting
+
+Quoted fields, a doubled quote, and an empty cell, read with `csv.read` and written back with `csv.write`. See
+[Quoting](/docs/stdlib/csv/#quoting).
+
+{{< details summary="`examples/projects/csv_quoting/main.tx`" >}}
+
+{{< include "examples/projects/csv_quoting/main.tx" "trux" >}}
+
+{{< /details >}}
+
+```shell-session
+$ trux run examples/projects/csv_quoting/main.tx
+```
+
+{{< include "website/outputs/csv_quoting.txt" "text" >}}
 
 ## Unit tests
 

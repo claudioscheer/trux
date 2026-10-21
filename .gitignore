@@ -41,3 +41,9 @@ examples/projects/io_basics/copy.txt
 examples/projects/io_basics/output.csv
 examples/projects/file_notes/summary.txt
 examples/projects/csv_roster/out.csv
+
+# Documentation site build output and local virtualenv
+/site/
+/.venv/
+*.egg-info/
+__pycache__/

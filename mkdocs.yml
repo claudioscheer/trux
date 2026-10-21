@@ -1,0 +1,140 @@
+site_name: Trux
+site_description: Trux is a small, Go-inspired language that compiles to C, and to CUDA for GPU kernels.
+site_url: https://claudioscheer.github.io/trux/
+repo_url: https://github.com/claudioscheer/trux
+repo_name: claudioscheer/trux
+edit_uri: edit/main/docs/
+copyright: Trux is released under the terms in the repository LICENSE file.
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  language: en
+  icon:
+    logo: material/code-braces
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+
+extra_css:
+  - assets/extra.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.inlinehilite
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: info
+    unrecognized_links: warn
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - getting-started/index.md
+      - Install and build: getting-started/install.md
+      - Your first program: getting-started/first-program.md
+      - Editor support: getting-started/editor.md
+  - Language guide:
+      - guide/index.md
+      - Program structure: guide/program-structure.md
+      - Types and values: guide/types.md
+      - Variables: guide/variables.md
+      - Operators and expressions: guide/operators.md
+      - Functions: guide/functions.md
+      - Control flow: guide/control-flow.md
+      - Arrays, slices, and lists: guide/collections.md
+      - Memory and ownership: guide/memory.md
+      - Modules and packages: guide/modules.md
+      - Testing: guide/testing.md
+      - GPU programming: guide/gpu.md
+  - Standard library:
+      - stdlib/index.md
+      - io and csv: stdlib/io-csv.md
+      - image: stdlib/image.md
+      - time: stdlib/time.md
+      - http: stdlib/http.md
+      - gpu: stdlib/gpu.md
+  - Examples: examples.md
+  - CLI reference: cli.md
+  - How it works:
+      - internals/index.md
+      - Compiling to C and CUDA: internals/compilation.md
+      - Codebase tour: internals/architecture.md
+      - Contributing: internals/contributing.md
+  - FAQ: faq.md
+  - Design notes:
+      - design/index.md
+      - Language specification: SPECS.md
+      - Arenas: ARENAS.md
+      - Modules design: MODULES.md
+      - GPU design: GPU.md
+      - IO packages: IO.md
+      - HTTP package: HTTP.md
+      - Image package: IMAGE.md
+      - Time package: TIME.md
+      - Naming: NAMING.md
+      - Using cc or $CC: COMPILER.md
+      - Open issues: OPEN_ISSUES.md

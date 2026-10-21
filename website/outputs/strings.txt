@@ -1,0 +1,12 @@
+trux compiler
+hello, trux compiler
+trux compiler!
+empty
+true
+true
+true
+true
+false
+true
+true
+true

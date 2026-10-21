@@ -1,0 +1,9 @@
+package main
+
+import "time"
+
+func main() int {
+  let delay int = -5
+  time.sleepMillis(delay)
+  return 0
+}

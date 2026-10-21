@@ -1,0 +1,7 @@
+examples/errors/gpu_launch_arguments.tx:12:3: gpu.launch1d kernel fill expects 2 arguments, got 1
+10 |   let host []int = make([]int, 4)
+11 |   let device gpu.Buffer[int] = gpu.from(host)
+12 |   gpu.launch1d(fill, 4, device)
+   |   ^
+13 |   gpu.free(device)
+14 |   return 0

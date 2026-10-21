@@ -1,0 +1,14 @@
+package main
+
+func double(x int) int {
+  return x + x
+}
+
+func testDouble() {
+  assert(double(2) == 4, "double(2) should be 4")
+  assert(double(3) == 7, "double(3) should be 7")
+}
+
+func testDoubleZero() {
+  assert(double(0) == 0, "double(0) should be 0")
+}

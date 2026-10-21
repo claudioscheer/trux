@@ -1,0 +1,12 @@
+package main
+
+func addOne(xs list[int]) int {
+  append(xs, 1)
+  return len(xs)
+}
+
+func main() int {
+  let items list[int] = list[int]{}
+  print(addOne(items))
+  return 0
+}

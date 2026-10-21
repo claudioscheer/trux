@@ -1,0 +1,7 @@
+examples/errors/modules_cycle/b.tx:3:1: import cycle detected: examples/errors/modules_cycle/a.tx -> examples/errors/modules_cycle/b.tx -> examples/errors/modules_cycle/a.tx
+1 | package b
+2 | 
+3 | import "a.tx"
+  | ^
+4 | 
+5 | pub func two() int {

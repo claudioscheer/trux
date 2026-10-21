@@ -1,0 +1,11 @@
+package main
+
+func main() int {
+  let n int = 5
+  if n > 3 {
+    print("big")
+  } if n > 1 {
+    print("medium")
+  }
+  return 0
+}

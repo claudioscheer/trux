@@ -1,0 +1,7 @@
+examples/errors/memory_unknown_ownership.tx:9:10: cannot mutate collection with unknown ownership
+ 7 | func main() int {
+ 8 |   let ys list[int] = makeList()
+ 9 |   append(ys, 4)
+   |          ^
+10 |   print(len(ys))
+11 |   return 0

@@ -1,0 +1,7 @@
+examples/errors/operators_compare_collections.tx:6:9: operator "==" requires matching comparable operands, got [2]int and [2]int
+4 |   let a [2]int = [2]int{1, 2}
+5 |   let b [2]int = [2]int{1, 2}
+6 |   print(a == b)
+  |         ^
+7 |   return 0
+8 | }

@@ -1,0 +1,7 @@
+examples/errors/types_mixed_numbers.tx:4:20: operator "/" requires matching numeric operands, got int and float
+2 | 
+3 | func main() int {
+4 |   let half float = 1 / 2.0
+  |                    ^
+5 |   print(half)
+6 |   return 0

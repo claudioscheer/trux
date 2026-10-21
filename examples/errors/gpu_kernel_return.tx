@@ -1,0 +1,12 @@
+package main
+
+import "gpu"
+
+kernel func square(i int, out gpu.Buffer[int]) int {
+  out[i] = i * i
+  return 0
+}
+
+func main() int {
+  return 0
+}

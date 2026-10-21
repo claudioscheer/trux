@@ -1,0 +1,9 @@
+package main
+
+import "image"
+
+func main() int {
+  let pixels []int = make([]int, 5)
+  image.writePpm("tiny.ppm", pixels, 2, 1)
+  return 0
+}

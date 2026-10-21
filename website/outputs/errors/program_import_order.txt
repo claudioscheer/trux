@@ -1,0 +1,6 @@
+examples/errors/program_import_order.tx:8:1: imports must appear after package and before functions
+6 | }
+7 | 
+8 | import "io"
+  | ^
+9 | 

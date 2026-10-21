@@ -1,0 +1,7 @@
+examples/errors/program_missing_main.tx:3:1: missing main function
+1 | package main
+2 | 
+3 | func start() int {
+  | ^
+4 |   print("hello")
+5 |   return 0

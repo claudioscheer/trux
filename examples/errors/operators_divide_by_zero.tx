@@ -1,0 +1,10 @@
+package main
+
+func average(total int, count int) int {
+  return total / count
+}
+
+func main() int {
+  print(average(10, 0))
+  return 0
+}

@@ -1,0 +1,2 @@
+execute /tmp/trux-run-<id>/main: exit status 1
+trux runtime error: ppm pixel count 5 does not match 2x1x3

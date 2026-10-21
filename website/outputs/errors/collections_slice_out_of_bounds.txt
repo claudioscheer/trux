@@ -1,0 +1,2 @@
+execute /tmp/trux-run-<id>/main: exit status 1
+trux runtime error: slice 2:9 out of bounds for length 4

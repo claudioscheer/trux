@@ -1,0 +1,7 @@
+examples/errors/io_not_imported.tx:4:21: package "io" is not imported by examples/errors/io_not_imported.tx
+2 | 
+3 | func main() int {
+4 |   let name string = io.readLine()
+  |                     ^
+5 |   print(name)
+6 |   return 0

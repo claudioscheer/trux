@@ -1,0 +1,6 @@
+package main
+
+func start() int {
+  print("hello")
+  return 0
+}

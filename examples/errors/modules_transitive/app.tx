@@ -1,0 +1,7 @@
+package app
+
+import "text.tx"
+
+pub func greet() string {
+  return text.prefix() + "app"
+}

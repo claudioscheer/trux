@@ -1,0 +1,16 @@
+package main
+
+import "gpu"
+
+kernel func fill(row int, col int, out gpu.Buffer[int]) {
+  out[row * 4 + col] = 1
+}
+
+func main() int {
+  let host []int = make([]int, 16)
+  let device gpu.Buffer[int] = gpu.from(host)
+  gpu.launch2d(fill, 4, 4, device)
+  gpu.launch1d(fill, 4, 0, device)
+  gpu.free(device)
+  return 0
+}

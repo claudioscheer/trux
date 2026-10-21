@@ -1,0 +1,8 @@
+package main
+
+import "a.tx"
+
+func main() int {
+  print(a.one())
+  return 0
+}

@@ -1,0 +1,8 @@
+package main
+
+import "text.tx"
+
+func main() int {
+  print(text.shout("hi"))
+  return 0
+}

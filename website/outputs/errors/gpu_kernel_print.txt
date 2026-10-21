@@ -1,0 +1,7 @@
+examples/errors/gpu_kernel_print.tx:6:3: kernel cannot call "print"
+4 | 
+5 | kernel func fill(i int, out gpu.Buffer[int]) {
+6 |   print(i)
+  |   ^
+7 |   out[i] = i
+8 | }

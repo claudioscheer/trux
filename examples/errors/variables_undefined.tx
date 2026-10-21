@@ -1,0 +1,9 @@
+package main
+
+func main() int {
+  if true {
+    let inner int = 1
+  }
+  print(inner)
+  return 0
+}

@@ -1,0 +1,9 @@
+package main
+
+import "app.tx"
+
+func main() int {
+  print(app.greet())
+  print(text.prefix())
+  return 0
+}

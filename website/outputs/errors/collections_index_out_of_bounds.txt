@@ -1,0 +1,2 @@
+execute /tmp/trux-run-<id>/main: exit status 1
+trux runtime error: index 5 out of bounds for length 3

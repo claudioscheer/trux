@@ -1,0 +1,8 @@
+package main
+
+func main() int {
+  let a [2]int = [2]int{1, 2}
+  let b [2]int = [2]int{1, 2}
+  print(a == b)
+  return 0
+}

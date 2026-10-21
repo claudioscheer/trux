@@ -1,0 +1,10 @@
+package main
+
+func double(x int) int {
+  return x * 2
+}
+
+func main() int {
+  print(double(1.5))
+  return 0
+}

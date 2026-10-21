@@ -1,0 +1,8 @@
+package main
+
+func main() int {
+  let xs [4]int = [4]int{1, 2, 3, 4}
+  let end int = 9
+  print(len(xs[2:end]))
+  return 0
+}

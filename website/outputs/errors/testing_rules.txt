@@ -1,0 +1,10 @@
+FAIL examples/errors/testing_rules/math.test.tx
+0 passed, 1 failed
+failures:
+
+FAIL examples/errors/testing_rules/math.test.tx
+trace:
+  at examples/errors/testing_rules/math.test.tx
+error:
+examples/errors/testing_rules/math.test.tx:3:6: test function testAddition must not declare a return type
+1 test(s) failed

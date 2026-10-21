@@ -1,0 +1,7 @@
+examples/errors/functions_mut_scalar.tx:3:20: mut parameter "n" must be array, slice, or list, got int
+1 | package main
+2 | 
+3 | func increment(mut n int) int {
+  |                    ^
+4 |   n = n + 1
+5 |   return n

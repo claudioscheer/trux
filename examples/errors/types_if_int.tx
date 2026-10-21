@@ -1,0 +1,9 @@
+package main
+
+func main() int {
+  let count int = 3
+  if count {
+    print("non-zero")
+  }
+  return 0
+}

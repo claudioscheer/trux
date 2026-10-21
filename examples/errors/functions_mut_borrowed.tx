@@ -1,0 +1,17 @@
+package main
+
+func push(mut xs list[int]) int {
+  append(xs, 1)
+  return len(xs)
+}
+
+func pushTwice(xs list[int]) int {
+  push(xs)
+  return push(xs)
+}
+
+func main() int {
+  let items list[int] = list[int]{}
+  print(pushTwice(items))
+  return 0
+}

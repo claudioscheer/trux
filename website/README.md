@@ -27,9 +27,8 @@ More detail: [Working on the documentation site](https://claudioscheer.github.io
 ## Markdown for AI tools
 
 Every docs page is also published as Markdown next to its HTML, at `<page URL>index.md` (for example
-<https://claudioscheer.github.io/trux/docs/guide/types/index.md>). Each page has **Copy page as Markdown** and **View as
-Markdown** buttons, and its `<head>` links the Markdown with `rel="alternate" type="text/markdown"`. The site root also
-has [`llms.txt`](https://claudioscheer.github.io/trux/llms.txt) (an index of all pages) and
+<https://claudioscheer.github.io/trux/docs/guide/types/index.md>). Each page has a **Copy page as Markdown** button that
+copies it, and its `<head>` links it with `rel="alternate" type="text/markdown"`. The site root also has [`llms.txt`](https://claudioscheer.github.io/trux/llms.txt) (an index of all pages) and
 [`llms-full.txt`](https://claudioscheer.github.io/trux/llms-full.txt) (every page in one file).
 
 The Markdown is built from each page's source by `layouts/partials/page-markdown.md`, which inlines `include`d files

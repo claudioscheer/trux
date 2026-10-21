@@ -1,4 +1,4 @@
-{{- /* Copy of the Lotus Docs v0.3.0 partial, changed only so the Atom feed link keeps the /trux/ base path. */ -}}
+{{- /* Copy of the Lotus Docs v0.3.0 partial, changed only so the Atom feed link keeps the /trux/ base path, and to link each page's Markdown version. */ -}}
 <head>
     <meta charset="utf-8" />
     <title>
@@ -36,6 +36,10 @@
     <!-- Atom feed autodiscovery -->
     {{- with .Site.Title }}
         <link rel="alternate" type="application/atom+xml" title="Atom feed for {{ . }}" href="{{ "index.xml" | absURL }}" />
+    {{- end }}
+    <!-- Markdown version of this page (for AI tools) -->
+    {{- with .OutputFormats.Get "markdown" }}
+        <link rel="alternate" type="text/markdown" title="{{ $.Title }} (Markdown)" href="{{ .Permalink }}" />
     {{- end }}
     <!-- Dark Mode -->
     {{ if eq .Site.Params.docs.darkMode true -}}

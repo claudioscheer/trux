@@ -94,13 +94,13 @@ kernel func paint(row int, col int, out gpu.Buffer[int], width int) {
 
 ## Launching
 
-### 1D: `gpu.launch1d(kernel, n, args...)`
+### 1D: `gpu.launch1d(kernel, n, args...)` {#launch1d}
 
 The kernel's **first parameter** must be an `int`. It receives the element index, from `0` to `n - 1`. The remaining
 arguments are passed to the remaining parameters. Threads past `n` do nothing, so the kernel doesn't need its own bounds
 check. The launch uses 256-thread blocks.
 
-### 2D: `gpu.launch2d(kernel, width, height, args...)`
+### 2D: `gpu.launch2d(kernel, width, height, args...)` {#launch2d}
 
 The kernel's **first two parameters** must be `int`: they receive the **row** (`0` to `height - 1`) and the **column**
 (`0` to `width - 1`). The launch uses 16 x 16 blocks.

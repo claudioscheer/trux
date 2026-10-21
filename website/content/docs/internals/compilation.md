@@ -21,8 +21,7 @@ flowchart TD
     TOOL --> EXE["native executable"]
 ```
 
-## 1. Loading modules
-
+## 1. Loading modules {#loading-modules}
 `modules.Load` (in `internal/modules/loader.go`) starts at the entry file and reads every file it imports, transitively:
 
 - Relative `.tx` imports are resolved from the importing file's directory and canonicalized, so each file is loaded once.
@@ -32,21 +31,18 @@ flowchart TD
 
 Each file is lexed and parsed separately (steps 2 and 3), then merged (step 4).
 
-## 2. Lexing
-
+## 2. Lexing {#lexing}
 `internal/lexer` turns source text into tokens (`internal/token`): keywords, identifiers, integer and float literals,
 string literals (with escapes already decoded), operators, and punctuation. Whitespace and `//` comments are skipped.
 Every token records its file, line, and column, which is what makes error messages point at the right place.
 
-## 3. Parsing
-
+## 3. Parsing {#parsing}
 `internal/parser` is a hand-written recursive-descent parser. Statements are parsed by looking at the first token
 (`let`, `return`, `if`, `for`, `break`, `continue`, or else an expression/assignment), and binary expressions use
 precedence climbing with five levels (`||`, `&&`, comparisons and `in`, `+ -`, `* / %`). The result is an AST
 (`internal/ast`): a `Program` with a package name, imports, and function declarations.
 
-## 4. Merging into one program
-
+## 4. Merging into one program {#merging-into-one-program}
 Back in the loader, the parsed files are validated and merged:
 
 - calls are checked against visibility rules (`pub` vs package-private, direct imports only),
@@ -58,8 +54,7 @@ Back in the loader, the parsed files are validated and merged:
 This "name hygiene" trick lets the rest of the compiler work on one program, as if it had been written in one file. The
 trade-offs are discussed in [Modules design](/docs/design-notes/modules/).
 
-## 5. Type checking
-
+## 5. Type checking {#type-checking}
 `types.Check` (in `internal/types/types.go`) walks every function and:
 
 - assigns a type to every expression and checks every rule from the [language guide](/docs/guide/): exact type
@@ -75,8 +70,7 @@ trade-offs are discussed in [Modules design](/docs/design-notes/modules/).
 
 The result is an `Info` table that maps AST nodes to types, origins, and resolved calls.
 
-## 6. Typed IR
-
+## 6. Typed IR {#typed-ir}
 `ir.Build` (in `internal/ir/ir.go`) combines the AST with the `Info` table into a typed intermediate representation. In
 the IR:
 
@@ -88,8 +82,7 @@ the IR:
 
 The code generator only ever reads the IR, never the AST.
 
-## 7. Generating C
-
+## 7. Generating C {#generating-c}
 `internal/codegen/c` writes one C source file for the whole program.
 
 ### Types
@@ -157,8 +150,7 @@ Things to notice:
 - Standard library calls become calls to runtime helpers (`io.readLine()` → `rt_read_line`, `time.monotonicNanos()` →
   a monotonic clock helper, and so on).
 
-## 8. Calling the C compiler
-
+## 8. Calling the C compiler {#calling-the-c-compiler}
 `cmd/trux/compile.go` writes the generated file and the runtime headers into a temporary directory (or `out/<name>/` for
 `emit-c`) and runs:
 

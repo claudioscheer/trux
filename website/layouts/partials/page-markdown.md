@@ -38,6 +38,8 @@
 {{- $md = replaceRE `\{\{%\s*/tab\s*%\}\}` "" $md -}}
 {{- /* Escaped shortcode examples (written with the comment-style escape) show the shortcode literally. */ -}}
 {{- $md = replaceRE `\{\{<\s*/\*\s*(.*?)\s*\*/\s*>\}\}` "{{< $1 >}}" $md -}}
+{{- /* Explicit heading IDs ("## Title {#id}") are site markup, not content. */ -}}
+{{- $md = replaceRE `(?m)^(#{1,6} .*?)\s*\{#[\w-]+\}[ \t]*$` "$1" $md -}}
 {{- /* Site-relative links need the full URL outside the site. */ -}}
 {{- $md = replaceRE `\]\(/docs/` (printf "](%sdocs/" site.BaseURL) $md -}}
 {{- $md = replaceRE `\n{3,}` "\n\n" $md | strings.TrimSpace -}}

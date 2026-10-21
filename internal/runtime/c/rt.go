@@ -74,6 +74,17 @@ typedef struct {
     size_t len;
 } rt_string;
 
+typedef struct rt_error_data {
+    rt_string message;
+} rt_error_data;
+
+typedef rt_error_data* rt_error;
+
+typedef struct {
+    rt_string f0;
+    rt_error f1;
+} trux_tuple_string_error;
+
 typedef struct rt_arena_chunk {
     struct rt_arena_chunk* next;
     size_t cap;
@@ -100,6 +111,11 @@ typedef struct {
     size_t used;
     rt_list_allocation* lists;
 } rt_arena_mark;
+
+static RT_UNUSED rt_error rt_error_new(rt_arena* arena, rt_string message);
+static RT_UNUSED rt_string rt_error_message(rt_error err);
+static RT_UNUSED rt_error rt_error_clone(rt_arena* arena, rt_error err);
+static RT_UNUSED void rt_print_error(rt_error err);
 
 struct rt_context {
     rt_arena* arena;
@@ -778,21 +794,28 @@ static RT_UNUSED void rt_time_sleep_millis(int64_t millis) {
 #endif
 }
 
-static RT_UNUSED rt_string rt_read_file(rt_arena* arena, rt_string path) {
+static RT_UNUSED trux_tuple_string_error rt_read_file(rt_arena* arena, rt_string path) {
     char* c_path = rt_string_to_c_string(path, "file path");
     FILE* file = fopen(c_path, "rb");
     if (file == NULL) {
-        rt_file_fail("open file for reading", c_path);
+        free(c_path);
+        return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to open file for reading", 31)) };
     }
     if (fseek(file, 0, SEEK_END) != 0) {
-        rt_file_fail("seek file for reading", c_path);
+        fclose(file);
+        free(c_path);
+        return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to seek file", 19)) };
     }
     long file_size = ftell(file);
     if (file_size < 0) {
-        rt_file_fail("tell file size", c_path);
+        fclose(file);
+        free(c_path);
+        return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to tell file size", 24)) };
     }
     if (fseek(file, 0, SEEK_SET) != 0) {
-        rt_file_fail("rewind file for reading", c_path);
+        fclose(file);
+        free(c_path);
+        return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to rewind file", 21)) };
     }
 
     size_t size = (size_t)file_size;
@@ -800,28 +823,40 @@ static RT_UNUSED rt_string rt_read_file(rt_arena* arena, rt_string path) {
     if (size > 0) {
         data = (uint8_t*)rt_arena_alloc(arena, size);
         if (fread(data, 1, size, file) != size) {
-            rt_runtime_fail("read failed");
+            fclose(file);
+            free(c_path);
+            return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"read failed", 11)) };
         }
     }
     if (fclose(file) != 0) {
-        rt_file_fail("close file after reading", c_path);
+        free(c_path);
+        return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to close file", 20)) };
     }
     free(c_path);
-    return RT_LIT(rt_string, data, size);
+    return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, data, size), .f1 = NULL };
 }
 
-static RT_UNUSED void rt_write_file(rt_string path, rt_string contents) {
+static RT_UNUSED rt_error rt_write_file(rt_arena* arena, rt_string path, rt_string contents) {
     char* c_path = rt_string_to_c_string(path, "file path");
     FILE* file = fopen(c_path, "wb");
     if (file == NULL) {
-        rt_file_fail("open file for writing", c_path);
+        free(c_path);
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to open file for writing", 31));
     }
 
-    rt_file_write_string(file, contents);
+    if (contents.len > 0) {
+        if (fwrite(contents.data, 1, contents.len, file) != contents.len) {
+            fclose(file);
+            free(c_path);
+            return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to write file contents", 29));
+        }
+    }
     if (fclose(file) != 0) {
-        rt_file_fail("close file after writing", c_path);
+        free(c_path);
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to close file after writing", 34));
     }
     free(c_path);
+    return NULL;
 }
 
 static RT_UNUSED void rt_print_int(int64_t value) {
@@ -935,10 +970,43 @@ static RT_UNUSED bool rt_string_contains(rt_string needle, rt_string haystack) {
     return false;
 }
 
+static RT_UNUSED rt_error rt_error_new(rt_arena* arena, rt_string message) {
+    rt_error err = (rt_error)rt_arena_alloc(arena, sizeof(rt_error_data));
+    err->message = message;
+    return err;
+}
+
+static RT_UNUSED rt_string rt_error_message(rt_error err) {
+    if (err == NULL) {
+        return (rt_string){(const uint8_t*)"", 0};
+    }
+    return err->message;
+}
+
+static RT_UNUSED rt_error rt_error_clone(rt_arena* arena, rt_error err) {
+    if (err == NULL) {
+        return NULL;
+    }
+    rt_error copied = (rt_error)rt_arena_alloc(arena, sizeof(rt_error_data));
+    copied->message = rt_string_clone(arena, err->message);
+    return copied;
+}
+
+#define rt_clone_error(ARENA, VALUE) rt_error_clone((ARENA), (VALUE))
+
+static RT_UNUSED void rt_print_error(rt_error err) {
+    if (err == NULL) {
+        printf("<nil>");
+    } else {
+        rt_print_string(err->message);
+    }
+}
+
 #define RT_CLONE_VALUE_int(ARENA, VALUE) (VALUE)
 #define RT_CLONE_VALUE_float(ARENA, VALUE) (VALUE)
 #define RT_CLONE_VALUE_bool(ARENA, VALUE) (VALUE)
 #define RT_CLONE_VALUE_string(ARENA, VALUE) rt_string_clone((ARENA), (VALUE))
+#define RT_CLONE_VALUE_error(ARENA, VALUE) rt_error_clone((ARENA), (VALUE))
 
 #define RT_DEFINE_COLLECTIONS(NAME, CTYPE) \
 typedef struct { \
@@ -1104,6 +1172,16 @@ RT_DEFINE_COLLECTIONS(float, double)
 RT_DEFINE_COLLECTIONS(bool, bool)
 RT_DEFINE_COLLECTIONS(string, rt_string)
 
+typedef struct {
+    rt_list_string* f0;
+    rt_error f1;
+} trux_tuple_list_string_error;
+
+typedef struct {
+    rt_slice_int f0;
+    rt_error f1;
+} trux_tuple_slice_int_error;
+
 #ifdef TRUX_RUNTIME_CUDA
 typedef struct { int64_t* data; size_t len; } rt_gpu_buffer_int;
 typedef struct { double* data; size_t len; } rt_gpu_buffer_float;
@@ -1184,45 +1262,79 @@ static RT_UNUSED void rt_ppm_skip_space_and_comments(rt_string contents, size_t*
     }
 }
 
-static RT_UNUSED int64_t rt_ppm_read_int_token(rt_string contents, size_t* index, const char* what) {
+static RT_UNUSED bool rt_ppm_try_read_int_token(rt_string contents, size_t* index, int64_t* out_value) {
     rt_ppm_skip_space_and_comments(contents, index);
     if (*index >= contents.len || !isdigit((unsigned char)contents.data[*index])) {
-        fprintf(stderr, "trux runtime error: expected ppm %s\n", what);
-        exit(1);
+        return false;
     }
 
     int64_t value = 0;
     while (*index < contents.len && isdigit((unsigned char)contents.data[*index])) {
         int digit = contents.data[*index] - '0';
         if (value > (INT64_MAX - digit) / 10) {
-            rt_runtime_fail("ppm integer overflow");
+            return false;
         }
         value = value * 10 + digit;
         (*index)++;
     }
+    *out_value = value;
+    return true;
+}
+
+static RT_UNUSED int64_t rt_ppm_read_int_token(rt_string contents, size_t* index, const char* what) {
+    int64_t value = 0;
+    if (!rt_ppm_try_read_int_token(contents, index, &value)) {
+        fprintf(stderr, "trux runtime error: expected ppm %s\n", what);
+        exit(1);
+    }
     return value;
 }
 
-static RT_UNUSED rt_ppm_header rt_ppm_read_header(rt_string contents) {
+static RT_UNUSED bool rt_ppm_try_read_header(rt_arena* arena, rt_string contents, rt_ppm_header* out_header, rt_error* out_err) {
     rt_check_string(contents);
     size_t index = 0;
     rt_ppm_skip_space_and_comments(contents, &index);
     if (index + 2 > contents.len || contents.data[index] != 'P' || contents.data[index + 1] != '3') {
-        rt_runtime_fail("expected P3 ppm image");
+        *out_err = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"expected P3 ppm image", 21));
+        return false;
     }
     index += 2;
 
-    int64_t width = rt_ppm_read_int_token(contents, &index, "width");
-    int64_t height = rt_ppm_read_int_token(contents, &index, "height");
-    int64_t max_value = rt_ppm_read_int_token(contents, &index, "max value");
+    int64_t width = 0;
+    int64_t height = 0;
+    int64_t max_value = 0;
+    if (!rt_ppm_try_read_int_token(contents, &index, &width) ||
+        !rt_ppm_try_read_int_token(contents, &index, &height) ||
+        !rt_ppm_try_read_int_token(contents, &index, &max_value)) {
+        *out_err = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"invalid ppm header", 18));
+        return false;
+    }
     if (width <= 0 || height <= 0) {
-        rt_runtime_fail("ppm width and height must be positive");
+        *out_err = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm width and height must be positive", 37));
+        return false;
     }
     if (max_value != 255) {
-        rt_runtime_fail("only 8-bit P3 ppm images with max value 255 are supported");
+        *out_err = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"only 8-bit P3 ppm images with max value 255 are supported", 57));
+        return false;
     }
     rt_ppm_skip_space_and_comments(contents, &index);
-    return RT_LIT(rt_ppm_header, width, height, max_value, index);
+    *out_header = RT_LIT(rt_ppm_header, width, height, max_value, index);
+    return true;
+}
+
+static RT_UNUSED rt_ppm_header rt_ppm_read_header(rt_string contents) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+    rt_ppm_header header;
+    rt_error err = NULL;
+    if (!rt_ppm_try_read_header(&arena, contents, &header, &err)) {
+        char* c_msg = rt_string_to_c_string(err->message, "ppm error");
+        rt_arena_deinit(&arena);
+        fprintf(stderr, "trux runtime error: %s\n", c_msg);
+        exit(1);
+    }
+    rt_arena_deinit(&arena);
+    return header;
 }
 
 static RT_UNUSED size_t rt_ppm_pixel_count(rt_ppm_header header) {
@@ -1235,7 +1347,11 @@ static RT_UNUSED size_t rt_ppm_pixel_count(rt_ppm_header header) {
 static RT_UNUSED int64_t rt_image_width(rt_string path) {
     rt_arena arena;
     rt_arena_init(&arena);
-    rt_ppm_header header = rt_ppm_read_header(rt_read_file(&arena, path));
+    trux_tuple_string_error res = rt_read_file(&arena, path);
+    if (res.f1 != NULL) {
+        rt_runtime_fail("failed to read ppm image file");
+    }
+    rt_ppm_header header = rt_ppm_read_header(res.f0);
     int64_t width = header.width;
     rt_arena_deinit(&arena);
     return width;
@@ -1244,63 +1360,90 @@ static RT_UNUSED int64_t rt_image_width(rt_string path) {
 static RT_UNUSED int64_t rt_image_height(rt_string path) {
     rt_arena arena;
     rt_arena_init(&arena);
-    rt_ppm_header header = rt_ppm_read_header(rt_read_file(&arena, path));
+    trux_tuple_string_error res = rt_read_file(&arena, path);
+    if (res.f1 != NULL) {
+        rt_runtime_fail("failed to read ppm image file");
+    }
+    rt_ppm_header header = rt_ppm_read_header(res.f0);
     int64_t height = header.height;
     rt_arena_deinit(&arena);
     return height;
 }
 
-static RT_UNUSED rt_slice_int rt_read_ppm(rt_arena* arena, rt_string path) {
-    rt_string contents = rt_read_file(arena, path);
-    rt_ppm_header header = rt_ppm_read_header(contents);
+static RT_UNUSED trux_tuple_slice_int_error rt_read_ppm(rt_arena* arena, rt_string path) {
+    trux_tuple_string_error res = rt_read_file(arena, path);
+    if (res.f1 != NULL) {
+        return (trux_tuple_slice_int_error){ .f0 = rt_make_slice_int(arena, 0), .f1 = res.f1 };
+    }
+    rt_string contents = res.f0;
+    rt_ppm_header header;
+    rt_error header_err = NULL;
+    if (!rt_ppm_try_read_header(arena, contents, &header, &header_err)) {
+        return (trux_tuple_slice_int_error){ .f0 = rt_make_slice_int(arena, 0), .f1 = header_err };
+    }
     size_t count = rt_ppm_pixel_count(header);
     if (count > (size_t)INT64_MAX) {
-        rt_runtime_fail("ppm image too large");
+        return (trux_tuple_slice_int_error){ .f0 = rt_make_slice_int(arena, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm image too large", 19)) };
     }
 
     rt_slice_int pixels = rt_make_slice_int(arena, (int64_t)count);
     size_t index = header.pixel_start;
     for (size_t i = 0; i < count; i++) {
-        int64_t value = rt_ppm_read_int_token(contents, &index, "pixel value");
+        int64_t value = 0;
+        if (!rt_ppm_try_read_int_token(contents, &index, &value)) {
+            return (trux_tuple_slice_int_error){ .f0 = pixels, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"expected ppm pixel value", 24)) };
+        }
         if (value < 0 || value > 255) {
-            rt_runtime_fail("ppm pixel value must be between 0 and 255");
+            return (trux_tuple_slice_int_error){ .f0 = pixels, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm pixel value must be between 0 and 255", 41)) };
         }
         pixels.data[i] = value;
     }
 
     rt_ppm_skip_space_and_comments(contents, &index);
     if (index < contents.len) {
-        rt_runtime_fail("unexpected trailing data in ppm image");
+        return (trux_tuple_slice_int_error){ .f0 = pixels, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"unexpected trailing data in ppm image", 37)) };
     }
-    return pixels;
+    return (trux_tuple_slice_int_error){ .f0 = pixels, .f1 = NULL };
 }
 
-static RT_UNUSED void rt_write_ppm(rt_string path, rt_slice_int pixels, int64_t width_value, int64_t height_value) {
-    size_t width = rt_checked_positive_count(width_value, "ppm width");
-    size_t height = rt_checked_positive_count(height_value, "ppm height");
-    size_t expected = rt_checked_bytes(rt_checked_bytes(width, height), 3);
+static RT_UNUSED rt_error rt_write_ppm(rt_arena* arena, rt_string path, rt_slice_int pixels, int64_t width_value, int64_t height_value) {
+    if (width_value <= 0 || height_value <= 0) {
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm dimensions must be positive", 31));
+    }
+    size_t width = (size_t)width_value;
+    size_t height = (size_t)height_value;
+    if (width > SIZE_MAX / height || width * height > SIZE_MAX / 3) {
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm image dimensions overflow", 29));
+    }
+    size_t expected = width * height * 3;
     rt_check_array_like(pixels.data, pixels.len, "ppm pixels");
     if (pixels.len != expected) {
-        fprintf(stderr, "trux runtime error: ppm pixel count %zu does not match %zux%zux3\n", pixels.len, width, height);
-        exit(1);
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm pixel count does not match dimensions", 41));
     }
 
     char* c_path = rt_string_to_c_string(path, "file path");
     FILE* file = fopen(c_path, "wb");
     if (file == NULL) {
-        rt_file_fail("open ppm for writing", c_path);
+        free(c_path);
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to open ppm for writing", 30));
     }
     if (fprintf(file, "P3\n%zu %zu\n255\n", width, height) < 0) {
-        rt_runtime_fail("write failed");
+        fclose(file);
+        free(c_path);
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"write failed", 12));
     }
 
     for (size_t i = 0; i < pixels.len; i++) {
         int64_t value = pixels.data[i];
         if (value < 0 || value > 255) {
-            rt_runtime_fail("ppm pixel value must be between 0 and 255");
+            fclose(file);
+            free(c_path);
+            return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm pixel value must be between 0 and 255", 41));
         }
         if (fprintf(file, "%" PRId64, value) < 0) {
-            rt_runtime_fail("write failed");
+            fclose(file);
+            free(c_path);
+            return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"write failed", 12));
         }
         if ((i + 1) % 12 == 0 || i + 1 == pixels.len) {
             rt_file_write_byte(file, '\n');
@@ -1310,9 +1453,11 @@ static RT_UNUSED void rt_write_ppm(rt_string path, rt_slice_int pixels, int64_t 
     }
 
     if (fclose(file) != 0) {
-        rt_file_fail("close ppm after writing", c_path);
+        free(c_path);
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"close ppm after writing failed", 30));
     }
     free(c_path);
+    return NULL;
 }
 
 static RT_UNUSED bool rt_csv_is_newline(uint8_t ch) {
@@ -1340,12 +1485,19 @@ static RT_UNUSED rt_string rt_csv_finish_cell(rt_arena* arena, rt_byte_buffer* f
     return cell;
 }
 
-static RT_UNUSED rt_list_string* rt_read_csv(rt_arena* arena, rt_string path, int64_t columns_value) {
-    size_t columns = rt_checked_positive_count(columns_value, "csv columns");
-    rt_string contents = rt_read_file(arena, path);
+static RT_UNUSED trux_tuple_list_string_error rt_read_csv(rt_arena* arena, rt_string path, int64_t columns_value) {
+    if (columns_value <= 0) {
+        return (trux_tuple_list_string_error){ .f0 = rt_list_string_new(arena, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv columns must be positive", 28)) };
+    }
+    size_t columns = (size_t)columns_value;
+    trux_tuple_string_error file_res = rt_read_file(arena, path);
+    if (file_res.f1 != NULL) {
+        return (trux_tuple_list_string_error){ .f0 = rt_list_string_new(arena, 0), .f1 = file_res.f1 };
+    }
+    rt_string contents = file_res.f0;
     rt_list_string* cells = rt_list_string_new(arena, 0);
     if (contents.len == 0) {
-        return cells;
+        return (trux_tuple_list_string_error){ .f0 = cells, .f1 = NULL };
     }
 
     size_t index = 0;
@@ -1376,15 +1528,15 @@ static RT_UNUSED rt_list_string* rt_read_csv(rt_arena* arena, rt_string path, in
                 break;
             }
             if (!closed) {
-                rt_runtime_fail("unterminated csv quoted field");
+                return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"unterminated csv quoted field", 29)) };
             }
             if (index < contents.len && contents.data[index] != ',' && !rt_csv_is_newline(contents.data[index])) {
-                rt_runtime_fail("expected csv delimiter after quoted field");
+                return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"expected csv delimiter after quoted field", 41)) };
             }
         } else {
             while (index < contents.len && contents.data[index] != ',' && !rt_csv_is_newline(contents.data[index])) {
                 if (contents.data[index] == '"') {
-                    rt_runtime_fail("unexpected quote in csv field");
+                    return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"unexpected quote in csv field", 29)) };
                 }
                 rt_byte_buffer_append_byte(&field, contents.data[index]);
                 index++;
@@ -1395,7 +1547,9 @@ static RT_UNUSED rt_list_string* rt_read_csv(rt_arena* arena, rt_string path, in
         row_columns++;
 
         if (index >= contents.len) {
-            rt_csv_check_row_columns(row_columns, columns);
+            if (row_columns != columns) {
+                return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv row column count mismatch", 29)) };
+            }
             break;
         }
         if (contents.data[index] == ',') {
@@ -1407,15 +1561,17 @@ static RT_UNUSED rt_list_string* rt_read_csv(rt_arena* arena, rt_string path, in
         }
         if (rt_csv_is_newline(contents.data[index])) {
             rt_csv_consume_newline(contents, &index);
-            rt_csv_check_row_columns(row_columns, columns);
+            if (row_columns != columns) {
+                return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv row column count mismatch", 29)) };
+            }
             row_columns = 0;
             continue;
         }
 
-        rt_runtime_fail("invalid csv parser state");
+        return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"invalid csv parser state", 24)) };
     }
 
-    return cells;
+    return (trux_tuple_list_string_error){ .f0 = cells, .f1 = NULL };
 }
 
 static RT_UNUSED bool rt_csv_cell_needs_quotes(rt_string cell) {
@@ -1445,18 +1601,21 @@ static RT_UNUSED void rt_csv_write_cell(FILE* file, rt_string cell) {
     rt_file_write_byte(file, '"');
 }
 
-static RT_UNUSED void rt_write_csv(rt_string path, rt_list_string* cells, int64_t columns_value) {
-    size_t columns = rt_checked_positive_count(columns_value, "csv columns");
+static RT_UNUSED rt_error rt_write_csv(rt_arena* arena, rt_string path, rt_list_string* cells, int64_t columns_value) {
+    if (columns_value <= 0) {
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv columns must be positive", 28));
+    }
+    size_t columns = (size_t)columns_value;
     rt_check_array_like(cells->data, cells->len, "csv cells");
     if (cells->len % columns != 0) {
-        fprintf(stderr, "trux runtime error: csv cell count %zu is not divisible by columns %zu\n", cells->len, columns);
-        exit(1);
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv cell count is not divisible by columns", 42));
     }
 
     char* c_path = rt_string_to_c_string(path, "file path");
     FILE* file = fopen(c_path, "wb");
     if (file == NULL) {
-        rt_file_fail("open csv for writing", c_path);
+        free(c_path);
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to open csv for writing", 30));
     }
 
     for (size_t i = 0; i < cells->len; i++) {
@@ -1470,9 +1629,11 @@ static RT_UNUSED void rt_write_csv(rt_string path, rt_list_string* cells, int64_
     }
 
     if (fclose(file) != 0) {
-        rt_file_fail("close csv after writing", c_path);
+        free(c_path);
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to close csv after writing", 33));
     }
     free(c_path);
+    return NULL;
 }
 
 #endif

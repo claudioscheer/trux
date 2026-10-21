@@ -175,9 +175,9 @@ import "csv"
 
 func main() int {
     let line string = io.readLine()
-    let cells list[string] = csv.read("input.csv", 2)
-    io.writeFile("out.txt", line)
-    csv.write("out.csv", cells, 2)
+    let cells list[string], err1 error = csv.read("input.csv", 2)
+    let err2 error = io.writeFile("out.txt", line)
+    let err3 error = csv.write("out.csv", cells, 2)
     return 0
 }
 `
@@ -1927,7 +1927,7 @@ func main() int {
 	}
 
 	hover := result.(Hover)
-	if hover.Contents.Value != "`csv.read(path string, columns int) list[string]`" {
+	if hover.Contents.Value != "`csv.read(path string, columns int) (list[string], error)`" {
 		t.Fatalf("hover = %#v, want standard library function signature", hover)
 	}
 	assertRange(t, hover.Range, positionOfAfter(t, src, "csv.", "read"), "read")

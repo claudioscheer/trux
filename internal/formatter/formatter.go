@@ -436,7 +436,7 @@ func isOperator(typ token.Type) bool {
 
 func isTypeToken(typ token.Type) bool {
 	switch typ {
-	case token.IntType, token.FloatType, token.StringType, token.BoolType:
+	case token.IntType, token.FloatType, token.StringType, token.BoolType, token.ErrorType:
 		return true
 	default:
 		return false

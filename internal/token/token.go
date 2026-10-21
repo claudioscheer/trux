@@ -28,6 +28,8 @@ const (
 	FloatType  Type = "FLOAT_TYPE"
 	StringType Type = "STRING_TYPE"
 	BoolType   Type = "BOOL_TYPE"
+	ErrorType  Type = "ERROR_TYPE"
+	Nil        Type = "NIL"
 	True       Type = "TRUE"
 	False      Type = "FALSE"
 	In         Type = "IN"
@@ -93,6 +95,8 @@ var keywords = map[string]Type{
 	"float":    FloatType,
 	"string":   StringType,
 	"bool":     BoolType,
+	"error":    ErrorType,
+	"nil":      Nil,
 	"true":     True,
 	"false":    False,
 	"in":       In,

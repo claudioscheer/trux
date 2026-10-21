@@ -730,13 +730,17 @@ import "io"
 import "csv"
 
 func main() int {
-    let text string = io.readFile(`+truxString(inputPath)+`)
-    io.writeFile(`+truxString(copyPath)+`, text + "!")
+    let text string, err1 error = io.readFile(`+truxString(inputPath)+`)
+    assert(err1 == nil, "read input.txt")
+    let err2 error = io.writeFile(`+truxString(copyPath)+`, text + "!")
+    assert(err2 == nil, "write copy.txt")
 
-    let cells list[string] = csv.read(`+truxString(csvPath)+`, 2)
+    let cells list[string], err3 error = csv.read(`+truxString(csvPath)+`, 2)
+    assert(err3 == nil, "read csv")
     append(cells, "Cara")
     append(cells, "3")
-    csv.write(`+truxString(outCSVPath)+`, cells, 2)
+    let err4 error = csv.write(`+truxString(outCSVPath)+`, cells, 2)
+    assert(err4 == nil, "write csv")
 
     print(text)
     print(len(cells), " ", cells[2])
@@ -757,6 +761,107 @@ func main() int {
 	}
 	if got := readFile(t, outCSVPath); got != "name,score\n\"A, B\",2\nCara,3\n" {
 		t.Fatalf("written csv = %q, want appended csv", got)
+	}
+}
+
+func TestRunFileCompilesAndExecutesMultiReturnAndErrors(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+import "errors"
+import "io"
+
+func divmod(a int, b int) (int, int) {
+    return a / b, a % b
+}
+
+func forwardDivmod(a int, b int) (int, int) {
+    return divmod(a, b)
+}
+
+func makeMessage(id int) (string, error) {
+    return "message " + "from id", nil
+}
+
+func forwardMessage(id int) (string, error) {
+    return makeMessage(id)
+}
+
+func parsePositive(n int) (int, error) {
+    if n < 0 {
+        return 0, errors.new("negative number")
+    }
+    return n, nil
+}
+
+func main() int {
+    let q int, r int = divmod(14, 3)
+    print(q, " ", r)
+
+    let _, rem int = divmod(14, 3)
+    print("rem=", rem)
+
+    let quot int, _ int = divmod(14, 3)
+    print("quot=", quot)
+
+    q, r = forwardDivmod(20, 6)
+    print("forward: ", q, " ", r)
+
+    let msg string, msgErr error = forwardMessage(42)
+    assert(msgErr == nil, "forwardMessage error")
+    print(msg)
+
+    _, r = divmod(25, 4)
+    print("r=", r)
+
+    let val int, err error = parsePositive(10)
+    if err != nil {
+        print("error: ", errors.message(err))
+    } else {
+        print("ok ", val)
+    }
+
+    val, err = parsePositive(-5)
+    if err != nil {
+        print("error: ", errors.message(err))
+        print(err)
+    }
+
+    let nilErr error = nil
+    print(nilErr)
+    if nilErr == nil {
+        print("nilErr is nil")
+    }
+
+    let _, ioErr error = io.readFile("non_existent_file_path_12345.xyz")
+    if ioErr != nil {
+        print("caught io error: ", errors.message(ioErr))
+    }
+
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "4 2\n" +
+		"rem=2\n" +
+		"quot=4\n" +
+		"forward: 3 2\n" +
+		"message from id\n" +
+		"r=1\n" +
+		"ok 10\n" +
+		"error: negative number\n" +
+		"negative number\n" +
+		"<nil>\n" +
+		"nilErr is nil\n" +
+		"caught io error: failed to open file for reading\n"
+
+	if out.String() != want {
+		t.Fatalf("output =\n%q\nwant:\n%q", out.String(), want)
 	}
 }
 

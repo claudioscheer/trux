@@ -7,8 +7,8 @@ import "image"
 
 image.width(path string) int
 image.height(path string) int
-image.readPpm(path string) []int
-image.writePpm(path string, pixels []int, width int, height int)
+image.readPpm(path string) ([]int, error)
+image.writePpm(path string, pixels []int, width int, height int) error
 ```
 
 `image.readPpm` reads a P3 PPM file and returns flat RGB channel values:

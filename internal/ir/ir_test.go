@@ -385,10 +385,10 @@ import "csv"
 func main() int {
     let line string = io.readLine()
     let count int = io.readInt()
-    let text string = io.readFile("input.txt")
-    io.writeFile("out.txt", text + line)
-    let cells list[string] = csv.read("in.csv", 2)
-    csv.write("out.csv", cells, 2)
+    let text string, err1 error = io.readFile("input.txt")
+    let err2 error = io.writeFile("out.txt", text + line)
+    let cells list[string], err3 error = csv.read("in.csv", 2)
+    let err4 error = csv.write("out.csv", cells, 2)
     print(line, " ", count, " ", len(cells))
     return 0
 }`)
@@ -412,18 +412,19 @@ func main() int {
 	if _, ok := mainFn.Body[2].(*LetStmt).Value.(*ReadFileExpr); !ok {
 		t.Fatalf("text let value = %T, want ReadFileExpr", mainFn.Body[2].(*LetStmt).Value)
 	}
-	if _, ok := mainFn.Body[3].(*WriteFileStmt); !ok {
-		t.Fatalf("fourth statement = %T, want WriteFileStmt", mainFn.Body[3])
+	if _, ok := mainFn.Body[3].(*LetStmt).Value.(*WriteFileExpr); !ok {
+		t.Fatalf("fourth statement = %T, want WriteFileExpr", mainFn.Body[3].(*LetStmt).Value)
 	}
 	readCsv := mainFn.Body[4].(*LetStmt).Value
-	if !ast.TypeEqual(readCsv.Type(), &ast.ListType{Elem: ast.StringType}) {
-		t.Fatalf("readCsv type = %s, want list[string]", readCsv.Type())
+	wantCsvType := &ast.TupleType{Types: []ast.Type{&ast.ListType{Elem: ast.StringType}, ast.ErrorType}}
+	if !ast.TypeEqual(readCsv.Type(), wantCsvType) {
+		t.Fatalf("readCsv type = %s, want (list[string], error)", readCsv.Type())
 	}
 	if _, ok := readCsv.(*ReadCSVExpr); !ok {
 		t.Fatalf("cells let value = %T, want ReadCSVExpr", readCsv)
 	}
-	if _, ok := mainFn.Body[5].(*WriteCSVStmt); !ok {
-		t.Fatalf("sixth statement = %T, want WriteCSVStmt", mainFn.Body[5])
+	if _, ok := mainFn.Body[5].(*LetStmt).Value.(*WriteCSVExpr); !ok {
+		t.Fatalf("sixth statement = %T, want WriteCSVExpr", mainFn.Body[5].(*LetStmt).Value)
 	}
 }
 
@@ -434,8 +435,8 @@ import "image"
 func main() int {
     let width int = image.width("in.ppm")
     let height int = image.height("in.ppm")
-    let pixels []int = image.readPpm("in.ppm")
-    image.writePpm("out.ppm", pixels, width, height)
+    let pixels []int, err1 error = image.readPpm("in.ppm")
+    let err2 error = image.writePpm("out.ppm", pixels, width, height)
     return 0
 }`)
 	info, err := semtypes.Check(program)
@@ -456,14 +457,15 @@ func main() int {
 		t.Fatalf("height let value = %T, want ImageDimensionExpr", mainFn.Body[1].(*LetStmt).Value)
 	}
 	readPPM := mainFn.Body[2].(*LetStmt).Value
-	if !ast.TypeEqual(readPPM.Type(), &ast.SliceType{Elem: ast.IntType}) {
-		t.Fatalf("readPpm type = %s, want []int", readPPM.Type())
+	wantPpmType := &ast.TupleType{Types: []ast.Type{&ast.SliceType{Elem: ast.IntType}, ast.ErrorType}}
+	if !ast.TypeEqual(readPPM.Type(), wantPpmType) {
+		t.Fatalf("readPpm type = %s, want ([]int, error)", readPPM.Type())
 	}
 	if _, ok := readPPM.(*ReadPPMExpr); !ok {
 		t.Fatalf("pixels let value = %T, want ReadPPMExpr", readPPM)
 	}
-	if _, ok := mainFn.Body[3].(*WritePPMStmt); !ok {
-		t.Fatalf("fourth statement = %T, want WritePPMStmt", mainFn.Body[3])
+	if _, ok := mainFn.Body[3].(*LetStmt).Value.(*WritePPMExpr); !ok {
+		t.Fatalf("fourth statement = %T, want WritePPMExpr", mainFn.Body[3].(*LetStmt).Value)
 	}
 }
 

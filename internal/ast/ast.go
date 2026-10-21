@@ -2,6 +2,7 @@ package ast
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/claudioscheer/trux/internal/token"
 )
@@ -47,6 +48,7 @@ const (
 	FloatType  ScalarType = "float"
 	StringType ScalarType = "string"
 	BoolType   ScalarType = "bool"
+	ErrorType  ScalarType = "error"
 )
 
 func (t ScalarType) String() string { return string(t) }
@@ -94,6 +96,20 @@ func (t *GPUBufferType) String() string {
 
 func (*GPUBufferType) typeNode() {}
 
+type TupleType struct {
+	Types []Type
+}
+
+func (t *TupleType) String() string {
+	parts := make([]string, len(t.Types))
+	for i, typ := range t.Types {
+		parts[i] = typ.String()
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+func (*TupleType) typeNode() {}
+
 func TypeEqual(left Type, right Type) bool {
 	switch left := left.(type) {
 	case ScalarType:
@@ -111,6 +127,17 @@ func TypeEqual(left Type, right Type) bool {
 	case *GPUBufferType:
 		right, ok := right.(*GPUBufferType)
 		return ok && TypeEqual(left.Elem, right.Elem)
+	case *TupleType:
+		right, ok := right.(*TupleType)
+		if !ok || len(left.Types) != len(right.Types) {
+			return false
+		}
+		for i := range left.Types {
+			if !TypeEqual(left.Types[i], right.Types[i]) {
+				return false
+			}
+		}
+		return true
 	default:
 		return left == nil && right == nil
 	}
@@ -140,12 +167,19 @@ type Statement interface {
 	statementNode()
 }
 
+type LetBinding struct {
+	Pos  token.Position
+	Name string
+	Type Type
+}
+
 type LetStmt struct {
-	Start   token.Position
-	NamePos token.Position
-	Name    string
-	Type    Type
-	Value   Expression
+	Start    token.Position
+	NamePos  token.Position
+	Name     string
+	Type     Type
+	Bindings []LetBinding
+	Value    Expression
 }
 
 func (s *LetStmt) Pos() token.Position { return s.Start }
@@ -153,8 +187,9 @@ func (s *LetStmt) Pos() token.Position { return s.Start }
 func (*LetStmt) statementNode() {}
 
 type ReturnStmt struct {
-	Start token.Position
-	Value Expression
+	Start  token.Position
+	Value  Expression
+	Values []Expression
 }
 
 func (s *ReturnStmt) Pos() token.Position { return s.Start }
@@ -177,10 +212,16 @@ func (s *ContinueStmt) Pos() token.Position { return s.Start }
 
 func (*ContinueStmt) statementNode() {}
 
+type AssignTarget struct {
+	Pos  token.Position
+	Name string
+}
+
 type AssignStmt struct {
-	Start token.Position
-	Name  string
-	Value Expression
+	Start   token.Position
+	Name    string
+	Targets []AssignTarget
+	Value   Expression
 }
 
 func (s *AssignStmt) Pos() token.Position { return s.Start }
@@ -277,6 +318,14 @@ type BoolLiteral struct {
 func (e *BoolLiteral) Pos() token.Position { return e.Start }
 
 func (*BoolLiteral) expressionNode() {}
+
+type NilLiteral struct {
+	Start token.Position
+}
+
+func (e *NilLiteral) Pos() token.Position { return e.Start }
+
+func (*NilLiteral) expressionNode() {}
 
 type ArrayLiteral struct {
 	Start    token.Position

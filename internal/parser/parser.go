@@ -261,6 +261,27 @@ func (p *Parser) parseType() (ast.Type, error) {
 		return ast.StringType, nil
 	case p.match(token.BoolType):
 		return ast.BoolType, nil
+	case p.match(token.ErrorType):
+		return ast.ErrorType, nil
+	case p.match(token.LParen):
+		var types []ast.Type
+		for !p.check(token.RParen) && !p.check(token.EOF) {
+			elem, err := p.parseType()
+			if err != nil {
+				return nil, err
+			}
+			types = append(types, elem)
+			if !p.match(token.Comma) {
+				break
+			}
+		}
+		if _, err := p.expect(token.RParen); err != nil {
+			return nil, err
+		}
+		if len(types) == 1 {
+			return types[0], nil
+		}
+		return &ast.TupleType{Types: types}, nil
 	default:
 		tok := p.current()
 		return nil, p.errorf(tok, "expected type, got %s", describe(tok))
@@ -332,14 +353,32 @@ func (p *Parser) parseLetStmt() (ast.Statement, error) {
 		return nil, err
 	}
 
-	name, err := p.expect(token.Ident)
-	if err != nil {
-		return nil, err
-	}
+	var bindings []ast.LetBinding
+	for {
+		name, err := p.expect(token.Ident)
+		if err != nil {
+			return nil, err
+		}
 
-	typ, err := p.parseType()
-	if err != nil {
-		return nil, err
+		var typ ast.Type
+		if name.Lexeme == "_" && (p.check(token.Comma) || p.check(token.Assign)) {
+			typ = nil
+		} else {
+			typ, err = p.parseType()
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		bindings = append(bindings, ast.LetBinding{
+			Pos:  name.Pos,
+			Name: name.Lexeme,
+			Type: typ,
+		})
+
+		if !p.match(token.Comma) {
+			break
+		}
 	}
 
 	if _, err := p.expect(token.Assign); err != nil {
@@ -351,7 +390,15 @@ func (p *Parser) parseLetStmt() (ast.Statement, error) {
 		return nil, err
 	}
 
-	return &ast.LetStmt{Start: start.Pos, NamePos: name.Pos, Name: name.Lexeme, Type: typ, Value: value}, nil
+	first := bindings[0]
+	return &ast.LetStmt{
+		Start:    start.Pos,
+		NamePos:  first.Pos,
+		Name:     first.Name,
+		Type:     first.Type,
+		Bindings: bindings,
+		Value:    value,
+	}, nil
 }
 
 func (p *Parser) parseReturnStmt() (ast.Statement, error) {
@@ -360,12 +407,26 @@ func (p *Parser) parseReturnStmt() (ast.Statement, error) {
 		return nil, err
 	}
 
-	value, err := p.parseExpression(0)
-	if err != nil {
-		return nil, err
+	var values []ast.Expression
+	if !p.check(token.RBrace) && !p.check(token.EOF) {
+		for {
+			val, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, val)
+			if !p.match(token.Comma) {
+				break
+			}
+		}
 	}
 
-	return &ast.ReturnStmt{Start: start.Pos, Value: value}, nil
+	var first ast.Expression
+	if len(values) > 0 {
+		first = values[0]
+	}
+
+	return &ast.ReturnStmt{Start: start.Pos, Value: first, Values: values}, nil
 }
 
 func (p *Parser) parseIfStmt() (ast.Statement, error) {
@@ -535,6 +596,34 @@ func (p *Parser) parseAssignOrExprStmt() (ast.Statement, error) {
 		return nil, err
 	}
 
+	if p.check(token.Comma) {
+		firstIdent, ok := expr.(*ast.IdentExpr)
+		if !ok {
+			return nil, p.errorf(token.Token{Pos: expr.Pos()}, "invalid multi-assignment target")
+		}
+		targets := []ast.AssignTarget{{Pos: firstIdent.Start, Name: firstIdent.Name}}
+		for p.match(token.Comma) {
+			tok, err := p.expect(token.Ident)
+			if err != nil {
+				return nil, err
+			}
+			targets = append(targets, ast.AssignTarget{Pos: tok.Pos, Name: tok.Lexeme})
+		}
+		if _, err := p.expect(token.Assign); err != nil {
+			return nil, err
+		}
+		value, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.AssignStmt{
+			Start:   firstIdent.Start,
+			Name:    firstIdent.Name,
+			Targets: targets,
+			Value:   value,
+		}, nil
+	}
+
 	if p.match(token.Assign) {
 		value, err := p.parseExpression(0)
 		if err != nil {
@@ -543,7 +632,12 @@ func (p *Parser) parseAssignOrExprStmt() (ast.Statement, error) {
 
 		switch target := expr.(type) {
 		case *ast.IdentExpr:
-			return &ast.AssignStmt{Start: target.Start, Name: target.Name, Value: value}, nil
+			return &ast.AssignStmt{
+				Start:   target.Start,
+				Name:    target.Name,
+				Targets: []ast.AssignTarget{{Pos: target.Start, Name: target.Name}},
+				Value:   value,
+			}, nil
 		case *ast.IndexExpr:
 			return &ast.IndexAssignStmt{Start: target.Start, Target: target, Value: value}, nil
 		default:
@@ -662,6 +756,9 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 	case p.check(token.False):
 		tok := p.advance()
 		return &ast.BoolLiteral{Start: tok.Pos, Value: false}, nil
+	case p.check(token.Nil):
+		tok := p.advance()
+		return &ast.NilLiteral{Start: tok.Pos}, nil
 	case p.check(token.Ident):
 		ident := p.advance()
 		packageName := ""

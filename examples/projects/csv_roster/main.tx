@@ -6,11 +6,13 @@ import "csv"
 func main() int {
   let name string = io.readLine()
   let team string = io.readLine()
-  let cells list[string] = csv.read("examples/projects/csv_roster/roster.csv", 2)
+  let cells list[string], readErr error = csv.read("examples/projects/csv_roster/roster.csv", 2)
+  assert(readErr == nil, "read roster.csv")
 
   append(cells, name)
   append(cells, team)
-  csv.write("examples/projects/csv_roster/out.csv", cells, 2)
+  let writeErr error = csv.write("examples/projects/csv_roster/out.csv", cells, 2)
+  assert(writeErr == nil, "write out.csv")
 
   print(len(cells), " cells")
   print(cells[0], " ", cells[1])

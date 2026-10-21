@@ -43,6 +43,8 @@ const (
 	CallGPUFrom            CallKind = "gpuFrom"
 	CallGPUTo              CallKind = "gpuTo"
 	CallGPUCoord           CallKind = "gpuCoord"
+	CallErrorsNew          CallKind = "errorsNew"
+	CallErrorsMessage      CallKind = "errorsMessage"
 )
 
 type ResultOrigin string
@@ -137,7 +139,7 @@ var packages = []Package{
 				Params: []Param{
 					{Name: "path", Type: ast.StringType},
 				},
-				ReturnType:   ast.StringType,
+				ReturnType:   &ast.TupleType{Types: []ast.Type{ast.StringType, ast.ErrorType}},
 				ResultOrigin: ResultFrameOwned,
 				Detail:       "read a file into a string",
 			},
@@ -149,9 +151,9 @@ var packages = []Package{
 					{Name: "path", Type: ast.StringType},
 					{Name: "contents", Type: ast.StringType},
 				},
-				ReturnType:    ast.StringType,
-				ResultOrigin:  ResultUnknown,
-				StatementOnly: true,
+				ReturnType:    ast.ErrorType,
+				ResultOrigin:  ResultFrameOwned,
+				StatementOnly: false,
 				Detail:        "write a string to a file",
 			},
 		},
@@ -167,7 +169,7 @@ var packages = []Package{
 					{Name: "path", Type: ast.StringType},
 					{Name: "columns", Type: ast.IntType},
 				},
-				ReturnType:   &ast.ListType{Elem: ast.StringType},
+				ReturnType:   &ast.TupleType{Types: []ast.Type{&ast.ListType{Elem: ast.StringType}, ast.ErrorType}},
 				ResultOrigin: ResultFrameOwned,
 				Detail:       "read a CSV file into row-major cells",
 			},
@@ -180,10 +182,37 @@ var packages = []Package{
 					{Name: "cells", Type: &ast.ListType{Elem: ast.StringType}},
 					{Name: "columns", Type: ast.IntType},
 				},
-				ReturnType:    ast.StringType,
-				ResultOrigin:  ResultUnknown,
-				StatementOnly: true,
+				ReturnType:    ast.ErrorType,
+				ResultOrigin:  ResultFrameOwned,
+				StatementOnly: false,
 				Detail:        "write row-major cells to a CSV file",
+			},
+		},
+	},
+	{
+		Name: "errors",
+		Members: []Member{
+			{
+				Package: "errors",
+				Name:    "new",
+				Kind:    CallErrorsNew,
+				Params: []Param{
+					{Name: "msg", Type: ast.StringType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultFrameOwned,
+				Detail:       "create a new error with a message",
+			},
+			{
+				Package: "errors",
+				Name:    "message",
+				Kind:    CallErrorsMessage,
+				Params: []Param{
+					{Name: "err", Type: ast.ErrorType},
+				},
+				ReturnType:   ast.StringType,
+				ResultOrigin: ResultFrameOwned,
+				Detail:       "get the message string of an error",
 			},
 		},
 	},
@@ -239,7 +268,7 @@ var packages = []Package{
 				Params: []Param{
 					{Name: "path", Type: ast.StringType},
 				},
-				ReturnType:   &ast.SliceType{Elem: ast.IntType},
+				ReturnType:   &ast.TupleType{Types: []ast.Type{&ast.SliceType{Elem: ast.IntType}, ast.ErrorType}},
 				ResultOrigin: ResultFrameOwned,
 				Detail:       "read P3 PPM RGB pixels into a flat slice",
 			},
@@ -253,9 +282,9 @@ var packages = []Package{
 					{Name: "width", Type: ast.IntType},
 					{Name: "height", Type: ast.IntType},
 				},
-				ReturnType:    ast.StringType,
-				ResultOrigin:  ResultUnknown,
-				StatementOnly: true,
+				ReturnType:    ast.ErrorType,
+				ResultOrigin:  ResultFrameOwned,
+				StatementOnly: false,
 				Detail:        "write flat RGB pixels as a P3 PPM image",
 			},
 		},

@@ -731,10 +731,10 @@ func main() int {
     let count int = io.readInt()
     let ratio float = io.readFloat()
     let ready bool = io.readBool()
-    let text string = io.readFile("input.txt")
-    io.writeFile("out.txt", text + line)
-    let cells list[string] = csv.read("in.csv", 2)
-    csv.write("out.csv", cells, 2)
+    let text string, err1 error = io.readFile("input.txt")
+    let err2 error = io.writeFile("out.txt", text + line)
+    let cells list[string], err3 error = csv.read("in.csv", 2)
+    let err4 error = csv.write("out.csv", cells, 2)
     print(line, " ", count, " ", ratio, " ", ready, " ", len(cells))
     return 0
 }`)
@@ -765,8 +765,9 @@ func main() int {
 
 	mainFn := program.Functions[0]
 	readCsvLet := mainFn.Body.Statements[6].(*ast.LetStmt)
-	if !ast.TypeEqual(info.ExprTypes[readCsvLet.Value], &ast.ListType{Elem: ast.StringType}) {
-		t.Fatalf("readCsv type = %s, want list[string]", info.ExprTypes[readCsvLet.Value])
+	wantType := &ast.TupleType{Types: []ast.Type{&ast.ListType{Elem: ast.StringType}, ast.ErrorType}}
+	if !ast.TypeEqual(info.ExprTypes[readCsvLet.Value], wantType) {
+		t.Fatalf("readCsv type = %s, want (list[string], error)", info.ExprTypes[readCsvLet.Value])
 	}
 	if info.ExprOrigins[readCsvLet.Value] != OriginFrameOwned {
 		t.Fatalf("readCsv origin = %s, want %s", info.ExprOrigins[readCsvLet.Value], OriginFrameOwned)
@@ -780,8 +781,8 @@ import "image"
 func main() int {
     let width int = image.width("in.ppm")
     let height int = image.height("in.ppm")
-    let pixels []int = image.readPpm("in.ppm")
-    image.writePpm("out.ppm", pixels, width, height)
+    let pixels []int, err1 error = image.readPpm("in.ppm")
+    let err2 error = image.writePpm("out.ppm", pixels, width, height)
     print(width, " ", height, " ", len(pixels))
     return 0
 }`)
@@ -808,8 +809,9 @@ func main() int {
 
 	mainFn := program.Functions[0]
 	readPPMLet := mainFn.Body.Statements[2].(*ast.LetStmt)
-	if !ast.TypeEqual(info.ExprTypes[readPPMLet.Value], &ast.SliceType{Elem: ast.IntType}) {
-		t.Fatalf("readPpm type = %s, want []int", info.ExprTypes[readPPMLet.Value])
+	wantType := &ast.TupleType{Types: []ast.Type{&ast.SliceType{Elem: ast.IntType}, ast.ErrorType}}
+	if !ast.TypeEqual(info.ExprTypes[readPPMLet.Value], wantType) {
+		t.Fatalf("readPpm type = %s, want ([]int, error)", info.ExprTypes[readPPMLet.Value])
 	}
 	if info.ExprOrigins[readPPMLet.Value] != OriginFrameOwned {
 		t.Fatalf("readPpm origin = %s, want %s", info.ExprOrigins[readPPMLet.Value], OriginFrameOwned)
@@ -1316,7 +1318,7 @@ func main() int {
 import "io"
 
 func main() int {
-    let text string = io.readFile(1)
+    let text string, err error = io.readFile(1)
     return 0
 }`,
 			want: `io.readFile path has type int, want string`,
@@ -1329,7 +1331,7 @@ import "io"
 func main() int {
     return io.writeFile("out.txt", "contents")
 }`,
-			want: `io.writeFile can only be used as a statement`,
+			want: `cannot return error from function returning int`,
 		},
 		{
 			name: "readCsv columns type",
@@ -1337,7 +1339,7 @@ func main() int {
 import "csv"
 
 func main() int {
-    let cells list[string] = csv.read("in.csv", "2")
+    let cells list[string], err error = csv.read("in.csv", "2")
     return 0
 }`,
 			want: `csv.read columns has type string, want int`,
@@ -1349,7 +1351,7 @@ import "csv"
 
 func main() int {
     let cells list[int] = list[int]{1}
-    csv.write("out.csv", cells, 1)
+    let err error = csv.write("out.csv", cells, 1)
     return 0
 }`,
 			want: `csv.write cells has type list[int], want list[string]`,
@@ -1362,6 +1364,25 @@ func main() int {
     return len(text)
 }`,
 			want: `undefined function "readFile"; use io.readFile after import "io"`,
+		},
+		{
+			name: "tuple parameter rejected",
+			src: `package main
+func f(x (int, int)) int {
+    return 0
+}
+func main() int { return 0 }`,
+			want: `tuple types can only be used as function return types`,
+		},
+		{
+			name: "tuple variable rejected",
+			src: `package main
+func pair() (int, int) { return 1, 2 }
+func main() int {
+    let x (int, int) = pair()
+    return 0
+}`,
+			want: `tuple types can only be used as function return types`,
 		},
 	}
 
@@ -1498,4 +1519,76 @@ func mustParseOrLoadProgram(t *testing.T, src string) *ast.Program {
 		return mustLoadProgram(t, src)
 	}
 	return mustParse(t, src)
+}
+
+func TestTypeCheckMultiReturnAndErrors(t *testing.T) {
+	src := `package main
+
+import "errors"
+
+func divide(a int, b int) (int, error) {
+    if b == 0 {
+        return 0, errors.new("division by zero")
+    }
+    return a / b, nil
+}
+
+func main() int {
+    let result int, err error = divide(10, 2)
+    if err != nil {
+        print(errors.message(err))
+        return 1
+    }
+    print(err)
+    let _, err2 error = divide(10, 0)
+    let _ int, _ error = divide(20, 2)
+    result, err = divide(30, 3)
+    _, err = divide(40, 4)
+    return 0
+}
+`
+	program := mustParseOrLoadProgram(t, src)
+	info, err := Check(program)
+	if err != nil {
+		t.Fatalf("unexpected type check error: %v", err)
+	}
+	if info == nil {
+		t.Fatal("info is nil")
+	}
+}
+
+func TestTypeCheckRejectsBareErrorAndMultiReturnCalls(t *testing.T) {
+	src := `package main
+
+func fail() error {
+    return nil
+}
+
+func main() int {
+    fail()
+    return 0
+}
+`
+	program := mustParseOrLoadProgram(t, src)
+	_, err := Check(program)
+	if err == nil {
+		t.Fatal("expected type check error for bare call to error-returning function")
+	}
+
+	src2 := `package main
+
+func pair() (int, int) {
+    return 1, 2
+}
+
+func main() int {
+    pair()
+    return 0
+}
+`
+	program2 := mustParseOrLoadProgram(t, src2)
+	_, err2 := Check(program2)
+	if err2 == nil {
+		t.Fatal("expected type check error for bare call to multi-return function")
+	}
 }

@@ -7,13 +7,17 @@ func main() int {
   let name string = io.readLine()
   let bonus int = io.readInt()
 
-  let note string = io.readFile("examples/projects/io_basics/input.txt")
-  io.writeFile("examples/projects/io_basics/copy.txt", note + "\n" + name)
+  let note string, readErr error = io.readFile("examples/projects/io_basics/input.txt")
+  assert(readErr == nil, "read input.txt")
+  let writeErr error = io.writeFile("examples/projects/io_basics/copy.txt", note + "\n" + name)
+  assert(writeErr == nil, "write copy.txt")
 
-  let cells list[string] = csv.read("examples/projects/io_basics/input.csv", 2)
+  let cells list[string], csvReadErr error = csv.read("examples/projects/io_basics/input.csv", 2)
+  assert(csvReadErr == nil, "read input.csv")
   append(cells, name)
   append(cells, "interactive")
-  csv.write("examples/projects/io_basics/output.csv", cells, 2)
+  let csvWriteErr error = csv.write("examples/projects/io_basics/output.csv", cells, 2)
+  assert(csvWriteErr == nil, "write output.csv")
 
   print("hello ", name)
   print(bonus + 1)

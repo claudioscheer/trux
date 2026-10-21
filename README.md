@@ -24,12 +24,15 @@ The compiler currently supports:
 
 - `package main`
 - `func`, parameters, return types, and function calls
-- `let` bindings with explicit types
-- `int`, `float`, `string`, and `bool`
+- multiple return values with `func f() (T1, T2)` and `return a, b`
+- explicit `error` type, `nil` keyword, and standard `errors` package (`errors.new`, `errors.message`)
+- `let` bindings with explicit types, multi-binding unpacking, and blank identifier `_` discards
+- compile-time enforcement requiring multiple returns and `error` values to be handled or explicitly discarded
+- `int`, `float`, `string`, `bool`, and `error`
 - integer and float arithmetic with `+`, `-`, `*`, and `/`
 - comparison operators with `==`, `!=`, `<`, `<=`, `>`, and `>=`
 - `if`, `else if`, `else`, and `for`
-- assignment to existing variables
+- assignment to existing variables and multi-variable assignment
 - string and boolean literals
 - string containment with `needle in haystack`
 - string concatenation with `+`
@@ -40,11 +43,11 @@ The compiler currently supports:
 - `pub func` exports called as `package.function(...)`, package-private functions across same-directory package files, and import-cycle detection
 - typed IR
 - C code generation and execution through `cc` or `$CC`
-- `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
+- `print(...)` with one or more `int`, `float`, `string`, `bool`, or `error` arguments
 - `assert(condition, message)` runtime checks that crash the app when false
 - `.test.tx` unit tests through `trux test`
-- standard `io` and `csv` packages for stdin, file, and CSV IO
-- standard `image` package for first P3 PPM image reads/writes
+- standard `io` and `csv` packages with explicit error return signatures
+- standard `image` package for P3 PPM image reads/writes with error returns
 - standard `time` package for wall-clock timestamps, monotonic timing, and sleeping
 - standard `http` package for plaintext POSIX HTTP servers backed by a pthread worker pool
 - initial CUDA GPU support with `gpu.Buffer[int|float]`, Trux `kernel func`, and `gpu.launch1d` / `gpu.launch2d`
@@ -125,6 +128,48 @@ Expected output:
 ```text
 trux false
 2
+```
+
+Multiple returns and error handling:
+
+```go trux
+package main
+
+import "errors"
+
+func divmod(a int, b int) (int, int) {
+  return a / b, a % b
+}
+
+func parsePositive(n int) (int, error) {
+  if n < 0 {
+    return 0, errors.new("negative number")
+  }
+  return n, nil
+}
+
+func main() int {
+  let q int, r int = divmod(14, 3)
+  let val int, err error = parsePositive(-5)
+  if err != nil {
+    print("error: ", errors.message(err))
+  } else {
+    print("value: ", val)
+  }
+
+  // Discarding unused returns with blank identifier _
+  let _, rem int = divmod(14, 3)
+  print(q, " remainder ", rem)
+
+  return 0
+}
+```
+
+Expected output:
+
+```text
+error: negative number
+4 remainder 2
 ```
 
 Unit tests live in `.test.tx` files and run with `trux test`. Test functions

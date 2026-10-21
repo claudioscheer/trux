@@ -13,8 +13,8 @@ io.readLine() string
 io.readInt() int
 io.readFloat() float
 io.readBool() bool
-io.readFile(path string) string
-io.writeFile(path string, contents string)
+io.readFile(path string) (string, error)
+io.writeFile(path string, contents string) error
 ```
 
 CSV:
@@ -22,8 +22,8 @@ CSV:
 ```trux
 import "csv"
 
-csv.read(path string, columns int) list[string]
-csv.write(path string, cells list[string], columns int)
+csv.read(path string, columns int) (list[string], error)
+csv.write(path string, cells list[string], columns int) error
 ```
 
 CSV data is flat and row-major. `columns` defines the row width, so row count is `len(cells) / columns`.
@@ -38,7 +38,7 @@ The type checker still rejects parameters on `main`, and generated C still emits
 
 Dynamic IO results allocate into the caller's current arena. `io.readLine`, `io.readFile`, and `csv.read` are frame-owned in local expression context and are copied out through the existing return-copy rules when returned from a function.
 
-Write operations are statement-only, like `append`. They fatal on runtime errors, matching the current runtime style for allocation, bounds, and output failures.
+File and CSV operations return explicit `error` values rather than aborting the process on filesystem or parse failures. On success, `readFile` and `csv.read` return the data paired with `nil`, while `writeFile` and `csv.write` return `nil`. On failure, they return an error created with a descriptive message. Callers must bind or discard returned errors; Trux rejects bare statements that return an unhandled error or multiple values.
 
 The old global names such as `readLine`, `readFile`, `readCsv`, and `writeCsv` are not part of the language surface. Use `io.readLine`, `io.readFile`, `csv.read`, and `csv.write`.
 

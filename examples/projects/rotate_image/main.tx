@@ -120,7 +120,8 @@ func main() int {
   // simple uncompressed RGB format.
   let width int = image.width(path)
   let height int = image.height(path)
-  let pixels []int = image.readPpm(path)
+  let pixels []int, readErr error = image.readPpm(path)
+  assert(readErr == nil, "read ppm")
 
   let pixelCount int = width * height
   let componentCount int = pixelCount * 3
@@ -187,8 +188,10 @@ func main() int {
     }
   }
 
-  image.writePpm("examples/projects/rotate_image/rotated_cpu.ppm", cpuOut, outWidth, outHeight)
-  image.writePpm("examples/projects/rotate_image/rotated_gpu.ppm", gpuOut, outWidth, outHeight)
+  let writeCpuErr error = image.writePpm("examples/projects/rotate_image/rotated_cpu.ppm", cpuOut, outWidth, outHeight)
+  assert(writeCpuErr == nil, "write rotated_cpu.ppm")
+  let writeGpuErr error = image.writePpm("examples/projects/rotate_image/rotated_gpu.ppm", gpuOut, outWidth, outHeight)
+  assert(writeGpuErr == nil, "write rotated_gpu.ppm")
 
   print("width ", width)
   print("height ", height)

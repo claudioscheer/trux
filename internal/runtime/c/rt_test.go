@@ -513,15 +513,33 @@ int main(void) {
     rt_string csv_path = ` + cString(csvPath) + `;
     rt_string out_csv_path = ` + cString(outCSVPath) + `;
 
-    rt_write_file(text_path, (rt_string){(const uint8_t*)"alpha\nbeta", 10});
-    rt_string text = rt_read_file(&arena, text_path);
+    rt_error write_err = rt_write_file(&arena, text_path, (rt_string){(const uint8_t*)"alpha\nbeta", 10});
+    if (write_err != NULL) {
+        fprintf(stderr, "rt_write_file failed\n");
+        return 1;
+    }
+    trux_tuple_string_error text_res = rt_read_file(&arena, text_path);
+    if (text_res.f1 != NULL) {
+        fprintf(stderr, "rt_read_file returned unexpected error\n");
+        return 1;
+    }
+    rt_string text = text_res.f0;
     if (!rt_string_equal(text, (rt_string){(const uint8_t*)"alpha\nbeta", 10})) {
         fprintf(stderr, "rt_read_file returned unexpected contents\n");
         return 1;
     }
 
-    rt_write_file(csv_path, (rt_string){(const uint8_t*)"name,score\n\"A, B\",2\n", 20});
-    rt_list_string* cells = rt_read_csv(&arena, csv_path, 2);
+    write_err = rt_write_file(&arena, csv_path, (rt_string){(const uint8_t*)"name,score\n\"A, B\",2\n", 20});
+    if (write_err != NULL) {
+        fprintf(stderr, "rt_write_file csv failed\n");
+        return 1;
+    }
+    trux_tuple_list_string_error csv_res = rt_read_csv(&arena, csv_path, 2);
+    if (csv_res.f1 != NULL) {
+        fprintf(stderr, "rt_read_csv returned unexpected error\n");
+        return 1;
+    }
+    rt_list_string* cells = csv_res.f0;
     if (cells->len != 4 ||
         !rt_string_equal(cells->data[0], (rt_string){(const uint8_t*)"name", 4}) ||
         !rt_string_equal(cells->data[2], (rt_string){(const uint8_t*)"A, B", 4})) {
@@ -529,7 +547,11 @@ int main(void) {
         return 1;
     }
 
-    rt_write_csv(out_csv_path, cells, 2);
+    rt_error csv_err = rt_write_csv(&arena, out_csv_path, cells, 2);
+    if (csv_err != NULL) {
+        fprintf(stderr, "rt_write_csv returned unexpected error\n");
+        return 1;
+    }
     rt_arena_deinit(&arena);
     return 0;
 }
@@ -553,15 +575,23 @@ func TestCSVRuntimeRejectsWrongColumnCount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	compileAndRunRuntimeCExpectFailure(t, Source+`
+	compileAndRunRuntimeC(t, Source+`
 int main(void) {
     rt_arena arena;
     rt_arena_init(&arena);
-    (void)rt_read_csv(&arena, `+cString(csvPath)+`, 2);
+    trux_tuple_list_string_error res = rt_read_csv(&arena, `+cString(csvPath)+`, 2);
+    if (res.f1 == NULL) {
+        fprintf(stderr, "expected error on bad column count\n");
+        return 1;
+    }
+    if (!rt_string_equal(res.f1->message, (rt_string){(const uint8_t*)"csv row column count mismatch", 29})) {
+        fprintf(stderr, "unexpected error message\n");
+        return 2;
+    }
     rt_arena_deinit(&arena);
     return 0;
 }
-`, "trux runtime error: csv row has 1 columns, want 2")
+`)
 }
 
 func TestFrameChunkPoolReusesChunksAndStaysContextLocal(t *testing.T) {
@@ -727,7 +757,12 @@ int main(void) {
     const uint8_t small_want[] = {0, 1, 255, 'a', 10, 0};
 
     size_t before = rt_test_malloc_calls;
-    rt_string text = rt_read_file(&arena, small_path);
+    trux_tuple_string_error text_res = rt_read_file(&arena, small_path);
+    if (text_res.f1 != NULL) {
+        fprintf(stderr, "small read returned error\n");
+        return 1;
+    }
+    rt_string text = text_res.f0;
     if (rt_test_malloc_calls - before != 2) {
         fprintf(stderr, "small read mallocs = %zu, want 2\n", rt_test_malloc_calls - before);
         return 1;
@@ -749,7 +784,12 @@ int main(void) {
     }
 
     before = rt_test_malloc_calls;
-    rt_string empty = rt_read_file(&arena, empty_path);
+    trux_tuple_string_error empty_res = rt_read_file(&arena, empty_path);
+    if (empty_res.f1 != NULL) {
+        fprintf(stderr, "empty read returned error\n");
+        return 5;
+    }
+    rt_string empty = empty_res.f0;
     if (rt_test_malloc_calls - before != 1) {
         fprintf(stderr, "empty read mallocs = %zu, want 1\n", rt_test_malloc_calls - before);
         return 5;
@@ -764,7 +804,12 @@ int main(void) {
     }
 
     before = rt_test_malloc_calls;
-    rt_string big = rt_read_file(&arena, big_path);
+    trux_tuple_string_error big_res = rt_read_file(&arena, big_path);
+    if (big_res.f1 != NULL) {
+        fprintf(stderr, "big read returned error\n");
+        return 8;
+    }
+    rt_string big = big_res.f0;
     if (rt_test_malloc_calls - before != 2) {
         fprintf(stderr, "big read mallocs = %zu, want 2\n", rt_test_malloc_calls - before);
         return 8;

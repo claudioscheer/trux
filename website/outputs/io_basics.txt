@@ -1,0 +1,3 @@
+hello Ada
+42
+6 name kind

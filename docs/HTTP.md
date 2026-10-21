@@ -51,7 +51,7 @@ func main() int {
 }
 ```
 
-See [examples/projects/http_server](../examples/projects/http_server) for a runnable server with `GET /`, `GET /health`, and `POST /echo`.
+See [examples/projects/http_server](https://github.com/claudioscheer/trux/tree/main/examples/projects/http_server) for a runnable server with `GET /`, `GET /health`, and `POST /echo`.
 
 ## Runtime Model
 

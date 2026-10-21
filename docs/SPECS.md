@@ -525,7 +525,7 @@ func good(mut xs list[int]) int {
 
 Values appended through a `mut` list parameter allocate dynamic element data in the durable arena when needed, so caller-visible list elements remain valid after the callee returns.
 
-See [ARENAS.md](ARENAS.md) for the full memory model rationale. See [../examples/ownership_clone.tx](../examples/ownership_clone.tx) and [../examples/mut_parameters.tx](../examples/mut_parameters.tx) for executable walkthroughs.
+See [ARENAS.md](ARENAS.md) for the full memory model rationale. See [examples/ownership_clone.tx](https://github.com/claudioscheer/trux/blob/main/examples/ownership_clone.tx) and [examples/mut_parameters.tx](https://github.com/claudioscheer/trux/blob/main/examples/mut_parameters.tx) for executable walkthroughs.
 
 ## Compiler Checks
 

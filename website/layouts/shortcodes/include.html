@@ -1,0 +1,34 @@
+{{- /*
+  Shows a file from the repository as a highlighted code block, so the site
+  always shows the real example programs and their recorded output.
+
+    {{< include "examples/hello.tx" >}}               whole file, language from the extension
+    {{< include "examples/gpu_matrix_multiply.tx:15:23" >}}   lines 15 to 23 (1-based, inclusive)
+    {{< include "website/outputs/hello.txt" "text" >}}  explicit Prism language
+
+  Paths are repository paths; hugo.toml mounts examples/ and website/outputs/
+  into assets/.
+*/ -}}
+{{- $spec := .Get 0 -}}
+{{- $parts := split $spec ":" -}}
+{{- $path := index $parts 0 -}}
+{{- $assetPath := $path -}}
+{{- if hasPrefix $path "website/outputs/" -}}
+  {{- $assetPath = replace $path "website/outputs/" "outputs/" 1 -}}
+{{- end -}}
+{{- $res := resources.Get $assetPath -}}
+{{- if not $res -}}
+  {{- errorf "include: %q not found (from %s)" $path .Position -}}
+{{- end -}}
+{{- $text := $res.Content -}}
+{{- if ge (len $parts) 3 -}}
+  {{- $lines := split $text "\n" -}}
+  {{- $from := sub (int (index $parts 1)) 1 -}}
+  {{- $to := int (index $parts 2) -}}
+  {{- $text = delimit (first (sub $to $from) (after $from $lines)) "\n" -}}
+{{- end -}}
+{{- $text = strings.TrimRight "\n" $text -}}
+{{- $ext := path.Ext $path -}}
+{{- $lang := .Get 1 | default (index (dict ".tx" "trux" ".c" "c" ".cu" "cpp" ".txt" "text" ".csv" "text" ".json" "json") $ext) | default "text" -}}
+<div class="prism-codeblock"><pre id="{{ substr (sha1 (printf "%s%d" $spec .Ordinal)) 0 7 }}" class="language-{{ $lang }}"><code>{{ $text }}</code></pre></div>
+{{- /* .Content of a text resource is a string; html/template escapes it above. */ -}}

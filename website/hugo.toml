@@ -1,0 +1,114 @@
+# Hugo configuration for the Trux documentation site (theme: Lotus Docs).
+# Build from this directory:  hugo        Preview:  hugo server
+baseURL = "https://claudioscheer.github.io/trux/"
+locale = "en-us"
+title = "Trux"
+enableEmoji = true
+enableGitInfo = false
+enableRobotsTXT = true
+disableKinds = ["taxonomy", "term"]
+
+[module]
+  [module.hugoVersion]
+    extended = true
+    min = "0.140.0"
+  [[module.imports]]
+    path = "github.com/colinwilson/lotusdocs"
+    disable = false
+  [[module.imports]]
+    path = "github.com/gohugoio/hugo-mod-bootstrap-scss/v5"
+    disable = false
+
+  # The site's own directories.
+  [[module.mounts]]
+    source = "content"
+    target = "content"
+  [[module.mounts]]
+    source = "layouts"
+    target = "layouts"
+  [[module.mounts]]
+    source = "static"
+    target = "static"
+  [[module.mounts]]
+    source = "data"
+    target = "data"
+  [[module.mounts]]
+    source = "assets"
+    target = "assets"
+  # Files from the rest of the repository that pages include verbatim:
+  # the design notes in docs/, the example programs, and their recorded output.
+  [[module.mounts]]
+    source = "../docs"
+    target = "assets/design-notes"
+  [[module.mounts]]
+    source = "../examples"
+    target = "assets/examples"
+  [[module.mounts]]
+    source = "outputs"
+    target = "assets/outputs"
+
+[markup]
+  defaultMarkdownHandler = "goldmark"
+  [markup.tableOfContents]
+    startLevel = 2
+    endLevel = 3
+  [markup.goldmark.renderer]
+    unsafe = true
+
+[params]
+  [params.footer]
+    copyright = "Trux is released under the [MIT license](https://github.com/claudioscheer/trux/blob/main/LICENSE). Site built with [Hugo](https://gohugo.io) and [Lotus Docs](https://lotusdocs.dev)."
+
+  [params.social]
+    github = "claudioscheer/trux"
+
+  [params.docs]
+    title = "Trux"
+    themeColor = "blue"
+    darkMode = true
+    prism = true
+    prismTheme = "lotusdocs"
+
+    repoURL = "https://github.com/claudioscheer/trux"
+    repoBranch = "main"
+    editPage = true
+    lastMod = false
+
+    sidebarIcons = true
+    breadcrumbs = true
+    backToTop = true
+    toc = true
+    tocMobile = true
+    scrollSpy = true
+    descriptions = true
+    titleIcon = false
+    navDesc = true
+    navDescTrunc = 40
+    listDescTrunc = 120
+    intLinkTooltip = false
+
+  [params.flexsearch]
+    enabled = true
+    tokenize = "forward"
+    maxResult = 8
+
+  # Fail the build on any internal link or #fragment that does not resolve.
+  [params.render_hooks.link]
+    errorLevel = "error"
+
+[menu]
+  [[menu.primary]]
+    name = "Docs"
+    url = "docs/"
+    identifier = "docs"
+    weight = 10
+  [[menu.primary]]
+    name = "Examples"
+    url = "docs/examples/"
+    identifier = "examples"
+    weight = 20
+  [[menu.primary]]
+    name = "GitHub"
+    url = "https://github.com/claudioscheer/trux"
+    identifier = "github"
+    weight = 30

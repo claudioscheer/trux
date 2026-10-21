@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generates every derived Trux logo file from the approved mark.
 
-The source of truth is trux-logo.svg (and the PNG exports that came with it).
-This script writes the light variant, the wordmark, the app icon, and the
+The source of truth is the mark geometry below (MARK_PATHS and STROKE). This
+script writes the mark in both colors, the wordmark, the app icon, and the
 copies used by the docs site, the README, and the VS Code extension.
 
 Requirements: Python 3 with cairosvg, Pillow, and fontTools, plus the Inter
@@ -34,18 +34,23 @@ LIGHT_BLUE = "#93C5FD"  # the mark on dark backgrounds
 INK = "#1F2937"         # wordmark text on light backgrounds
 WHITE = "#FFFFFF"
 
-# The mark, in the 512x512 coordinates of trux-logo.svg.
+# The mark ("variant C", the compact t with an x crossbar), in 512x512 units.
 MARK_PATHS = [
-    "M256 70 V330 Q256 440 366 440",
-    "M172 150 L340 318",
-    "M340 150 L172 318",
+    "M256 208 V352 Q256 440 344 440",
+    "M200 222 L312 334",
+    "M312 222 L200 334",
 ]
-STROKE = 44
-SHIFT_X = -12  # trux-logo.svg draws the mark with translate(-12 0)
-# Bounds of the stroked mark (after the shift): x 138..376, y 48..462.
-MARK_BOX = (138, 48, 238, 414)
+STROKE = 40
+# Unshifted, the stroked mark spans x 180..364 and y 188..460. The shift
+# centers it in the 512x512 box of trux-logo.svg.
+SHIFT_X = -16
+SHIFT_Y = -68
+# Bounds of the stroked mark after the shift: x 164..348, y 120..392.
+MARK_TOP = 208 - STROKE / 2 + SHIFT_Y      # top of the stem's round cap
+MARK_BASE = 440 + STROKE / 2 + SHIFT_Y     # bottom edge of the foot
+MARK_BOX = (164, 120, 184, 272)
 # A square around the mark for small icons, centered on it.
-SQUARE_BOX = (49, 47, 416, 416)
+SQUARE_BOX = (116, 116, 280, 280)
 
 
 def mark_group(stroke, extra=""):
@@ -53,7 +58,7 @@ def mark_group(stroke, extra=""):
     # var() only works in a style attribute, not in a presentation attribute.
     color = f'style="stroke:{stroke}"' if stroke.startswith("var(") else f'stroke="{stroke}"'
     return (
-        f'<g transform="translate({SHIFT_X} 0)" fill="none" {color} '
+        f'<g transform="translate({SHIFT_X} {SHIFT_Y})" fill="none" {color} '
         f'stroke-width="{STROKE}" stroke-linecap="round" stroke-linejoin="round"{extra}>'
         f"{paths}</g>"
     )
@@ -87,11 +92,13 @@ def wordmark_path(inter_path, cap_height):
 
 
 def logo_svg(mark_stroke, text_fill, inter_path, title="Trux"):
-    """Mark plus "Trux" wordmark, on one baseline with the mark's foot."""
+    """Mark plus "Trux" wordmark. The text's cap height equals the mark's
+    height, so the mark's top lines up with the top of the T and the bottom of
+    its foot with the baseline."""
     mx, my, mw, mh = MARK_BOX
-    cap = 270
-    baseline = 440 + STROKE / 2 - 6
-    gap = 70
+    baseline = MARK_BASE
+    cap = MARK_BASE - MARK_TOP
+    gap = 60
     text, advance = wordmark_path(inter_path, cap)
     tx = mx + mw + gap
     width = round(tx + advance + 10 - mx)
@@ -109,7 +116,7 @@ def icon_svg():
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">\n'
         "  <title>Trux</title>\n"
         f'  <rect width="512" height="512" rx="112" fill="{BLUE}"/>\n'
-        f'  <g transform="translate(256 256) scale(0.74) translate(-257 -255)">{inner}</g>\n'
+        f'  <g transform="translate(256 256) scale(1.12) translate(-256 -256)">{inner}</g>\n'
         "</svg>\n"
     )
 
@@ -148,7 +155,7 @@ def og_image(inter_path, base_only=False):
         ghost = png_height(mark_svg("#EEF2FF", box=MARK_BOX), 420)
         card.alpha_composite(ghost, (1200 - ghost.width - 60, 150))
         return card.convert("RGB")
-    img = png_height(logo_svg(BLUE, INK, inter_path), 250)
+    img = png_height(logo_svg(BLUE, INK, inter_path), 170)
     card.alpha_composite(img, ((1200 - img.width) // 2, (618 - img.height) // 2))
     return card.convert("RGB")
 
@@ -159,6 +166,9 @@ def main():
     inter = parser.parse_args().inter
 
     # Shared assets (repository root).
+    write(HERE / "trux-logo.svg", mark_svg(BLUE))
+    for size in (1024, 512, 256, 64, 32):
+        write(HERE / f"trux-logo-{size}.png", png(mark_svg(BLUE), size))
     write(HERE / "trux-logo-light.svg", mark_svg(LIGHT_BLUE))
     for size in (1024, 512, 256, 64, 32):
         write(HERE / f"trux-logo-light-{size}.png", png(mark_svg(LIGHT_BLUE), size))
@@ -177,7 +187,12 @@ def main():
     write(SITE / "assets/images/logos/logo.svg",
           logo_svg(css_mark, "currentColor", inter))
     # Used by Lotus Docs on the generated per-page social cards.
-    write(SITE / "assets/images/logos/logo.png", png_height(logo_svg(BLUE, INK, inter), 180))
+    # Lotus Docs scales it to 60px high; the transparent space below the logo
+    # keeps the name about as large as with the old, taller mark.
+    card_logo = png_height(logo_svg(BLUE, INK, inter), 126)
+    padded = Image.new("RGBA", (card_logo.width, 180), (0, 0, 0, 0))
+    padded.alpha_composite(card_logo, (0, 0))
+    write(SITE / "assets/images/logos/logo.png", padded)
     write(SITE / "assets/opengraph/card-base-2.png", og_image(inter, base_only=True))
     write(SITE / "static/og-image.png", og_image(inter))
 

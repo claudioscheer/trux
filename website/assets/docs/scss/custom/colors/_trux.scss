@@ -72,3 +72,13 @@
         --bs-btn-focus-shadow-rgb: #{to-rgb($trux-blue-light)};
     }
 }
+
+// The compact logo mark is as tall as the "Trux" capitals, so at the theme's
+// 26px logo height the name would be half again as large as before. 20px keeps
+// the name close to its old size and the whole logo a little smaller.
+// (The mobile header's mark-only icon keeps the theme's size.)
+// "html" outranks the theme rule, which comes later with the same selector.
+html .page-wrapper .sidebar-wrapper .sidebar-brand > a svg,
+#top-header .logo-icon .big svg {
+    height: 20px;
+}

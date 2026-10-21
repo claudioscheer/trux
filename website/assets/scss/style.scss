@@ -56,3 +56,9 @@ $bg-gradient-primary:       linear-gradient(to left, darken($purple, 10%) 0%, da
 {{ if ($.Scratch.Get "image_compare_enabled") }}@import "custom/pages/image-compare-viewer";{{ end }}
 
 // @import "custom/pages/simplebar";
+
+// Trux: the compact logo mark is as tall as the capitals; see the matching
+// rule in docs/scss/custom/colors/_trux.scss.
+.logo svg {
+    height: 20px;
+}

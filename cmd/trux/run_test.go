@@ -133,6 +133,110 @@ func main() int {
 	}
 }
 
+func TestRunFileKeepsJumpAssignedLoopStringAliveForCaller(t *testing.T) {
+	requireCC(t)
+
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "continue",
+			src: `package main
+func cont(flag bool) string {
+    let acc string = ""
+    let i int = 0
+    for ; i < 4; i = i + 1 {
+        if flag {
+            acc = acc + "x"
+            continue
+            acc = "ok"
+        }
+        acc = "no"
+    }
+    return acc
+}
+
+func main() int {
+    let value string = cont(true)
+    let junk string = "01230123012301230123012301230123" + "01230123012301230123012301230123"
+    print(value)
+    print(len(value))
+    print(len(junk))
+    return 0
+}`,
+			want: "xxxx\n4\n64\n",
+		},
+		{
+			name: "break",
+			src: `package main
+func broken(flag bool) string {
+    let acc string = ""
+    let i int = 0
+    for ; i < 4; i = i + 1 {
+        if flag {
+            acc = acc + "x"
+            break
+            acc = "ok"
+        }
+        acc = "no"
+    }
+    return acc
+}
+
+func main() int {
+    let value string = broken(true)
+    let junk string = "0" + "123"
+    print(value)
+    print(len(value))
+    print(len(junk))
+    return 0
+}`,
+			want: "x\n1\n4\n",
+		},
+		{
+			name: "break skips post",
+			src: `package main
+func broken(flag bool) string {
+    let acc string = ""
+    let i int = 0
+    for ; i < 4; acc = "ok" {
+        if flag {
+            acc = acc + "x"
+            break
+        }
+        i = i + 1
+    }
+    return acc
+}
+
+func main() int {
+    let value string = broken(true)
+    let junk string = "0" + "123"
+    print(value)
+    print(len(value))
+    print(len(junk))
+    return 0
+}`,
+			want: "x\n1\n4\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempSource(t, tt.src)
+			var out bytes.Buffer
+			if err := runFile(&out, path); err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != tt.want {
+				t.Fatalf("output = %q, want %q", out.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestRunFileKeepsTempStringReturnAliveForCaller(t *testing.T) {
 	requireCC(t)
 

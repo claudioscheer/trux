@@ -1,186 +1,128 @@
-# trux
+# Trux
 
-`trux` is a small Go-inspired language that compiles to C.
+**Trux is a small, Go-inspired programming language that compiles to C, and to CUDA for GPU kernels.**
 
-The goal is to learn compiler construction by building the full pipeline by hand:
+The compiler is written in Go and builds every stage by hand: lexer, parser, type checker, typed IR, and a C/CUDA
+backend. The generated C is compiled with your system's C compiler into an ordinary native executable. Trux is a
+learning project; it borrows syntax ideas from Go but is not Go-compatible.
 
-```text
-source code
-  -> lexer
-  -> parser
-  -> AST
-  -> type checker
-  -> typed IR
-  -> C code or CUDA
-  -> cc (or $CC), or nvcc (or $NVCC) for a program that declares a kernel
-  -> executable
-```
+📖 **Documentation: <https://claudioscheer.github.io/trux/>**
 
-`trux` is not Go-compatible. It only borrows simple syntax ideas from Go.
+## A quick look
 
-## Current Status
-
-The compiler currently supports:
-
-- `package main`
-- `func`, parameters, return types, and function calls
-- `let` bindings with explicit types
-- `int`, `float`, `string`, and `bool`
-- integer and float arithmetic with `+`, `-`, `*`, and `/`
-- comparison operators with `==`, `!=`, `<`, `<=`, `>`, and `>=`
-- `if`, `else if`, `else`, and `for`
-- assignment to existing variables
-- string and boolean literals
-- string containment with `needle in haystack`
-- string concatenation with `+`
-- fixed arrays `[N]T`, slices `[]T`, and mutable lists `list[T]` for scalar element types
-- array and list literals, `make([]T, n)`, `len(x)`, indexing, slicing, list `append`, and indexed assignment
-- explicit `clone(x)` for owned copies of strings, arrays, slices, and lists
-- relative module imports with `import "path/to/file.tx"` across files that may declare different package names
-- `pub func` exports called as `package.function(...)`, package-private functions across same-directory package files, and import-cycle detection
-- typed IR
-- C code generation and execution through `cc` or `$CC`
-- `print(...)` with one or more `int`, `float`, `string`, or `bool` arguments
-- `assert(condition, message)` runtime checks that crash the app when false
-- `.test.tx` unit tests through `trux test`
-- standard `io` and `csv` packages for stdin, file, and CSV IO
-- standard `image` package for first P3 PPM image reads/writes
-- standard `time` package for wall-clock timestamps, monotonic timing, and sleeping
-- standard `http` package for plaintext POSIX HTTP servers backed by a pthread worker pool
-- initial CUDA GPU support with `gpu.Buffer[int|float]`, Trux `kernel func`, and `gpu.launch1d` / `gpu.launch2d`
-
-Recursive directory-based packages, separate module compilation, and reusable package artifacts are not implemented.
-
-## Building
-
-```bash
-make build
-```
-
-This produces `bin/trux`.
-
-## Running
-
-Run a source file:
-
-```bash
-make run FILE=examples/hello.tx
-```
-
-Run with debug output for each compiler phase:
-
-```bash
-make run FILE=examples/hello.tx DEBUG=1
-```
-
-Debug files are written to `tmp/trux-debug/<source-name>/`.
-
-## Examples
-
-Minimal integer program:
-
-```go trux
+```go
 package main
 
-func add(a int, b int) int {
-  return a + b
+import "io"
+
+func greet(name string) string {
+  return "hello, " + name
 }
 
 func main() int {
-  let x int = add(1, 2)
-  print(x)
+  let name string = io.readLine()
+  let scores list[int] = list[int]{72, 88, 95}
+
+  let total int = 0
+  for let i int = 0; i < len(scores); i = i + 1 {
+    total = total + scores[i]
+  }
+
+  print(greet(name))
+  print("average: ", total / len(scores))
   return 0
 }
 ```
 
-Expected output:
+```console
+$ echo Ada | trux run greet.tx
+hello, Ada
+average: 85
+```
+
+Highlights:
+
+- explicit types: `int`, `float`, `string`, `bool`, arrays `[N]T`, slices `[]T`, and lists `list[T]`
+- no implicit conversions; conditions must be `bool`
+- checked integer overflow, division by zero, and bounds, reported as `trux runtime error`
+- arena-based memory with simple ownership rules (`mut` parameters, `clone`) instead of a garbage collector
+- multi-file programs with relative imports and `pub func`
+- built-in unit tests: `.test.tx` files run by `trux test`
+- standard packages for stdin and files (`io`), CSV (`csv`), PPM images (`image`), clocks (`time`), and HTTP servers (`http`)
+- GPU kernels written in Trux with `kernel func`, compiled as CUDA
+
+## Install and build
+
+Requirements:
+
+- [Go](https://go.dev/dl/) to build the compiler (`go.mod` declares Go 1.26.3)
+- a C11 compiler, invoked as `cc` or `$CC`
+- optional: the NVIDIA CUDA toolkit (`nvcc` or `$NVCC`) and an NVIDIA GPU for programs with kernels
+- optional: `make` for the convenience targets
+
+```bash
+git clone https://github.com/claudioscheer/trux.git
+cd trux
+make build              # or: go build -o bin/trux ./cmd/trux
+./bin/trux --version    # trux version 0.1.0
+```
+
+## Quick start
+
+```bash
+./bin/trux run examples/hello.tx                  # compile and run
+./bin/trux build -o hello examples/hello.tx       # build an executable
+./bin/trux emit-c examples/hello.tx               # write the generated C to out/hello/
+./bin/trux run --debug examples/hello.tx          # dump every compiler phase to tmp/trux-debug/hello/
+./bin/trux test                                   # run all .test.tx unit tests
+./bin/trux fmt -r                                 # format all .tx files
+```
+
+Programs that declare a `kernel func` are emitted as CUDA and compiled with `nvcc`; everything else goes through `cc`:
 
 ```text
-3
+source -> lexer -> parser -> AST -> type checker -> typed IR -> C or CUDA -> cc/$CC or nvcc/$NVCC -> executable
 ```
-
-Strings, booleans, floats, and multi-argument print:
-
-```go trux
-package main
-
-func mean(a float, b float) float {
-  return (a + b) / 2.0
-}
-
-func main() int {
-  let name string = "trux"
-  let stable bool = false
-  let average float = mean(1.5, 2.5)
-
-  print(name, " ", stable)
-  print(average)
-
-  return 0
-}
-```
-
-Expected output:
-
-```text
-trux false
-2
-```
-
-Unit tests live in `.test.tx` files and run with `trux test`. Test functions
-start with `test`, take no parameters, omit the return type, and use
-`assert(condition, message)` for checks:
-
-```go trux
-package math
-
-import "math.tx"
-
-func testAdd() {
-  assert(add(2, 3) == 5, "add should sum integers")
-}
-```
-
-Run tests recursively or run a single test file:
-
-```bash
-./bin/trux test
-./bin/trux test examples/projects/scorebook/scores.test.tx
-```
-
-More examples live in [examples/](examples/). Start with [examples/hello.tx](examples/hello.tx), then read [examples/control_flow.tx](examples/control_flow.tx), [examples/loops.tx](examples/loops.tx), [examples/else_if.tx](examples/else_if.tx), [examples/assertions.tx](examples/assertions.tx), [examples/collections.tx](examples/collections.tx), and [examples/ownership_clone.tx](examples/ownership_clone.tx) for the current control-flow, assertion, collection, and ownership model. [examples/performance_integer.tx](examples/performance_integer.tx) is a CPU-bound integer workload for comparing optimized and debug generated C builds. Module examples live under [examples/modules/](examples/modules/).
-
-The IO basics project reads a name and number from stdin, reads/writes text files, and reads/writes flat row-major CSV:
-
-```bash
-printf 'Ada\n41\n' | make run FILE=examples/projects/io_basics/main.tx
-```
-
-More complete IO examples live under [examples/projects/](examples/projects/):
-
-- `io_basics`: stdin, file IO, and CSV IO in one small program
-- `interactive_counter`: stdin with `io.readLine` and `io.readInt`
-- `file_notes`: `io.readFile` and `io.writeFile`
-- `csv_roster`: `csv.read`, list mutation, and `csv.write`
-- `rotate_image`: PPM image rotation on CPU and GPU
-- `http_server`: plaintext HTTP with a pthread-backed worker pool
-
-## Commands
-
-```bash
-make test
-make emit-c FILE=examples/hello.tx
-make build-bin FILE=examples/hello.tx OUT=bin/hello
-./bin/trux fmt examples/hello.tx
-./bin/trux fmt -r
-./bin/trux test
-./bin/trux test examples/projects/scorebook/scores.test.tx
-make lsp
-```
-
-`trux emit-c main.tx` writes generated source plus runtime headers to `out/main/` by default. Use `trux emit-c --out-dir DIR main.tx` to choose a different directory.
 
 ## Documentation
 
-See [docs/SPECS.md](docs/SPECS.md) and the other docs in [docs/](docs/) for design decisions, including naming, arenas, IO, HTTP, image, time, modules, and GPU support.
-Editor tooling lives in [tooling/](tooling/), including the Go language server and VS Code extension.
+The website covers everything from installation to compiler internals:
+
+| Section | |
+| --- | --- |
+| [Getting started](https://claudioscheer.github.io/trux/getting-started/) | install, first program, editor setup |
+| [Language guide](https://claudioscheer.github.io/trux/guide/) | types, functions, control flow, collections, memory, modules, tests, GPU |
+| [Standard library](https://claudioscheer.github.io/trux/stdlib/) | `io`, `csv`, `image`, `time`, `http`, `gpu` |
+| [Examples](https://claudioscheer.github.io/trux/examples/) | every program in `examples/`, with its output |
+| [CLI reference](https://claudioscheer.github.io/trux/cli/) | `run`, `build`, `emit-c`, `fmt`, `test` |
+| [How it works](https://claudioscheer.github.io/trux/internals/) | the compilation pipeline, generated C and CUDA, codebase tour |
+| [FAQ](https://claudioscheer.github.io/trux/faq/) | limitations and common errors |
+
+The site's sources are the Markdown files in [`docs/`](docs/). The compact language specification is
+[`docs/SPECS.md`](docs/SPECS.md), and the other files in `docs/` are design notes (arenas, modules, GPU, IO, HTTP, ...).
+
+## Project layout
+
+```text
+cmd/trux/            the trux command line tool
+internal/            compiler: lexer, parser, ast, modules, types, ir, codegen/c, runtime/c, formatter, stdlib
+examples/            runnable examples, module examples, and small projects
+tooling/             trux-lsp language server and the VS Code extension
+docs/                documentation site sources and design notes
+website/             site tooling (MkDocs requirements, Trux syntax highlighter, example outputs)
+mkdocs.yml           documentation site configuration
+```
+
+## Contributing
+
+```bash
+make test    # go test ./... (also compiles and runs generated C)
+```
+
+See the [contributing guide](https://claudioscheer.github.io/trux/internals/contributing/) for how a language change flows
+through the compiler, the project conventions, and how to preview the documentation site locally
+(`pip install -r website/requirements.txt && mkdocs serve`).
+
+## License
+
+[MIT](LICENSE)

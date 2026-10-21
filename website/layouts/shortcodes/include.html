@@ -30,5 +30,13 @@
 {{- $text = strings.TrimRight "\n" $text -}}
 {{- $ext := path.Ext $path -}}
 {{- $lang := .Get 1 | default (index (dict ".tx" "trux" ".c" "c" ".cu" "cpp" ".txt" "text" ".csv" "text" ".json" "json") $ext) | default "text" -}}
-<div class="prism-codeblock"><pre id="{{ substr (sha1 (printf "%s%d" $spec .Ordinal)) 0 7 }}" class="language-{{ $lang }}"><code>{{ $text }}</code></pre></div>
-{{- /* .Content of a text resource is a string; html/template escapes it above. */ -}}
+{{- /*
+  The output must start with "<pre". When this shortcode is used inside another
+  one that renders its content as Markdown (details, tab, alert), Goldmark only
+  keeps the block as raw HTML up to the closing </pre> if the line starts with
+  <pre. A leading <div> would end the HTML block at the first blank line in the
+  file and turn the rest of the code into paragraphs and nested code blocks,
+  which also breaks Prism on the page. .Content is a string, so html/template
+  escapes it below.
+*/ -}}
+<pre id="{{ substr (sha1 (printf "%s%d" $spec .Ordinal)) 0 7 }}" class="language-{{ $lang }}"><code>{{ $text }}</code></pre>

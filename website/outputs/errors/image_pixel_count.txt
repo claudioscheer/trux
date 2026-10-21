@@ -1,2 +1,3 @@
 execute /tmp/trux-run-<id>/main: exit status 1
-trux runtime error: ppm pixel count 5 does not match 2x1x3
+trux runtime error: assertion failed: ppm pixel count does not match dimensions
+  at image_pixel_count.tx:9:3

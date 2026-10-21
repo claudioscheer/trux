@@ -37,10 +37,10 @@ Then follow [Your first program](/docs/getting-started/first-program/) and the [
 - **Multi-file programs** with relative imports and `pub func`.
 - **Built-in tests**: `.test.tx` files and `trux test`.
 - **GPU kernels** written in Trux and compiled to CUDA.
-- A small standard library: `io`, `csv`, `image`, `time`, `http`, `gpu`.
+- A small standard library: `io`, `csv`, `image`, `time`, `http`, `gpu`, and `errors`.
 
 **Not there yet:** structs, maps, generics, user-defined types, type inference, `int`/`float` conversions, closures,
-error values, and concurrency outside the HTTP server. See the [FAQ](/docs/faq/#whats-missing).
+and concurrency outside the HTTP server. See the [FAQ](/docs/faq/#whats-missing).
 
 ## How it works
 

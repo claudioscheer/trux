@@ -26,8 +26,8 @@ data, use [`csv`](/docs/stdlib/csv/).
 | `io.readInt()` | `int` | Reads one line and parses it as a base-10 64-bit integer. Leading and trailing whitespace is ignored; a leading `+` or `-` is allowed. |
 | `io.readFloat()` | `float` | Reads one line and parses it as a floating-point number, such as `2.5`, `-0.1`, or `1e3`. Surrounding whitespace is ignored. |
 | `io.readBool()` | `bool` | Reads one line, which must be exactly `true` or `false` after surrounding whitespace is removed. |
-| `io.readFile(path string)` | `string` | Returns the entire contents of a file, byte for byte. |
-| `io.writeFile(path string, contents string)` | | Creates or overwrites a file with exactly `contents`; no newline is added (statement only). |
+| `io.readFile(path string)` | `(string, error)` | Returns the entire contents of a file, byte for byte, along with an error if reading failed. |
+| `io.writeFile(path string, contents string)` | `error` | Creates or overwrites a file with exactly `contents`; no newline is added. Returns an error if writing failed. |
 
 ## Reading stdin
 
@@ -80,23 +80,32 @@ $ printf 'abc\n' | trux run examples/errors/io_read_int.tx
 
 A missing file:
 
+{{< include "examples/errors/io_missing_file.tx" "trux" >}}
+
 {{< include "website/outputs/errors/io_missing_file.txt" "text" >}}
 
 Using `io` without importing it is a compile error:
 
 {{< include "website/outputs/errors/io_not_imported.txt" "text" >}}
 
-All runtime failures exit with status `1`:
+Input parsing failures stop the program with exit status `1`:
 
 | Message | Cause |
 | --- | --- |
 | `trux runtime error: invalid int input` | `io.readInt` got a line that isn't a whole base-10 number, or one that doesn't fit in an `int` |
 | `trux runtime error: invalid float input` | `io.readFloat` got a line that isn't a number |
 | `trux runtime error: invalid bool input` | `io.readBool` got anything other than `true` or `false` |
-| `trux runtime error: cannot open file for reading missing.txt: No such file or directory` | `io.readFile` couldn't open the file; `io.writeFile` reports `cannot open file for writing …` |
 | `trux runtime error: file path contains NUL byte` | a path contained a `\0` character |
 
-There is no way to catch these. To accept bad input gracefully, read with `io.readLine` and check the text yourself.
+File operations (`io.readFile`, `io.writeFile`) return explicit `error` values instead of stopping the program directly:
+
+| Error message | Cause |
+| --- | --- |
+| `failed to open file for reading` | `io.readFile` couldn't open the file |
+| `failed to open file for writing` | `io.writeFile` couldn't open or create the file |
+| `failed to seek file` / `read failed` | an error occurred during read operations |
+
+Callers must unpack or explicitly handle errors returned by file operations.
 
 ## Reading CSV {#csv}
 

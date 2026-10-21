@@ -18,8 +18,8 @@ keep it in lists instead of round-tripping through files.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `csv.read(path string, columns int)` | `list[string]` | Reads a whole CSV file into a flat, row-major list of cells. Every row must have exactly `columns` cells. |
-| `csv.write(path string, cells list[string], columns int)` | | Creates or overwrites a file with `cells` as CSV, `columns` cells per row (statement only). `len(cells)` must be divisible by `columns`. |
+| `csv.read(path string, columns int)` | `(list[string], error)` | Reads a whole CSV file into a flat, row-major list of cells. Every row must have exactly `columns` cells. |
+| `csv.write(path string, cells list[string], columns int)` | `error` | Creates or overwrites a file with `cells` as CSV, `columns` cells per row. `len(cells)` must be divisible by `columns`. |
 
 `csv` builds on the file handling of the [`io` package](/docs/stdlib/io/): `csv.read` reads the whole file the way
 `io.readFile` does, and `csv.write` replaces it the way `io.writeFile` does. Paths are resolved against the current
@@ -96,16 +96,17 @@ $ printf 'Ada\n41\n' | trux run examples/projects/io_basics/main.tx
 
 {{< include "website/outputs/errors/csv_columns.txt" "text" >}}
 
-All failures stop the program with exit status `1` and a message on stderr:
+`csv.read` and `csv.write` return explicit `error` values rather than aborting:
 
-| Message | Cause |
+| Error message | Cause |
 | --- | --- |
-| `trux runtime error: csv row has 1 columns, want 2` | a row has a different number of cells than `columns`; a blank line in the middle of a file is a row with one empty cell |
-| `trux runtime error: csv columns must be positive, got 0` | `columns` was `0` or negative |
-| `trux runtime error: csv cell count 5 is not divisible by columns 2` | `csv.write` got a list that doesn't fill whole rows |
-| `trux runtime error: unexpected quote in csv field` | a `"` appeared in the middle of an unquoted field |
-| `trux runtime error: unterminated csv quoted field` | the file ended inside a quoted field |
-| `trux runtime error: expected csv delimiter after quoted field` | text followed a closing quote, as in `"a"b` |
-| `trux runtime error: cannot open file for reading data.csv: No such file or directory` | `csv.read` couldn't open the file; `csv.write` reports `cannot open csv for writing …` |
+| `csv row column count mismatch` | a row has a different number of cells than `columns`; a blank line in the middle of a file is a row with one empty cell |
+| `csv columns must be positive` | `columns` was `0` or negative |
+| `csv cell count is not divisible by columns` | `csv.write` got a list that doesn't fill whole rows |
+| `unexpected quote in csv field` | a `"` appeared in the middle of an unquoted field |
+| `unterminated csv quoted field` | the file ended inside a quoted field |
+| `expected csv delimiter after quoted field` | text followed a closing quote, as in `"a"b` |
+| `failed to open file for reading` | `csv.read` couldn't open the file |
+| `failed to open csv for writing` | `csv.write` reports failure creating or opening the output file |
 
 See [IO packages](/docs/design-notes/io/) for the design notes.

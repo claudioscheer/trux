@@ -1,9 +1,12 @@
 package main
 
 import "csv"
+import "errors"
 
 func main() int {
-  let cells list[string] = csv.read("examples/projects/csv_roster/roster.csv", 3)
+  let cells list[string], err error = csv.read("examples/projects/csv_roster/roster.csv", 3)
+  assert(err == nil, errors.message(err))
   print(len(cells))
   return 0
 }
+

@@ -21,6 +21,7 @@ import "csv"
 | [`time`](/docs/stdlib/time/) | wall-clock timestamps, monotonic timers, and sleeping |
 | [`http`](/docs/stdlib/http/) | a plaintext HTTP/1.1 server with a worker pool (Linux/macOS) |
 | [`gpu`](/docs/stdlib/gpu/) | CUDA device buffers, kernel launches, and thread coordinates |
+| [`errors`](/docs/guide/errors/) | creating errors with `errors.new` and retrieving messages with `errors.message` |
 
 {{% alert context="info" %}}
 
@@ -43,8 +44,9 @@ Besides packages, a few **builtins** are always available without an import:
 | `make([]T, n)` | create a zero-filled slice of length `n` |
 | `clone(x)` | deep copy of a string, array, slice, or list |
 
-## Runtime errors
+## Errors and failure {#runtime-errors}
 
-Library calls fail loudly. Invalid input, a missing file, or a malformed CSV row stops the program with a message on
-stderr such as `trux runtime error: invalid int input` and exit status `1`. There is no error-return mechanism yet. Each
-package page shows its real error messages; [Errors and failures](/docs/guide/errors/) explains the format.
+Stdin input parsing and invalid runtime state stop the program with a message on stderr such as
+`trux runtime error: invalid int input` and exit status `1`. File operations in `io`, `csv`, and `image` return explicit
+`error` values that callers must handle or unpack. Each package page shows its real error messages;
+[Errors and failures](/docs/guide/errors/) explains the format.

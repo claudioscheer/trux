@@ -1,8 +1,12 @@
 package main
 
 import "io"
+import "errors"
 
 func main() int {
-  print(io.readFile("missing.txt"))
+  let text string, err error = io.readFile("missing.txt")
+  assert(err == nil, errors.message(err))
+  print(text)
   return 0
 }
+

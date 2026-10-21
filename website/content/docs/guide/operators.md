@@ -124,13 +124,13 @@ Use parentheses whenever they make the intent clearer: `(a + b) / 2.0`.
 ## Statement-only builtins
 
 **What it is.** Calls that produce no value and can only stand alone on a line: `print`, `assert`, `append`,
-`io.writeFile`, `csv.write`, `image.writePpm`, `time.sleepMillis`, `http.serve`, `http.respond`, and the GPU copy,
-launch, `sync`, and `free` calls.
+`time.sleepMillis`, `http.serve`, `http.respond`, and the GPU copy,
+launch, `sync`, and `free` calls. (File writes like `io.writeFile`, `csv.write`, and `image.writePpm` return `error`.)
 
 **Why.** They exist for their effect. Using one inside an expression is always a mistake, so the compiler rejects it.
 
-**How to use it.** Put each on its own line. A call to your own function may also be used as a statement; its result is
-discarded.
+**How to use it.** Put each on its own line. A call to your own function may also be used as a statement when its result
+is discarded (unless it returns multiple values or an `error`, which must be explicitly handled or bound to `_`).
 
 **Common mistakes.**
 

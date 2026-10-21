@@ -4,6 +4,11 @@
   "description": "Syntax highlighting and language server support for Trux.",
   "version": "0.1.0",
   "publisher": "trux",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#1E3A8A",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -29,7 +34,11 @@
         "extensions": [
           ".tx"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./images/file-icon-light.svg",
+          "dark": "./images/file-icon-dark.svg"
+        }
       }
     ],
     "grammars": [

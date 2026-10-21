@@ -56,6 +56,7 @@ disableKinds = ["taxonomy", "term"]
     unsafe = true
 
 [params]
+  description = "Trux is a small, Go-inspired programming language that compiles to C, and to CUDA for GPU kernels."
   [params.footer]
     copyright = "Trux is released under the [MIT license](https://github.com/claudioscheer/trux/blob/main/LICENSE). Site built with [Hugo](https://gohugo.io) and [Lotus Docs](https://lotusdocs.dev)."
 
@@ -64,7 +65,7 @@ disableKinds = ["taxonomy", "term"]
 
   [params.docs]
     title = "Trux"
-    themeColor = "blue"
+    themeColor = "trux"  # assets/docs/scss/custom/colors/_trux.scss
     darkMode = true
     prism = true
     prismTheme = "lotusdocs"

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Trux</title>
+  <rect width="512" height="512" rx="112" fill="#1E3A8A"/>
+  <g transform="translate(256 256) scale(0.74) translate(-257 -255)"><g transform="translate(-12 0)" fill="none" stroke="#FFFFFF" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"><path d="M256 70 V330 Q256 440 366 440"/><path d="M172 150 L340 318"/><path d="M340 150 L172 318"/></g></g>
+</svg>

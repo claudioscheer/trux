@@ -1,0 +1,60 @@
+// Trux brand colors, shared by the landing page (scss/style.scss) and the
+// docs pages (docs/scss/custom/colors/_trux.scss).
+//
+//   #1E3A8A  brand blue: primary color on light backgrounds
+//   #172554  darker blue: hover and pressed states on light backgrounds
+//   #93C5FD  light blue: primary color on dark backgrounds (dark mode)
+//   #BFDBFE  lighter blue: hover states on dark backgrounds
+//   #0B1B3F  near-black blue: text on light blue fills in dark mode
+
+$trux-blue:          #1E3A8A;
+$trux-blue-dark:     #172554;
+$trux-blue-light:    #93C5FD;
+$trux-blue-lighter:  #BFDBFE;
+$trux-ink-on-light:  #0B1B3F;
+
+// Point Bootstrap's primary color at the brand blue. Import this after
+// Bootstrap's (and Lotus Docs') variables and before "bootstrap/bootstrap":
+// Bootstrap's own !default values then keep these.
+$primary:                                 $trux-blue;
+$theme-colors:                            map-merge($theme-colors, ("primary": $primary));
+$theme-colors-rgb:                        map-loop($theme-colors, to-rgb, "$value");
+$link-color:                              $primary;
+$link-hover-color:                        $trux-blue-dark;
+$component-active-bg:                     $primary;
+$primary-text-emphasis:                   shade-color($primary, 60%);
+$primary-bg-subtle:                       tint-color($primary, 80%);
+$primary-border-subtle:                   tint-color($primary, 60%);
+$input-focus-border-color:                tint-color($primary, 50%);
+$focus-ring-color:                        rgba($primary, .25);
+$input-btn-focus-color:                   rgba($primary, .25);
+$form-check-input-checked-bg-color:       $primary;
+$form-check-input-checked-border-color:   $primary;
+$form-range-thumb-bg:                     $primary;
+$pagination-active-bg:                    $primary;
+$pagination-active-border-color:          $primary;
+$nav-pills-link-active-bg:                $primary;
+$dropdown-link-active-bg:                 $primary;
+$list-group-active-bg:                    $primary;
+$list-group-active-border-color:          $primary;
+$progress-bar-bg:                         $primary;
+$trux-focus-shadow:                       0 0 0 .25rem rgba($primary, .25);
+$input-btn-focus-box-shadow:              $trux-focus-shadow;
+$input-focus-box-shadow:                  $trux-focus-shadow;
+$focus-ring-box-shadow:                   $trux-focus-shadow;
+$form-select-focus-border-color:          $input-focus-border-color;
+$form-select-focus-box-shadow:            $trux-focus-shadow;
+$form-check-input-focus-border:           $input-focus-border-color;
+$form-check-input-focus-box-shadow:       $trux-focus-shadow;
+$form-check-input-indeterminate-bg-color: $primary;
+$form-check-input-indeterminate-border-color: $primary;
+$form-range-thumb-focus-box-shadow:       0 0 0 1px $white, $trux-focus-shadow;
+$nav-link-focus-box-shadow:               $trux-focus-shadow;
+$btn-close-focus-shadow:                  $trux-focus-shadow;
+$accordion-button-focus-box-shadow:       $trux-focus-shadow;
+$pagination-focus-box-shadow:             $trux-focus-shadow;
+$dropdown-dark-link-active-bg:            $primary;
+$btn-link-color:                          $link-color;
+$btn-link-hover-color:                    $link-hover-color;
+$nav-link-color:                          $link-color;
+$nav-link-hover-color:                    $link-hover-color;

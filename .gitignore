@@ -26,6 +26,7 @@ node_modules/
 *.tx.c
 tmp-*.tx
 trux-*
+!/assets/logo/trux-*
 
 tmp/
 out/

@@ -1,4 +1,4 @@
-{{- /* Copy of the Lotus Docs v0.3.0 partial, changed only so the Atom feed link keeps the /trux/ base path, and to link each page's Markdown version. */ -}}
+{{- /* Copy of the Lotus Docs v0.3.0 partial, changed only so the Atom feed link keeps the /trux/ base path, to link each page's Markdown version, and to replace the theme's own author and version meta tags with a Trux theme color. */ -}}
 <head>
     <meta charset="utf-8" />
     <title>
@@ -24,11 +24,8 @@
     {{- with .Description | default ($.Param "description") }}
     <meta name="description" content="{{ . }}">
     {{- end }}
-    <meta name="keywords" content="Documentation, Hugo, Hugo Theme, Bootstrap" />
-    <meta name="author" content="Colin Wilson - Lotus Labs" />
-    <meta name="email" content="support@aigis.uk" />
-    <meta name="website" content="https://lotusdocs.dev" />
-    <meta name="Version" content="v0.1.0" />
+    <meta name="theme-color" content="#1E3A8A" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#181921" media="(prefers-color-scheme: dark)" />
     <!-- favicon -->
     {{ block "favicon" . }}{{ partialCached (printf "%s/%s" ($.Scratch.Get "pathName") "head/favicon.html") . }}{{ end }}
     {{- partial (printf "%s/%s" ($.Scratch.Get "pathName") "head/opengraph") . }}

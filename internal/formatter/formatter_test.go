@@ -338,3 +338,30 @@ func main( int {
 		t.Fatalf("error = %q, want parse error", err.Error())
 	}
 }
+
+func TestFormatMultiReturnAndErrors(t *testing.T) {
+	src := `package main
+
+import "errors"
+
+func divide(a int, b int) (int, error) {
+  if b == 0 {
+    return 0, errors.new("division by zero")
+  }
+  return a / b, nil
+}
+
+func main() int {
+  let result int, err error = divide(10, 2)
+  let _, err2 error = divide(10, 0)
+  return 0
+}
+`
+	formatted, err := Format("test.tx", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if formatted != src {
+		t.Fatalf("unexpected formatting:\n%s\nwant:\n%s", formatted, src)
+	}
+}

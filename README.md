@@ -45,13 +45,14 @@ average: 85
 
 Highlights:
 
-- explicit types: `int`, `float`, `string`, `bool`, arrays `[N]T`, slices `[]T`, and lists `list[T]`
+- explicit types: `int`, `float`, `string`, `bool`, `error`, arrays `[N]T`, slices `[]T`, and lists `list[T]`
+- multiple return values `(T1, T2)` and Go-style explicit error handling with `nil` and package `errors`
 - no implicit conversions; conditions must be `bool`
 - checked integer overflow, division by zero, and bounds, reported as `trux runtime error`
 - arena-based memory with simple ownership rules (`mut` parameters, `clone`) instead of a garbage collector
 - multi-file programs with relative imports and `pub func`
 - built-in unit tests: `.test.tx` files run by `trux test`
-- standard packages for stdin and files (`io`), CSV (`csv`), PPM images (`image`), clocks (`time`), and HTTP servers (`http`)
+- standard packages for stdin and files (`io`), CSV (`csv`), PPM images (`image`), errors (`errors`), clocks (`time`), and HTTP servers (`http`)
 - GPU kernels written in Trux with `kernel func`, compiled as CUDA
 
 ## Install and build

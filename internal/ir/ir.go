@@ -36,26 +36,40 @@ type Stmt interface {
 	stmtNode()
 }
 
+type LetBinding struct {
+	Pos  token.Position
+	Name string
+	Type ast.Type
+}
+
 type LetStmt struct {
-	Name  string
-	Pos   token.Position
-	Type  ast.Type
-	Value Expr
+	Name     string
+	Pos      token.Position
+	Type     ast.Type
+	Bindings []LetBinding
+	Value    Expr
 }
 
 func (*LetStmt) stmtNode() {}
 
 type ReturnStmt struct {
-	Pos   token.Position
-	Value Expr
+	Pos    token.Position
+	Value  Expr
+	Values []Expr
 }
 
 func (*ReturnStmt) stmtNode() {}
 
+type AssignTarget struct {
+	Pos  token.Position
+	Name string
+}
+
 type AssignStmt struct {
-	Name  string
-	Pos   token.Position
-	Value Expr
+	Name    string
+	Pos     token.Position
+	Targets []AssignTarget
+	Value   Expr
 }
 
 func (*AssignStmt) stmtNode() {}
@@ -284,6 +298,17 @@ func (e *BoolLiteral) Ownership() types.Origin { return e.Origin }
 
 func (*BoolLiteral) exprNode() {}
 
+type NilLiteral struct {
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *NilLiteral) Type() ast.Type { return e.Typ }
+
+func (e *NilLiteral) Ownership() types.Origin { return e.Origin }
+
+func (*NilLiteral) exprNode() {}
+
 type ArrayLiteral struct {
 	Elements []Expr
 	Typ      ast.Type
@@ -401,6 +426,30 @@ func (e *ReadFileExpr) Ownership() types.Origin { return e.Origin }
 
 func (*ReadFileExpr) exprNode() {}
 
+type ErrorsNewExpr struct {
+	Message Expr
+	Typ     ast.Type
+	Origin  types.Origin
+}
+
+func (e *ErrorsNewExpr) Type() ast.Type { return e.Typ }
+
+func (e *ErrorsNewExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ErrorsNewExpr) exprNode() {}
+
+type ErrorsMessageExpr struct {
+	Err    Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *ErrorsMessageExpr) Type() ast.Type { return e.Typ }
+
+func (e *ErrorsMessageExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ErrorsMessageExpr) exprNode() {}
+
 type ReadCSVExpr struct {
 	Path    Expr
 	Columns Expr
@@ -413,6 +462,48 @@ func (e *ReadCSVExpr) Type() ast.Type { return e.Typ }
 func (e *ReadCSVExpr) Ownership() types.Origin { return e.Origin }
 
 func (*ReadCSVExpr) exprNode() {}
+
+type WriteFileExpr struct {
+	Path     Expr
+	Contents Expr
+	Typ      ast.Type
+	Origin   types.Origin
+}
+
+func (e *WriteFileExpr) Type() ast.Type { return e.Typ }
+
+func (e *WriteFileExpr) Ownership() types.Origin { return e.Origin }
+
+func (*WriteFileExpr) exprNode() {}
+
+type WriteCSVExpr struct {
+	Path    Expr
+	Cells   Expr
+	Columns Expr
+	Typ     ast.Type
+	Origin  types.Origin
+}
+
+func (e *WriteCSVExpr) Type() ast.Type { return e.Typ }
+
+func (e *WriteCSVExpr) Ownership() types.Origin { return e.Origin }
+
+func (*WriteCSVExpr) exprNode() {}
+
+type WritePPMExpr struct {
+	Path   Expr
+	Pixels Expr
+	Width  Expr
+	Height Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *WritePPMExpr) Type() ast.Type { return e.Typ }
+
+func (e *WritePPMExpr) Ownership() types.Origin { return e.Origin }
+
+func (*WritePPMExpr) exprNode() {}
 
 type ImageDimensionExpr struct {
 	Kind   types.IOCallKind
@@ -643,24 +734,65 @@ func (b builder) buildFunc(fn *ast.FuncDecl) (*Func, error) {
 func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 	switch stmt := stmt.(type) {
 	case *ast.LetStmt:
-		b.used.note(stmt.Type)
+		for _, binding := range stmt.Bindings {
+			if binding.Type != nil {
+				b.used.note(binding.Type)
+			}
+		}
+		if stmt.Type != nil {
+			b.used.note(stmt.Type)
+		}
 		value, err := b.buildExpr(stmt.Value)
 		if err != nil {
 			return nil, err
 		}
-		return &LetStmt{Name: stmt.Name, Pos: stmt.Pos(), Type: stmt.Type, Value: value}, nil
+		var bindings []LetBinding
+		for _, binding := range stmt.Bindings {
+			bindings = append(bindings, LetBinding{
+				Pos:  binding.Pos,
+				Name: binding.Name,
+				Type: binding.Type,
+			})
+		}
+		return &LetStmt{
+			Name:     stmt.Name,
+			Pos:      stmt.Start,
+			Type:     stmt.Type,
+			Bindings: bindings,
+			Value:    value,
+		}, nil
 	case *ast.ReturnStmt:
-		value, err := b.buildExpr(stmt.Value)
+		astValues := stmt.Values
+		if len(astValues) == 0 && stmt.Value != nil {
+			astValues = []ast.Expression{stmt.Value}
+		}
+		values, err := b.buildExprs(astValues)
 		if err != nil {
 			return nil, err
 		}
-		return &ReturnStmt{Pos: stmt.Pos(), Value: value}, nil
+		var first Expr
+		if len(values) > 0 {
+			first = values[0]
+		}
+		return &ReturnStmt{Pos: stmt.Pos(), Value: first, Values: values}, nil
 	case *ast.AssignStmt:
 		value, err := b.buildExpr(stmt.Value)
 		if err != nil {
 			return nil, err
 		}
-		return &AssignStmt{Name: stmt.Name, Pos: stmt.Pos(), Value: value}, nil
+		var targets []AssignTarget
+		for _, t := range stmt.Targets {
+			targets = append(targets, AssignTarget{
+				Pos:  t.Pos,
+				Name: t.Name,
+			})
+		}
+		return &AssignStmt{
+			Name:    stmt.Name,
+			Pos:     stmt.Start,
+			Targets: targets,
+			Value:   value,
+		}, nil
 	case *ast.IndexAssignStmt:
 		target, err := b.buildExpr(stmt.Target)
 		if err != nil {
@@ -855,6 +987,8 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		return &StringLiteral{Value: expr.Value, Typ: typ, Origin: origin}, nil
 	case *ast.BoolLiteral:
 		return &BoolLiteral{Value: expr.Value, Typ: typ, Origin: origin}, nil
+	case *ast.NilLiteral:
+		return &NilLiteral{Typ: typ, Origin: origin}, nil
 	case *ast.ArrayLiteral:
 		elements, err := b.buildExprs(expr.Elements)
 		if err != nil {
@@ -1014,6 +1148,36 @@ func (b builder) buildIOExpr(expr *ast.CallExpr, sig types.IOCallSig, typ ast.Ty
 		return &ReadPPMExpr{Path: path, Typ: typ, Origin: origin}, nil
 	case types.IOCallTimeNowUnixMillis, types.IOCallTimeMonotonicNanos:
 		return &TimeNowExpr{Kind: sig.Kind, Typ: typ, Origin: origin}, nil
+	case types.IOCallErrorsNew:
+		msg, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &ErrorsNewExpr{Message: msg, Typ: typ, Origin: origin}, nil
+	case types.IOCallErrorsMessage:
+		errExpr, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &ErrorsMessageExpr{Err: errExpr, Typ: typ, Origin: origin}, nil
+	case types.IOCallWriteFile:
+		args, err := b.buildExprs(expr.Args)
+		if err != nil {
+			return nil, err
+		}
+		return &WriteFileExpr{Path: args[0], Contents: args[1], Typ: typ, Origin: origin}, nil
+	case types.IOCallWriteCSV:
+		args, err := b.buildExprs(expr.Args)
+		if err != nil {
+			return nil, err
+		}
+		return &WriteCSVExpr{Path: args[0], Cells: args[1], Columns: args[2], Typ: typ, Origin: origin}, nil
+	case types.IOCallWritePPM:
+		args, err := b.buildExprs(expr.Args)
+		if err != nil {
+			return nil, err
+		}
+		return &WritePPMExpr{Path: args[0], Pixels: args[1], Width: args[2], Height: args[3], Typ: typ, Origin: origin}, nil
 	default:
 		return nil, fmt.Errorf("%s can only be used as a statement", sig.Kind)
 	}

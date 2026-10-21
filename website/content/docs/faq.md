@@ -26,14 +26,13 @@ and to learn from. CUDA is "C plus kernels", so the same backend can target NVID
 
 Not implemented today, so don't expect these to work:
 
-- structs, maps, tuples, enums, pointers, or user-defined types
+- structs, maps, tuples (outside multiple returns), enums, pointers, or user-defined types
 - generics, closures, or function values (except naming a handler for `http.serve` or a kernel for `gpu.launch*`)
 - type inference (`x := 1`), compound assignment (`+=`), and `++` / `--`
 - conversions between `int`, `float`, and `string`
 - global variables and constants
 - removing elements from a list
 - command-line arguments for programs (`main` takes no parameters)
-- error values: library calls stop the program on failure
 - threads or async code outside the HTTP server's worker pool
 - recursive directory packages and separate compilation
 
@@ -117,8 +116,8 @@ All runtime errors start with `trux runtime error:` and exit with status `1`.
 | `slice 2:9 out of bounds for length 4` | slice bounds outside the collection, or start after end |
 | `assertion failed: <message>` | an `assert` condition was `false` |
 | `invalid int input`, `invalid float input`, `invalid bool input` | [`io.readInt`](/docs/stdlib/io/#errors) and friends couldn't parse the line |
-| `cannot open file for reading notes.txt: No such file or directory` and similar | a file operation failed |
-| `csv row has 3 columns, want 2` | a CSV row didn't match the `columns` argument (see [`csv` errors](/docs/stdlib/csv/#errors)) |
+
+File operations in [`io`](/docs/stdlib/io/), [`csv`](/docs/stdlib/csv/), and [`image`](/docs/stdlib/image/) return explicit `error` values instead of stopping the program directly.
 
 The overflow, division, and assertion messages include the Trux file and line, for example `at main.tx:5`. Every
 message is explained, with a failing example, in [Errors and failures](/docs/guide/errors/) and on each guide page.

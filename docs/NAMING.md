@@ -5,6 +5,8 @@ Trux source-level identifiers use lower camelCase.
 This applies to public language surface names, including standard package members:
 
 ```trux
+errors.new(message)
+errors.message(err)
 io.readLine()
 io.readInt()
 io.readFloat()
@@ -13,6 +15,10 @@ io.readFile(path)
 io.writeFile(path, contents)
 csv.read(path, columns)
 csv.write(path, cells, columns)
+image.width(path)
+image.height(path)
+image.readPpm(path)
+image.writePpm(path, pixels, width, height)
 time.nowUnixMillis()
 time.monotonicNanos()
 time.sleepMillis(ms)

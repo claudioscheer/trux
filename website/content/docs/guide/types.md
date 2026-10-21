@@ -7,7 +7,7 @@ weight: 200
 
 ## Scalar types
 
-**What it is.** Four built-in value types:
+**What it is.** Built-in value types:
 
 | Type | Meaning | Literals | In generated C |
 | --- | --- | --- | --- |
@@ -15,6 +15,7 @@ weight: 200
 | `float` | 64-bit IEEE 754 number | `1.5`, `2.0`, `0.25` | `double` |
 | `string` | immutable sequence of bytes | `"hello"`, `"line\n"` | `rt_string` (pointer + length) |
 | `bool` | truth value | `true`, `false` | `bool` |
+| `error` | error value or nil | `nil` | `rt_error` |
 
 **Why.** A small, fixed set of types that map one-to-one onto C keeps the generated code predictable and fast.
 
@@ -43,6 +44,7 @@ weight: 200
 - Floats need digits on both sides of the dot: `1.0`, `0.5`. `1.`, `.5`, `1e9`, and hex are not supported.
 - Strings use double quotes, fit on one line, and support the escapes `\n`, `\t`, `\"`, and `\\`. `len(s)` counts
   bytes.
+- `nil` is the literal for an `error` that represents success (no error).
 
 **Common mistakes.** Any other escape is a compile error:
 

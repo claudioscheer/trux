@@ -496,7 +496,16 @@ func (l *loader) rewriteStmtCalls(unit *fileUnit, stmt ast.Statement, ctx resolu
 	case *ast.LetStmt:
 		return l.rewriteExprCalls(unit, stmt.Value, ctx)
 	case *ast.ReturnStmt:
-		return l.rewriteExprCalls(unit, stmt.Value, ctx)
+		values := stmt.Values
+		if len(values) == 0 && stmt.Value != nil {
+			values = []ast.Expression{stmt.Value}
+		}
+		for _, val := range values {
+			if err := l.rewriteExprCalls(unit, val, ctx); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *ast.AssignStmt:
 		return l.rewriteExprCalls(unit, stmt.Value, ctx)
 	case *ast.IndexAssignStmt:

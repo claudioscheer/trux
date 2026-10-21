@@ -20,8 +20,8 @@ func add(a int, b int) int {
 ```
 
 - Every parameter has its own type. There is no shorthand like `a, b int`.
-- The return type is **required**, and a function returns exactly one value. Functions that exist for their side effects
-  conventionally return `0`.
+- The return type is **required**. A function returns a single type or multiple types in parentheses (e.g. `(int, error)`).
+  Functions that exist for their side effects conventionally return `0` or `error`.
 - Arguments must match the parameter types exactly.
 - Functions can be declared in any order, and they can call themselves:
 
@@ -29,7 +29,7 @@ func add(a int, b int) int {
 
 {{< include "website/outputs/fibonacci.txt" "text" >}}
 
-A call can stand alone as a statement when you don't need its result (`printIterative(count)` above).
+A call returning a single non-error value can stand alone as a statement when you don't need its result (`printIterative(count)` above). Calls returning multiple values or an `error` must be unpacked or explicitly ignored with `_`.
 
 **Common mistakes.** Leaving out the return type:
 

@@ -930,10 +930,10 @@ func main() int {
     let count int = io.readInt()
     let ratio float = io.readFloat()
     let ready bool = io.readBool()
-    let text string = io.readFile("input.txt")
-    io.writeFile("out.txt", text + line)
-    let cells list[string] = csv.read("in.csv", 2)
-    csv.write("out.csv", cells, 2)
+    let text string, err1 error = io.readFile("input.txt")
+    let err2 error = io.writeFile("out.txt", text + line)
+    let cells list[string], err3 error = csv.read("in.csv", 2)
+    let err4 error = csv.write("out.csv", cells, 2)
     print(line, " ", count, " ", ratio, " ", ready, " ", len(cells))
     return 0
 }`)
@@ -943,10 +943,10 @@ func main() int {
 		"int64_t trux_v_5_count = rt_read_int(&trux_frame);",
 		"double trux_v_5_ratio = rt_read_float(&trux_frame);",
 		"bool trux_v_5_ready = rt_read_bool(&trux_frame);",
-		"rt_string trux_v_4_text = rt_read_file(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"input.txt\", 9));",
-		"rt_write_file(RT_LIT(rt_string, (const uint8_t*)\"out.txt\", 7), rt_string_concat(&trux_frame, trux_v_4_text, trux_v_4_line));",
-		"rt_list_string* trux_v_5_cells = rt_read_csv(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"in.csv\", 6), 2);",
-		"rt_write_csv(RT_LIT(rt_string, (const uint8_t*)\"out.csv\", 7), trux_v_5_cells, 2);",
+		"rt_read_file(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"input.txt\", 9))",
+		"rt_write_file(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"out.txt\", 7), rt_string_concat(&trux_frame, trux_v_4_text, trux_v_4_line))",
+		"rt_read_csv(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"in.csv\", 6), 2)",
+		"rt_write_csv(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"out.csv\", 7), trux_v_5_cells, 2)",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -1565,5 +1565,56 @@ func main() int {
 	}
 	if strings.Contains(addGreeting, "rt_string_concat(&trux_frame") {
 		t.Fatalf("addGreeting should not append frame-owned string data:\n%s", addGreeting)
+	}
+}
+
+func TestGenerateMultiReturnAndErrorHandling(t *testing.T) {
+	src := `package main
+
+import "errors"
+
+func divide(a int, b int) (int, error) {
+    if b == 0 {
+        return 0, errors.new("division by zero")
+    }
+    return a / b, nil
+}
+
+func main() int {
+    let result int, err error = divide(10, 2)
+    if err != nil {
+        print(errors.message(err))
+        return 1
+    }
+    print(err)
+    let _, err2 error = divide(10, 0)
+    result, err = divide(30, 3)
+    _, err = divide(40, 4)
+    return 0
+}
+`
+	path := filepath.Join(t.TempDir(), "main.tx")
+	result, err := modules.LoadWithSources(path, map[string]string{path: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(result.Program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(result.Program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(cSource, "trux_tuple_") {
+		t.Fatalf("generated C missing tuple struct definition:\n%s", cSource)
+	}
+	if !strings.Contains(cSource, "rt_error") {
+		t.Fatalf("generated C missing rt_error:\n%s", cSource)
 	}
 }

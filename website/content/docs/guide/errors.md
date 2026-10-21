@@ -5,8 +5,8 @@ icon: "report"
 weight: 1050
 ---
 
-Trux has no exceptions and no error values. A mistake is either caught by the compiler, or it stops the running program
-with a message. Either way the command exits with a non-zero status.
+Trux has no exceptions. Failure is handled explicitly with `error` values, or stops the running program
+with a runtime panic. Either way, unhandled mistakes or failed commands exit with a non-zero status.
 
 ## Compile errors
 
@@ -25,6 +25,43 @@ Errors in an imported file point at that file. Errors go to stderr.
 
 **Related:** [FAQ: common errors](/docs/faq/#common-errors). Every guide page lists the errors for its features.
 
+## Error values {#error-values}
+
+**What it is.** Trux supports explicit error values via the `error` scalar type, the `nil` literal keyword, and the `errors` standard package.
+
+**Why.** Explicit errors make fallible operations visible in function signatures without hidden control flow or exceptions.
+
+**How to use it.** Functions signal failure by returning an `error` (often alongside other values using multiple return types):
+
+```trux
+import "errors"
+
+func divide(a int, b int) (int, error) {
+  if b == 0 {
+    return 0, errors.new("division by zero")
+  }
+  return a / b, nil
+}
+```
+
+Callers unpack the error and check if `err != nil`:
+
+```trux
+let result int, err error = divide(10, 0)
+if err != nil {
+  print("failed: ", errors.message(err))
+  return 1
+}
+```
+
+Calls that return an `error` or multiple values cannot stand alone as bare statements; you must unpack them or explicitly ignore unwanted values with `_`:
+
+```trux
+let _, err error = divide(10, 0)
+```
+
+Standard library file and IO operations (`io.readFile`, `io.writeFile`, `csv.read`, `csv.write`, `image.readPpm`, `image.writePpm`) all return `error` values.
+
 ## Runtime errors {#runtime-errors}
 
 **What it is.** A check that fails while the program runs prints `trux runtime error: <message>` to stderr and exits
@@ -41,16 +78,16 @@ errors currently don't.
 | division or remainder by zero | `integer division by zero` | [Operators](/docs/guide/operators/#checked-integer-arithmetic) |
 | index or slice out of range | `index 5 out of bounds for length 3` | [Collections](/docs/guide/collections/#bounds-checks) |
 | failed `assert` | `assertion failed: <message>` | [Control flow](/docs/guide/control-flow/#assert) |
-| bad input, missing file, malformed CSV or PPM | `invalid int input`, `cannot open file …` | [Standard library](/docs/stdlib/#runtime-errors) |
+| malformed stdin input | `invalid int input` | [Standard library](/docs/stdlib/#runtime-errors) |
 | CUDA call failed | `CUDA <operation> failed: …` | [GPU](/docs/guide/gpu/#kernel-errors) |
 
 Under `trux run`, a failed program is followed by `execute <temp path>: exit status N`, printed by `trux` itself:
 
 {{< include "website/outputs/errors/operators_divide_by_zero.txt" "text" >}}
 
-**Common mistakes.** Expecting to recover. There is no `try`, and library calls do not return errors. Check what you can
-before the call (for example, read input with `io.readLine` and validate it yourself), and treat a runtime error as a
-bug to fix.
+**Common mistakes.** Expecting exceptions or `try`/`catch`. Trux uses Go-style explicit `error` values for fallible
+operations (such as file and CSV IO), and reserves runtime panics for unrecoverable programmer errors (such as
+integer overflow, index out of bounds, or a failed `assert`).
 
 **When you don't need it.** Don't add `assert`s that repeat the built-in checks above.
 

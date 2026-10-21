@@ -55,7 +55,16 @@ int
 float
 string
 bool
+error
 ```
+
+Supported multiple return types:
+
+```text
+(T1, T2, ...)
+```
+
+Functions can return multiple values using parenthesized return types, e.g. `(int, error)` or `(string, int, bool)`. The `error` type represents an explicit error value; `nil` represents the absence of an error.
 
 Supported collection types:
 
@@ -79,10 +88,12 @@ GPU buffers require `import "gpu"` for operations. They are device memory handle
 Current C mappings:
 
 ```text
-int    -> int64_t
-float  -> double
-bool   -> bool
-string -> rt_string
+int            -> int64_t
+float          -> double
+bool           -> bool
+string         -> rt_string
+error          -> rt_error (rt_error_data*)
+(T1, T2, ...)  -> trux_tuple_T1_T2
 ```
 
 A `trux` string is not a raw C `char*`. It is represented as:
@@ -151,15 +162,21 @@ slicing
 make([]T, n)
 clone(x)
 len(x)
+nil
+errors.new(message)
+errors.message(err)
 io.readLine()
 io.readInt()
 io.readFloat()
 io.readBool()
 io.readFile(path)
+io.writeFile(path, contents)
 csv.read(path, columns)
+csv.write(path, cells, columns)
 image.width(path)
 image.height(path)
 image.readPpm(path)
+image.writePpm(path, pixels, width, height)
 time.nowUnixMillis()
 time.monotonicNanos()
 gpu.alloc(n)
@@ -239,8 +256,6 @@ for
 print(...)
 assert(condition, message)
 append(list, value)
-io.writeFile(path, contents)
-csv.write(path, cells, columns)
 time.sleepMillis(ms)
 gpu.copyToDevice(host, device)
 gpu.copyToHost(device, host)
@@ -290,12 +305,109 @@ print(int)    -> rt_print_int
 print(float)  -> rt_print_float
 print(string) -> rt_print_string
 print(bool)   -> rt_print_bool
+print(error)  -> rt_print_error
 ```
 
 `assert` is statement-only. It requires a `bool` condition and a `string` message. If the condition is false at runtime, the generated app writes a runtime assertion error to stderr and exits with status `1`:
 
 ```trux
 assert(len(items) > 0, "items must not be empty")
+```
+
+## Error Handling and Multiple Returns
+
+Trux uses Go-style explicit error handling and multiple return values.
+
+### The `error` Type and `nil`
+
+`error` is a first-class scalar type representing fallible operation results. The `nil` keyword represents the absence of an error.
+
+`error` values can be compared to `nil` using `==` and `!=`:
+
+```trux
+if err != nil {
+  print("operation failed: ", errors.message(err))
+}
+```
+
+Printing an error value with `print(err)` prints the error's message string, or `<nil>` if the error is nil.
+
+### The `errors` Package
+
+The standard library includes `errors`:
+
+```trux
+import "errors"
+
+errors.new(msg string) error
+errors.message(err error) string
+```
+
+- `errors.new(msg)` allocates a new error value with the given message.
+- `errors.message(err)` returns the error message string (or `""` if `nil`).
+
+### Multiple Return Values
+
+Functions can return multiple values using parenthesized return types in their signature:
+
+```trux
+func divmod(a int, b int) (int, int) {
+  return a / b, a % b
+}
+
+func parse(s string) (int, error) {
+  if len(s) == 0 {
+    return 0, errors.new("empty string")
+  }
+  return 42, nil
+}
+```
+
+A return statement with multiple values uses comma separation: `return val, nil`.
+Forwarding a call returning matching multiple values is supported:
+
+```trux
+func forward(a int, b int) (int, int) {
+  return divmod(a, b)
+}
+```
+
+Multi-return forwarding into function argument lists (e.g. `foo(bar())`) is forbidden.
+
+### Unpacking and the Blank Identifier
+
+Multiple returns are unpacked into explicit typed `let` bindings:
+
+```trux
+let q int, r int = divmod(14, 3)
+let value int, err error = parse(input)
+```
+
+The blank identifier `_` discards unwanted values:
+
+```trux
+let _, rem int = divmod(14, 3)
+let val int, _ error = parse(input)
+```
+
+Multi-variable assignment updates existing variables:
+
+```trux
+q, r = divmod(20, 6)
+_, r = divmod(25, 4)
+```
+
+### Statement Restrictions
+
+Calling a function that returns multiple values or an `error` as a bare statement without assigning or discarding its results is a compile-time error. All errors must be handled, assigned, or explicitly discarded:
+
+```trux
+// Compile-time error:
+// io.writeFile("out.txt", data)
+
+// Allowed:
+let err error = io.writeFile("out.txt", data)
+_ = io.writeFile("out.txt", data)
 ```
 
 ## Unit Tests
@@ -341,27 +453,27 @@ let count int = io.readInt()
 let ratio float = io.readFloat()
 let ok bool = io.readBool()
 
-let contents string = io.readFile("input.txt")
-io.writeFile("copy.txt", contents)
+let contents string, readErr error = io.readFile("input.txt")
+let writeErr error = io.writeFile("copy.txt", contents)
 
-let cells list[string] = csv.read("input.csv", 2)
-csv.write("copy.csv", cells, 2)
+let cells list[string], csvErr error = csv.read("input.csv", 2)
+let writeCsvErr error = csv.write("copy.csv", cells, 2)
 
 let width int = image.width("input.ppm")
 let height int = image.height("input.ppm")
-let pixels []int = image.readPpm("input.ppm")
-image.writePpm("copy.ppm", pixels, width, height)
+let pixels []int, ppmErr error = image.readPpm("input.ppm")
+let writePpmErr error = image.writePpm("copy.ppm", pixels, width, height)
 ```
 
 `io.readLine` reads one line from stdin without the trailing newline. `io.readInt`, `io.readFloat`, and `io.readBool` read one line from stdin and parse it as the requested scalar type. Invalid typed input is a runtime error.
 
-`io.readFile` returns the complete file contents as a `string`. `io.writeFile` overwrites the target path with the provided contents.
+`io.readFile` returns `(string, error)` with the complete file contents or a descriptive error. `io.writeFile` writes the target path with the provided contents and returns `error` (`nil` on success).
 
-`csv.read` returns a flat row-major `list[string]`. The `columns` argument must be positive and each CSV row must have exactly that many columns. `csv.write` writes a flat row-major `list[string]` using the same column count.
+`csv.read` returns `(list[string], error)` as flat row-major cells. The `columns` argument must be positive and each CSV row must have exactly that many columns. `csv.write` writes a flat row-major `list[string]` using the same column count and returns `error` (`nil` on success).
 
 CSV supports quoted fields and escaped quotes using doubled quotes.
 
-`image.readPpm` returns flat RGB channel values from a P3 PPM image with max value `255`. `image.writePpm` writes a flat RGB `[]int` as P3 PPM and requires `len(pixels) == width * height * 3`.
+`image.readPpm` returns `([]int, error)` with flat RGB channel values from a P3 PPM image with max value `255`. `image.writePpm` writes a flat RGB `[]int` as P3 PPM, requiring `len(pixels) == width * height * 3`, and returns `error` (`nil` on success).
 
 ## Time
 
@@ -569,7 +681,8 @@ make with a non-slice type or non-int length
 clone with the wrong arity or unsupported type
 qualified calls to private package functions
 standard `io`, `csv`, `time`, and `gpu` package calls with the wrong arity or argument types
-io.writeFile, csv.write, time.sleepMillis, and statement-only gpu calls outside statement position
+time.sleepMillis, and statement-only gpu calls outside statement position
+calling a function returning multiple values or an error as a bare statement without assignment or discard
 unsupported host-only constructs inside kernels
 ```
 

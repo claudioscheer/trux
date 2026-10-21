@@ -3,11 +3,13 @@ package main
 import "io"
 
 func main() int {
-  let seed string = io.readFile("examples/projects/file_notes/seed.txt")
+  let seed string, readErr error = io.readFile("examples/projects/file_notes/seed.txt")
+  assert(readErr == nil, "read seed.txt")
   let extra string = io.readLine()
   let summary string = seed + "\n" + extra
 
-  io.writeFile("examples/projects/file_notes/summary.txt", summary)
+  let writeErr error = io.writeFile("examples/projects/file_notes/summary.txt", summary)
+  assert(writeErr == nil, "write summary.txt")
   print(summary)
 
   return 0

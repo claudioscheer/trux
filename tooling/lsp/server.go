@@ -308,9 +308,11 @@ func prepareTestFile(program *ast.Program) error {
 			return fmt.Errorf("%s:%d:%d: test function %s must not return explicitly", fn.NamePos.File, fn.NamePos.Line, fn.NamePos.Column, fn.Name)
 		}
 		fn.ReturnType = ast.IntType
+		retVal := &ast.IntLiteral{Start: fn.Body.End, Value: "0"}
 		fn.Body.Statements = append(fn.Body.Statements, &ast.ReturnStmt{
-			Start: fn.Body.End,
-			Value: &ast.IntLiteral{Start: fn.Body.End, Value: "0"},
+			Start:  fn.Body.End,
+			Value:  retVal,
+			Values: []ast.Expression{retVal},
 		})
 	}
 	return nil
@@ -351,7 +353,7 @@ func ensureMain(program *ast.Program) {
 			Start: pos,
 			End:   pos,
 			Statements: []ast.Statement{
-				&ast.ReturnStmt{Start: pos, Value: &ast.IntLiteral{Start: pos, Value: "0"}},
+				&ast.ReturnStmt{Start: pos, Value: &ast.IntLiteral{Start: pos, Value: "0"}, Values: []ast.Expression{&ast.IntLiteral{Start: pos, Value: "0"}}},
 			},
 		},
 	})

@@ -68,6 +68,8 @@ const (
 	IOCallTimeNowUnixMillis  IOCallKind = IOCallKind(stdlib.CallTimeNowUnixMillis)
 	IOCallTimeMonotonicNanos IOCallKind = IOCallKind(stdlib.CallTimeMonotonicNanos)
 	IOCallTimeSleepMillis    IOCallKind = IOCallKind(stdlib.CallTimeSleepMillis)
+	IOCallErrorsNew          IOCallKind = IOCallKind(stdlib.CallErrorsNew)
+	IOCallErrorsMessage      IOCallKind = IOCallKind(stdlib.CallErrorsMessage)
 )
 
 type IOCallSig struct {
@@ -327,7 +329,7 @@ func (c *checker) collectFunctions(program *ast.Program) error {
 			if fn.ReturnType == nil {
 				return typeError(fn.Pos, "function %q must declare return type", fn.Name)
 			}
-			if err := validateType(fn.Pos, fn.ReturnType); err != nil {
+			if err := validateReturnType(fn.Pos, fn.ReturnType); err != nil {
 				return err
 			}
 		}
@@ -485,6 +487,57 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 	c.reachesEnd = true
 	switch stmt := stmt.(type) {
 	case *ast.LetStmt:
+		if len(stmt.Bindings) > 1 {
+			valType, err := c.checkExpr(locals, stmt.Value, false)
+			if err != nil {
+				return err
+			}
+			tuple, ok := valType.(*ast.TupleType)
+			if !ok {
+				return typeError(stmt.Value.Pos(), "cannot unpack non-tuple type %s into %d variables", valType, len(stmt.Bindings))
+			}
+			if len(stmt.Bindings) != len(tuple.Types) {
+				return typeError(stmt.Start, "cannot unpack %d values into %d variables", len(tuple.Types), len(stmt.Bindings))
+			}
+			for i, binding := range stmt.Bindings {
+				elemType := tuple.Types[i]
+				if binding.Name == "_" {
+					if binding.Type != nil && !ast.TypeEqual(binding.Type, elemType) {
+						return typeError(binding.Pos, "cannot discard %s with type %s", elemType, binding.Type)
+					}
+					continue
+				}
+				if _, exists := locals.locals[binding.Name]; exists {
+					return typeError(binding.Pos, "duplicate local variable %q", binding.Name)
+				}
+				if binding.Type != nil {
+					if err := validateType(binding.Pos, binding.Type); err != nil {
+						return err
+					}
+					if !ast.TypeEqual(binding.Type, elemType) {
+						return typeError(binding.Pos, "cannot assign %s to %s", elemType, binding.Type)
+					}
+				}
+				if _, exists := c.info.Locals[fn][binding.Name]; !exists {
+					c.info.Locals[fn][binding.Name] = elemType
+				}
+				locals.locals[binding.Name] = localInfo{
+					typ:    elemType,
+					origin: OriginOwned,
+				}
+			}
+			return nil
+		}
+		if stmt.Name == "_" {
+			valType, err := c.checkExpr(locals, stmt.Value, false)
+			if err != nil {
+				return err
+			}
+			if stmt.Type != nil && !ast.TypeEqual(valType, stmt.Type) {
+				return typeError(stmt.Start, "cannot assign %s to _ of type %s", valType, stmt.Type)
+			}
+			return nil
+		}
 		if _, exists := locals.locals[stmt.Name]; exists {
 			return typeError(stmt.Start, "duplicate local variable %q", stmt.Name)
 		}
@@ -509,6 +562,39 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		}
 		return nil
 	case *ast.AssignStmt:
+		if len(stmt.Targets) > 1 {
+			valueType, err := c.checkExpr(locals, stmt.Value, false)
+			if err != nil {
+				return err
+			}
+			tuple, ok := valueType.(*ast.TupleType)
+			if !ok {
+				return typeError(stmt.Value.Pos(), "cannot unpack non-tuple type %s into %d variables", valueType, len(stmt.Targets))
+			}
+			if len(stmt.Targets) != len(tuple.Types) {
+				return typeError(stmt.Start, "cannot unpack %d values into %d variables", len(tuple.Types), len(stmt.Targets))
+			}
+			for i, target := range stmt.Targets {
+				elemType := tuple.Types[i]
+				if target.Name == "_" {
+					continue
+				}
+				local, ok := locals.lookup(target.Name)
+				if !ok {
+					return typeError(target.Pos, "undefined variable %q", target.Name)
+				}
+				if !ast.TypeEqual(elemType, local.typ) {
+					return typeError(target.Pos, "cannot assign %s to %s", elemType, local.typ)
+				}
+				local.origin = OriginOwned
+				locals.assign(target.Name, local)
+			}
+			return nil
+		}
+		if stmt.Name == "_" {
+			_, err := c.checkExpr(locals, stmt.Value, false)
+			return err
+		}
 		local, ok := locals.lookup(stmt.Name)
 		if !ok {
 			return typeError(stmt.Start, "undefined variable %q", stmt.Name)
@@ -555,12 +641,51 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		c.setExpr(stmt.Target, elemType, indexOrigin(collectionType, c.exprOrigin(stmt.Target.Collection)))
 		return nil
 	case *ast.ReturnStmt:
-		valueType, err := c.checkExpr(locals, stmt.Value, false)
-		if err != nil {
-			return err
+		values := stmt.Values
+		if len(values) == 0 && stmt.Value != nil {
+			values = []ast.Expression{stmt.Value}
 		}
-		if !ast.TypeEqual(valueType, fn.ReturnType) {
-			return typeError(stmt.Value.Pos(), "cannot return %s from function returning %s", valueType, fn.ReturnType)
+		if fn.ReturnType == nil {
+			if len(values) > 0 {
+				return typeError(stmt.Start, "cannot return value from void function")
+			}
+			c.reachesEnd = false
+			return nil
+		}
+		if tuple, isTuple := fn.ReturnType.(*ast.TupleType); isTuple {
+			if len(values) == 1 {
+				valType, err := c.checkExpr(locals, values[0], false)
+				if err != nil {
+					return err
+				}
+				if !ast.TypeEqual(valType, tuple) {
+					return typeError(values[0].Pos(), "cannot return %s from function returning %s", valType, tuple)
+				}
+			} else {
+				if len(values) != len(tuple.Types) {
+					return typeError(stmt.Start, "function returns %d values, but return statement has %d", len(tuple.Types), len(values))
+				}
+				for i, valExpr := range values {
+					valType, err := c.checkExpr(locals, valExpr, false)
+					if err != nil {
+						return err
+					}
+					if !ast.TypeEqual(valType, tuple.Types[i]) {
+						return typeError(valExpr.Pos(), "cannot return %s from function returning %s", valType, tuple.Types[i])
+					}
+				}
+			}
+		} else {
+			if len(values) != 1 {
+				return typeError(stmt.Start, "function returns 1 value, but return statement has %d", len(values))
+			}
+			valueType, err := c.checkExpr(locals, values[0], false)
+			if err != nil {
+				return err
+			}
+			if !ast.TypeEqual(valueType, fn.ReturnType) {
+				return typeError(values[0].Pos(), "cannot return %s from function returning %s", valueType, fn.ReturnType)
+			}
 		}
 		c.reachesEnd = false
 		return nil
@@ -672,8 +797,20 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		c.reachesEnd = false
 		return nil
 	case *ast.ExprStmt:
-		_, err := c.checkExpr(locals, stmt.Expr, true)
-		return err
+		typ, err := c.checkExpr(locals, stmt.Expr, true)
+		if err != nil {
+			return err
+		}
+		if call, ok := stmt.Expr.(*ast.CallExpr); ok && call.Package == "" && (call.Callee == "print" || call.Callee == "assert") {
+			return nil
+		}
+		if _, isTuple := typ.(*ast.TupleType); isTuple {
+			return typeError(stmt.Pos(), "result of multi-value call must be assigned or discarded with _")
+		}
+		if ast.TypeEqual(typ, ast.ErrorType) {
+			return typeError(stmt.Pos(), "result of call returning error must be handled or assigned to _")
+		}
+		return nil
 	default:
 		return typeError(stmt.Pos(), "unsupported statement %T", stmt)
 	}
@@ -828,6 +965,8 @@ func (c *checker) checkKernelExpr(locals *scope, expr ast.Expression) (ast.Type,
 	case *ast.BoolLiteral:
 		c.setExpr(expr, ast.BoolType, OriginOwned)
 		return ast.BoolType, nil
+	case *ast.NilLiteral:
+		return nil, typeError(expr.Pos(), "nil is not supported in kernels")
 	case *ast.IdentExpr:
 		local, ok := locals.lookup(expr.Name)
 		if !ok {
@@ -939,6 +1078,9 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 	case *ast.BoolLiteral:
 		c.setExpr(expr, ast.BoolType, OriginOwned)
 		return ast.BoolType, nil
+	case *ast.NilLiteral:
+		c.setExpr(expr, ast.ErrorType, OriginOwned)
+		return ast.ErrorType, nil
 	case *ast.ArrayLiteral:
 		if err := validateType(expr.Start, expr.Type); err != nil {
 			return nil, err
@@ -1639,7 +1781,8 @@ func printableType(typ ast.Type) bool {
 	return ast.TypeEqual(typ, ast.IntType) ||
 		ast.TypeEqual(typ, ast.FloatType) ||
 		ast.TypeEqual(typ, ast.StringType) ||
-		ast.TypeEqual(typ, ast.BoolType)
+		ast.TypeEqual(typ, ast.BoolType) ||
+		ast.TypeEqual(typ, ast.ErrorType)
 }
 
 func hasLength(typ ast.Type) bool {
@@ -1660,7 +1803,17 @@ func cloneableType(typ ast.Type) bool {
 }
 
 func dynamicType(typ ast.Type) bool {
-	return ast.TypeEqual(typ, ast.StringType) || isMutableCollection(typ)
+	if ast.TypeEqual(typ, ast.StringType) || ast.TypeEqual(typ, ast.ErrorType) || isMutableCollection(typ) {
+		return true
+	}
+	if tuple, ok := typ.(*ast.TupleType); ok {
+		for _, t := range tuple.Types {
+			if dynamicType(t) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func validateMutableParam(fn *ast.FuncDecl, param ast.Param) error {
@@ -1764,9 +1917,32 @@ func validateType(pos token.Position, typ ast.Type) error {
 			return typeError(pos, "gpu.Buffer element type must be int or float, got %s", typ.Elem)
 		}
 		return nil
+	case *ast.TupleType:
+		return typeError(pos, "tuple types can only be used as function return types")
 	default:
 		return typeError(pos, "unsupported type %s", typ)
 	}
+}
+
+func validateReturnType(pos token.Position, typ ast.Type) error {
+	if typ == nil {
+		return nil
+	}
+	if tuple, ok := typ.(*ast.TupleType); ok {
+		if len(tuple.Types) < 2 {
+			return typeError(pos, "tuple type must have at least 2 types")
+		}
+		for _, elem := range tuple.Types {
+			if _, isTuple := elem.(*ast.TupleType); isTuple {
+				return typeError(pos, "nested tuple types are not supported")
+			}
+			if err := validateType(pos, elem); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return validateType(pos, typ)
 }
 
 func gpuScalarType(typ ast.Type) bool {

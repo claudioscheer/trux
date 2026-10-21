@@ -147,9 +147,9 @@ import "csv"
 
 func main() int {
     let line string = io.readLine()
-    let cells list[string] = csv.read("input.csv", 2)
-    io.writeFile("out.txt", line)
-    csv.write("out.csv", cells, 2)
+    let cells list[string], err1 error = csv.read("input.csv", 2)
+    let err2 error = io.writeFile("out.txt", line)
+    let err3 error = csv.write("out.csv", cells, 2)
     return 0
 }`)
 

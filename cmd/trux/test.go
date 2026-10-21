@@ -245,9 +245,11 @@ func compileTestHarness(tc testCase) (*compileResult, error) {
 			found = true
 		}
 		fn.ReturnType = ast.IntType
+		retVal := &ast.IntLiteral{Start: fn.Body.End, Value: "0"}
 		fn.Body.Statements = append(fn.Body.Statements, &ast.ReturnStmt{
-			Start: fn.Body.End,
-			Value: &ast.IntLiteral{Start: fn.Body.End, Value: "0"},
+			Start:  fn.Body.End,
+			Value:  retVal,
+			Values: []ast.Expression{retVal},
 		})
 	}
 	if !found {
@@ -273,7 +275,7 @@ func syntheticMain(testName string, pos token.Position) *ast.FuncDecl {
 			End:   pos,
 			Statements: []ast.Statement{
 				&ast.ExprStmt{Expr: &ast.CallExpr{Start: pos, Callee: testName}},
-				&ast.ReturnStmt{Start: pos, Value: &ast.IntLiteral{Start: pos, Value: "0"}},
+				&ast.ReturnStmt{Start: pos, Value: &ast.IntLiteral{Start: pos, Value: "0"}, Values: []ast.Expression{&ast.IntLiteral{Start: pos, Value: "0"}}},
 			},
 		},
 	}

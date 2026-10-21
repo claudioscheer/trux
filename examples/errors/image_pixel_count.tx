@@ -1,9 +1,12 @@
 package main
 
 import "image"
+import "errors"
 
 func main() int {
   let pixels []int = make([]int, 5)
-  image.writePpm("tiny.ppm", pixels, 2, 1)
+  let err error = image.writePpm("tiny.ppm", pixels, 2, 1)
+  assert(err == nil, errors.message(err))
   return 0
 }
+

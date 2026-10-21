@@ -18,9 +18,11 @@ every name is visible where it is declared.
 let total int = 0
 let label string = "score"
 let values list[int] = list[int]{1, 2, 3}
+let text string, err error = io.readFile("input.txt")
+let value int, _ = getPair()
 ```
 
-The value's type must match the declared type exactly.
+The value's type must match the declared type exactly. Functions returning multiple values can be unpacked with comma-separated `let` declarations or discarded with the blank identifier `_`.
 
 **Common mistakes.** Declaring the same name twice in one block:
 
@@ -45,6 +47,11 @@ x = x + 1
 
 let xs [3]int = [3]int{1, 2, 3}
 xs[0] = 42
+
+let a int = 0
+let b int = 0
+a, b = getPair()
+a, _ = getPair()
 ```
 
 The new value must have the variable's type.

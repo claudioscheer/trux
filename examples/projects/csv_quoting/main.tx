@@ -4,7 +4,8 @@ import "io"
 import "csv"
 
 func main() int {
-  let cells list[string] = csv.read("examples/projects/csv_quoting/items.csv", 3)
+  let cells list[string], readErr error = csv.read("examples/projects/csv_quoting/items.csv", 3)
+  assert(readErr == nil, "read items.csv")
   let rows int = len(cells) / 3
   print(rows, " rows, header: ", cells[0], " ", cells[1], " ", cells[2])
 
@@ -16,8 +17,11 @@ func main() int {
     print(cells[row * 3], ": ", note, " x", cells[row * 3 + 2])
   }
 
-  csv.write("examples/projects/csv_quoting/out.csv", cells, 3)
-  print(io.readFile("examples/projects/csv_quoting/out.csv"))
+  let writeErr error = csv.write("examples/projects/csv_quoting/out.csv", cells, 3)
+  assert(writeErr == nil, "write out.csv")
+  let contents string, fileErr error = io.readFile("examples/projects/csv_quoting/out.csv")
+  assert(fileErr == nil, "read out.csv")
+  print(contents)
 
   return 0
 }

@@ -683,3 +683,59 @@ func mustParse(t *testing.T, src string) *ast.Program {
 
 	return program
 }
+
+func TestParseMultiReturnAndError(t *testing.T) {
+	src := `package main
+
+func divide(a int, b int) (int, error) {
+    if b == 0 {
+        return 0, nil
+    }
+    return a / b, nil
+}
+
+func main() int {
+    let result int, err error = divide(10, 2)
+    let _, err2 error = divide(5, 0)
+    result, err = divide(20, 4)
+    _, err = divide(1, 0)
+    return 0
+}
+`
+	program, err := Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(program.Functions) != 2 {
+		t.Fatalf("got %d functions, want 2", len(program.Functions))
+	}
+	divFn := program.Functions[0]
+	tuple, ok := divFn.ReturnType.(*ast.TupleType)
+	if !ok || len(tuple.Types) != 2 {
+		t.Fatalf("expected *ast.TupleType with 2 types, got %#v", divFn.ReturnType)
+	}
+	if tuple.Types[0] != ast.IntType || tuple.Types[1] != ast.ErrorType {
+		t.Fatalf("unexpected tuple types: %v", tuple.Types)
+	}
+
+	mainFn := program.Functions[1]
+	let1, ok := mainFn.Body.Statements[0].(*ast.LetStmt)
+	if !ok || len(let1.Bindings) != 2 {
+		t.Fatalf("expected let with 2 bindings, got %#v", mainFn.Body.Statements[0])
+	}
+	if let1.Bindings[0].Name != "result" || let1.Bindings[0].Type != ast.IntType {
+		t.Errorf("binding 0 mismatch: %#v", let1.Bindings[0])
+	}
+	if let1.Bindings[1].Name != "err" || let1.Bindings[1].Type != ast.ErrorType {
+		t.Errorf("binding 1 mismatch: %#v", let1.Bindings[1])
+	}
+
+	let2, ok := mainFn.Body.Statements[1].(*ast.LetStmt)
+	if !ok || len(let2.Bindings) != 2 {
+		t.Fatalf("expected let with 2 bindings, got %#v", mainFn.Body.Statements[1])
+	}
+	if let2.Bindings[0].Name != "_" {
+		t.Errorf("binding 0 name want _, got %q", let2.Bindings[0].Name)
+	}
+}

@@ -131,9 +131,18 @@ const (
 	OriginUnknown    Origin = "unknown"
 )
 
+type loopExit struct {
+	scope     *scope
+	breaks    []originSnap
+	continues []originSnap
+}
+
 type checker struct {
-	info      *Info
-	loopDepth int
+	info       *Info
+	loopDepth  int
+	loops      []*loopExit
+	deadCode   int
+	reachesEnd bool
 }
 
 type localInfo struct {
@@ -182,12 +191,30 @@ func snapshotOrigins(s *scope) originSnap {
 func restoreOrigins(s *scope, snap originSnap) {
 	i := 0
 	for scope := s; scope != nil; scope = scope.parent {
-		for name, origin := range snap.levels[i] {
+		level := snap.levels[i]
+		for name := range scope.locals {
+			origin, ok := level[name]
+			if !ok {
+				delete(scope.locals, name)
+				continue
+			}
 			local := scope.locals[name]
 			local.origin = origin
 			scope.locals[name] = local
 		}
 		i++
+	}
+}
+
+func joinExitOrigins(scope *scope, exits []originSnap) {
+	if len(exits) == 0 {
+		return
+	}
+	restoreOrigins(scope, exits[0])
+	current := exits[0]
+	for _, next := range exits[1:] {
+		joinOrigins(scope, current, next)
+		current = snapshotOrigins(scope)
 	}
 }
 
@@ -412,7 +439,45 @@ func stmtTerminates(stmt ast.Statement) bool {
 	}
 }
 
+func (c *checker) checkStmtList(fn *ast.FuncDecl, locals *scope, stmts []ast.Statement) (bool, error) {
+	reachesEnd := true
+	for _, stmt := range stmts {
+		if !reachesEnd {
+			saved := snapshotOrigins(locals)
+			c.deadCode++
+			err := c.checkStmt(fn, locals, stmt)
+			c.deadCode--
+			restoreOrigins(locals, saved)
+			if err != nil {
+				return false, err
+			}
+			continue
+		}
+		if err := c.checkStmt(fn, locals, stmt); err != nil {
+			return false, err
+		}
+		if !c.reachesEnd {
+			reachesEnd = false
+		}
+	}
+	return reachesEnd, nil
+}
+
+func (c *checker) noteLoopJump(continues bool) {
+	if c.deadCode > 0 || len(c.loops) == 0 {
+		return
+	}
+	frame := c.loops[len(c.loops)-1]
+	snap := snapshotOrigins(frame.scope)
+	if continues {
+		frame.continues = append(frame.continues, snap)
+		return
+	}
+	frame.breaks = append(frame.breaks, snap)
+}
+
 func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement) error {
+	c.reachesEnd = true
 	switch stmt := stmt.(type) {
 	case *ast.LetStmt:
 		if _, exists := locals.locals[stmt.Name]; exists {
@@ -492,6 +557,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		if !ast.TypeEqual(valueType, fn.ReturnType) {
 			return typeError(stmt.Value.Pos(), "cannot return %s from function returning %s", valueType, fn.ReturnType)
 		}
+		c.reachesEnd = false
 		return nil
 	case *ast.IfStmt:
 		conditionType, err := c.checkExpr(locals, stmt.Condition, false)
@@ -503,24 +569,35 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		}
 		before := snapshotOrigins(locals)
 		thenScope := newScope(locals)
-		for _, inner := range stmt.Then.Statements {
-			if err := c.checkStmt(fn, thenScope, inner); err != nil {
-				return err
-			}
+		thenReaches, err := c.checkStmtList(fn, thenScope, stmt.Then.Statements)
+		if err != nil {
+			return err
 		}
 		afterThen := snapshotOrigins(locals)
 		restoreOrigins(locals, before)
+		exits := []originSnap{}
+		if thenReaches {
+			exits = append(exits, afterThen)
+		}
 		if stmt.Else != nil {
 			elseScope := newScope(locals)
-			for _, inner := range stmt.Else.Statements {
-				if err := c.checkStmt(fn, elseScope, inner); err != nil {
-					return err
-				}
+			elseReaches, err := c.checkStmtList(fn, elseScope, stmt.Else.Statements)
+			if err != nil {
+				return err
 			}
-			joinOrigins(locals, afterThen, snapshotOrigins(locals))
+			if elseReaches {
+				exits = append(exits, snapshotOrigins(locals))
+			}
+			restoreOrigins(locals, before)
+		} else {
+			exits = append(exits, before)
+		}
+		if len(exits) == 0 {
+			c.reachesEnd = false
 			return nil
 		}
-		joinOrigins(locals, before, afterThen)
+		joinExitOrigins(locals, exits)
+		c.reachesEnd = true
 		return nil
 	case *ast.ForStmt:
 		loopScope := newScope(locals)
@@ -539,32 +616,55 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 			}
 		}
 		before := snapshotOrigins(loopScope)
+		frame := &loopExit{scope: loopScope}
+		c.loops = append(c.loops, frame)
 		c.loopDepth++
 		bodyScope := newScope(loopScope)
-		for _, inner := range stmt.Body.Statements {
-			if err := c.checkStmt(fn, bodyScope, inner); err != nil {
-				c.loopDepth--
-				return err
-			}
+		bodyReaches, err := c.checkStmtList(fn, bodyScope, stmt.Body.Statements)
+		if err != nil {
+			c.loopDepth--
+			c.loops = c.loops[:len(c.loops)-1]
+			return err
 		}
-		if stmt.Post != nil {
-			if err := c.checkStmt(fn, loopScope, stmt.Post); err != nil {
-				c.loopDepth--
-				return err
+		// Break leaves before the post. Continue and a normal body end run the post.
+		incoming := []originSnap{}
+		if bodyReaches {
+			incoming = append(incoming, snapshotOrigins(loopScope))
+		}
+		incoming = append(incoming, frame.continues...)
+		exits := []originSnap{before}
+		exits = append(exits, frame.breaks...)
+		if stmt.Post == nil {
+			exits = append(exits, incoming...)
+		} else {
+			for _, in := range incoming {
+				restoreOrigins(loopScope, in)
+				if err := c.checkStmt(fn, loopScope, stmt.Post); err != nil {
+					c.loopDepth--
+					c.loops = c.loops[:len(c.loops)-1]
+					return err
+				}
+				exits = append(exits, snapshotOrigins(loopScope))
 			}
 		}
 		c.loopDepth--
-		joinOrigins(loopScope, before, snapshotOrigins(loopScope))
+		c.loops = c.loops[:len(c.loops)-1]
+		joinExitOrigins(loopScope, exits)
+		c.reachesEnd = true
 		return nil
 	case *ast.BreakStmt:
 		if c.loopDepth == 0 {
 			return typeError(stmt.Start, "break outside of a loop")
 		}
+		c.noteLoopJump(false)
+		c.reachesEnd = false
 		return nil
 	case *ast.ContinueStmt:
 		if c.loopDepth == 0 {
 			return typeError(stmt.Start, "continue outside of a loop")
 		}
+		c.noteLoopJump(true)
+		c.reachesEnd = false
 		return nil
 	case *ast.ExprStmt:
 		_, err := c.checkExpr(locals, stmt.Expr, true)

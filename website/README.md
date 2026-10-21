@@ -18,6 +18,22 @@ hugo --gc --minify   # build into website/public/
 | `data/landing.yaml` | the landing page |
 | `layouts/` | the `include` shortcode and small overrides of Lotus Docs templates (each file says what changed) |
 | `static/docs/js/components/prism-trux.min.js` | Trux syntax highlighting for Prism |
+| `layouts/partials/page-markdown.md` | the Markdown version of each page (see below) |
+| `check-markdown-output.sh` | CI check of the Markdown output: no leftover shortcodes, no broken `llms.txt` links |
 | `outputs/` | real program output shown on the site, written by `update-example-outputs.sh` (CI runs it with `--check`) |
 
 More detail: [Working on the documentation site](https://claudioscheer.github.io/trux/docs/internals/contributing/#working-on-the-documentation-site).
+
+## Markdown for AI tools
+
+Every docs page is also published as Markdown next to its HTML, at `<page URL>index.md` (for example
+<https://claudioscheer.github.io/trux/docs/guide/types/index.md>). Each page has **Copy page as Markdown** and **View as
+Markdown** buttons, and its `<head>` links the Markdown with `rel="alternate" type="text/markdown"`. The site root also
+has [`llms.txt`](https://claudioscheer.github.io/trux/llms.txt) (an index of all pages) and
+[`llms-full.txt`](https://claudioscheer.github.io/trux/llms-full.txt) (every page in one file).
+
+The Markdown is built from each page's source by `layouts/partials/page-markdown.md`, which inlines `include`d files
+(honouring line ranges), turns alerts, tabs, and collapsible blocks into plain Markdown, and rewrites `/docs/...` links
+to absolute URLs. **If you add a new shortcode to the content, add a pattern for it there**: the build fails when
+shortcode syntax is left in the Markdown, and `check-markdown-output.sh` checks the built files again in CI.
+

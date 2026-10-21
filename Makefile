@@ -35,7 +35,7 @@ emit-c: build
 test:
 	$(GO) test ./...
 
-# Integer workload, GPU matrix multiply, and the Jacobi stencil.
+# Integer workload, GPU matrix multiply, Jacobi stencil, and a four-layer conv net.
 # On Windows, run `vs` in this shell first so nvcc can find cl.exe.
 bench: build
 	@echo ===== examples/performance_integer.tx =====
@@ -44,6 +44,8 @@ bench: build
 	$(RUN_BIN) run examples/gpu_matrix_multiply.tx
 	@echo ===== examples/performance_stencil.tx =====
 	$(RUN_BIN) run examples/performance_stencil.tx
+	@echo ===== examples/performance_cnn.tx =====
+	$(RUN_BIN) run examples/performance_cnn.tx
 
 fmt: build
 	./bin/$(BINARY) fmt -r

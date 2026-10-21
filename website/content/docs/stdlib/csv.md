@@ -9,6 +9,13 @@ weight: 110
 import "csv"
 ```
 
+**What it is.** Reads a whole CSV file into a flat `list[string]`, and writes one back.
+
+**Why.** Tabular input is common, and quoting rules are easy to get wrong by hand.
+
+**When you don't need it.** For one value per line, `io.readLine` is simpler. For data you only use inside the program,
+keep it in lists instead of round-tripping through files.
+
 | Function | Returns | Description |
 | --- | --- | --- |
 | `csv.read(path string, columns int)` | `list[string]` | Reads a whole CSV file into a flat, row-major list of cells. Every row must have exactly `columns` cells. |
@@ -83,7 +90,13 @@ $ printf 'Ada\n41\n' | trux run examples/projects/io_basics/main.tx
 
 ## Errors
 
-Failures stop the program with exit status `1` and a message on stderr:
+**Common mistakes.** Passing a column count that doesn't match the file. `roster.csv` above has two columns:
+
+{{< include "examples/errors/csv_columns.tx" "trux" >}}
+
+{{< include "website/outputs/errors/csv_columns.txt" "text" >}}
+
+All failures stop the program with exit status `1` and a message on stderr:
 
 | Message | Cause |
 | --- | --- |

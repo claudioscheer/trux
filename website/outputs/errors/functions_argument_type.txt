@@ -1,0 +1,7 @@
+examples/errors/functions_argument_type.tx:8:16: argument 1 to double has type float, want int
+ 6 | 
+ 7 | func main() int {
+ 8 |   print(double(1.5))
+   |                ^
+ 9 |   return 0
+10 | }

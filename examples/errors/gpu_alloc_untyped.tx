@@ -1,0 +1,10 @@
+package main
+
+import "gpu"
+
+func main() int {
+  let n int = 8
+  let host []int = make([]int, n)
+  gpu.to(gpu.alloc(n), host)
+  return 0
+}

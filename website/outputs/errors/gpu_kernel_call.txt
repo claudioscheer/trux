@@ -1,0 +1,7 @@
+examples/errors/gpu_kernel_call.tx:10:12: kernel cannot call "square"
+ 8 | 
+ 9 | kernel func fill(i int, out gpu.Buffer[int]) {
+10 |   out[i] = square(i)
+   |            ^
+11 | }
+12 | 

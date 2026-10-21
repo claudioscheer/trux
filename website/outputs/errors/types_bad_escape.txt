@@ -1,0 +1,7 @@
+examples/errors/types_bad_escape.tx:4:9: unknown escape \q
+2 | 
+3 | func main() int {
+4 |   print("tab:\q")
+  |         ^
+5 |   return 0
+6 | }

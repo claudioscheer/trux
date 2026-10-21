@@ -1,0 +1,7 @@
+examples/errors/control_if_same_line.tx:7:5: unexpected "if" after block on the same line; use "else if" for chained conditionals or put the next if on a new line
+5 |   if n > 3 {
+6 |     print("big")
+7 |   } if n > 1 {
+  |     ^
+8 |     print("medium")
+9 |   }

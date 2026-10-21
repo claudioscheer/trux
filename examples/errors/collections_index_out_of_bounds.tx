@@ -1,0 +1,8 @@
+package main
+
+func main() int {
+  let xs [3]int = [3]int{1, 2, 3}
+  let i int = 5
+  print(xs[i])
+  return 0
+}

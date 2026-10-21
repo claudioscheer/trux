@@ -1,0 +1,8 @@
+package main
+
+func main() int {
+  let count int = 0
+  assert(count > 0, "count must be positive")
+  print(count)
+  return 0
+}

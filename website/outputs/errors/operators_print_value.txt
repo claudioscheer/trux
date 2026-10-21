@@ -1,0 +1,7 @@
+examples/errors/operators_print_value.tx:4:19: print can only be used as a statement
+2 | 
+3 | func main() int {
+4 |   let shown int = print("hi")
+  |                   ^
+5 |   return shown
+6 | }

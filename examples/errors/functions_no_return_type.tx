@@ -1,0 +1,10 @@
+package main
+
+func hello() {
+  print("hi")
+}
+
+func main() int {
+  hello()
+  return 0
+}

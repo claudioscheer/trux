@@ -1,0 +1,7 @@
+examples/errors/collections_string_assign.tx:5:3: cannot assign through string index
+3 | func main() int {
+4 |   let text string = "trux"
+5 |   text[0] = "T"
+  |   ^
+6 |   print(text)
+7 |   return 0

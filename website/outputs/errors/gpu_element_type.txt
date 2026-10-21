@@ -1,0 +1,7 @@
+examples/errors/gpu_element_type.tx:7:34: cannot assign gpu.Buffer[int] to gpu.Buffer[float]
+5 | func main() int {
+6 |   let host []int = make([]int, 4)
+7 |   let device gpu.Buffer[float] = gpu.from(host)
+  |                                  ^
+8 |   gpu.free(device)
+9 |   return 0

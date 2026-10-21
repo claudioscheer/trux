@@ -1,0 +1,8 @@
+package main
+
+import "io"
+
+func main() int {
+  print(io.readFile("missing.txt"))
+  return 0
+}

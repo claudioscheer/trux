@@ -1,0 +1,3 @@
+execute /tmp/trux-run-<id>/main: exit status 1
+trux runtime error: assertion failed: count must be positive
+  at control_assert.tx:5:3

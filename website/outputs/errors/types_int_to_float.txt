@@ -1,0 +1,7 @@
+examples/errors/types_int_to_float.tx:4:21: cannot assign int to float
+2 | 
+3 | func main() int {
+4 |   let ratio float = 1
+  |                     ^
+5 |   print(ratio)
+6 |   return 0

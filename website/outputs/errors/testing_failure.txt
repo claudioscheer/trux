@@ -1,0 +1,13 @@
+FAIL examples/errors/testing_failure/math.test.tx testDouble
+PASS examples/errors/testing_failure/math.test.tx testDoubleZero
+1 passed, 1 failed
+failures:
+
+FAIL examples/errors/testing_failure/math.test.tx testDouble
+trace:
+  at testDouble (examples/errors/testing_failure/math.test.tx)
+  at math.test.tx:9:3
+error:
+trux runtime error: assertion failed: double(3) should be 7
+  at math.test.tx:9:3
+1 test(s) failed

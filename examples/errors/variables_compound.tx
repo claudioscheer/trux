@@ -1,0 +1,8 @@
+package main
+
+func main() int {
+  let i int = 0
+  i += 1
+  print(i)
+  return 0
+}

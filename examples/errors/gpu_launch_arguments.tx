@@ -1,0 +1,15 @@
+package main
+
+import "gpu"
+
+kernel func fill(i int, out gpu.Buffer[int], value int) {
+  out[i] = value
+}
+
+func main() int {
+  let host []int = make([]int, 4)
+  let device gpu.Buffer[int] = gpu.from(host)
+  gpu.launch1d(fill, 4, device)
+  gpu.free(device)
+  return 0
+}

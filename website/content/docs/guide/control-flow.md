@@ -1,77 +1,62 @@
 ---
 title: "Control flow"
-description: "if and else, the three kinds of for loop, break, and continue."
+description: "if and else, the three kinds of for loop, break, continue, and assert."
 icon: "alt_route"
 weight: 600
 ---
 
-## `if`, `else if`, `else`
+## `if`, `else if`, `else` {#if-else-if-else}
+
+**What it is.** Runs a block when a `bool` condition is `true`, with optional `else if` and `else` branches.
+
+**Why.** It is the only branching statement; there is no `switch` or ternary operator.
+
+**How to use it.** No parentheses around the condition, braces always required:
 
 {{< include "examples/else_if.tx" "trux" >}}
 
 {{< include "website/outputs/else_if.txt" "text" >}}
 
-- The condition must be a `bool`. There are no parentheses around it, and the braces are required.
-- Chain conditions with `else if`. Writing `} if` on the same line is rejected with a hint to use `else if`.
+**Common mistakes.** Writing `} if` on one line, which usually means a forgotten `else`:
+
+{{< include "examples/errors/control_if_same_line.tx" "trux" >}}
+
+{{< include "website/outputs/errors/control_if_same_line.txt" "text" >}}
+
+A non-`bool` condition is also rejected; see [No implicit conversions](/docs/guide/types/#no-implicit-conversions).
+
+**Related:** [Comparison](/docs/guide/operators/#comparison), [Logic](/docs/guide/operators/#logic).
 
 ## `for` loops
 
-`for` is the only loop keyword. It has three forms:
+**What it is.** `for` is the only loop keyword. It has three forms: condition only (like `while`), three-part
+(`init; condition; post`), and infinite.
 
-{{< tabs tabTotal="3" >}}
-{{% tab tabName="Condition" %}}
+**Why.** One keyword covers every loop shape, as in Go.
 
-Runs while the condition is `true`, like `while` in other languages.
-
-```trux
-let i int = 0
-for i < 3 {
-  print(i)
-  i = i + 1
-}
-```
-
-{{% /tab %}}
-{{% tab tabName="Three-part" %}}
-
-An init statement, a condition, and a post statement, separated by semicolons. A variable declared in the init
-statement is scoped to the loop.
-
-```trux
-for let i int = 0; i < 5; i = i + 1 {
-  print(i)
-}
-```
-
-Any of the three parts may be left empty, for example `for ; i < 5; { ... }`. The post statement cannot be a
-`let`.
-
-{{% /tab %}}
-{{% tab tabName="Infinite" %}}
-
-Loops until `break` or `return`.
-
-```trux
-for {
-  if done() {
-    break
-  }
-}
-```
-
-{{% /tab %}}
-{{< /tabs >}}
-
-All three forms appear in `examples/loops.tx`:
+**How to use it.**
 
 {{< include "examples/loops.tx" "trux" >}}
 
 {{< include "website/outputs/loops.txt" "text" >}}
 
+- A variable declared in the three-part header belongs to the loop.
+- Any of the three parts may be empty: `for ; i < 5; { ... }`.
+- The post statement is an assignment such as `i = i + 1`; it cannot be a `let`.
+
+**When you don't need it.** To process every element of a collection, a three-part loop over `len(xs)` is the only way;
+there is no `range`.
+
+**Related:** [Scope](/docs/guide/variables/#scope), [Arrays, slices, and lists](/docs/guide/collections/).
+
 ## `break` and `continue`
 
-`break` leaves the innermost loop. `continue` skips to the next iteration; in a three-part loop the post statement still
-runs. Both are compile errors outside a loop.
+**What it is.** `break` leaves the innermost loop. `continue` skips to its next iteration; in a three-part loop the post
+statement still runs.
+
+**Why.** They stop or skip work without extra flag variables.
+
+**How to use it.**
 
 ```trux
 package main
@@ -96,24 +81,38 @@ func main() int {
 25
 ```
 
-## Returning from loops
+**Common mistakes.** Using them outside a loop:
 
-`return` can appear anywhere, including inside loops. Remember that a function must return on every path, so a loop that
-might finish without returning needs a `return` after it:
+{{< include "examples/errors/control_break_outside.tx" "trux" >}}
 
-{{< include "examples/return_paths.tx" "trux" >}}
+{{< include "website/outputs/errors/control_break_outside.txt" "text" >}}
 
-## Assertions
+To leave a function early, use `return`.
 
-`assert(condition, message)` stops the program with exit status `1` if `condition` is `false`:
+**Related:** [Returning on every path](/docs/guide/functions/#returning-on-every-path).
 
-```trux
-assert(count > 0, "count must be positive")
-```
+## `assert`
 
-```text
-trux runtime error: assertion failed: count must be positive
-  at main.tx:9:3
-```
+**What it is.** `assert(condition, message)` stops the program with exit status `1` and prints `message` when
+`condition` is `false`.
 
-`assert` is a statement and is the building block of [unit tests](/docs/guide/testing/).
+**Why.** It turns an assumption into a check that fails loudly at the line where it is broken. It is also how
+[tests](/docs/guide/testing/) fail.
+
+**How to use it.** `assert` is a statement:
+
+{{< include "examples/assertions.tx" "trux" >}}
+
+{{< include "website/outputs/assertions.txt" "text" >}}
+
+**Common mistakes.** A false condition stops the program, with the file, line, and column:
+
+{{< include "examples/errors/control_assert.tx" "trux" >}}
+
+{{< include "website/outputs/errors/control_assert.txt" "text" >}}
+
+**When you don't need it.** Don't assert what the runtime already checks: indexes, integer overflow, and division by
+zero fail on their own. `assert` is not for expected conditions such as bad user input; there is no way to recover from
+it. Check the input with `if` and handle it instead.
+
+**Related:** [Testing](/docs/guide/testing/), [Errors and failures](/docs/guide/errors/).

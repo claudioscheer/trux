@@ -1,0 +1,2 @@
+execute /tmp/trux-run-<id>/main: exit status 1
+trux runtime error: sleep milliseconds must be non-negative, got -5

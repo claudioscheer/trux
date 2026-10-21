@@ -1,0 +1,7 @@
+package main
+
+func main() int {
+  let half float = 1 / 2.0
+  print(half)
+  return 0
+}

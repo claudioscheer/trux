@@ -1,62 +1,110 @@
 ---
 title: "Operators and expressions"
-description: "Arithmetic, comparison, and logical operators, and checked arithmetic."
+description: "Arithmetic, checked integer math, comparison, logic, string containment, and precedence."
 icon: "calculate"
 weight: 400
 ---
 
 ## Arithmetic
 
+**What it is.** `+ - * / %` and unary `-` on numbers, and `+` to join strings.
+
 | Operator | `int` | `float` | `string` |
 | --- | --- | --- | --- |
 | `+` | addition | addition | concatenation |
 | `-` | subtraction | subtraction | |
 | `*` | multiplication | multiplication | |
-| `/` | division (truncates toward zero) | division | |
+| `/` | division, truncates toward zero | division | |
 | `%` | remainder | | |
 | unary `-` | negation | negation | |
 
-Both operands must have the **same** type. `1 + 2` and `1.0 + 2.0` are fine, `1 + 2.0` is a compile error.
+**Why.** These are the operators C has, with the same meaning, so the generated code is direct.
 
-### Checked integer arithmetic
+**How to use it.** Both operands must have the same type:
 
-Integer `+`, `-`, `*`, `/`, `%`, and unary `-` are checked at run time. Signed overflow, division by zero, and remainder by
-zero stop the program:
+{{< include "examples/arithmetic.tx" "trux" >}}
 
-```text
-trux runtime error: integer overflow in +
-  at main.tx:5
-```
+{{< include "website/outputs/arithmetic.txt" "text" >}}
 
-Float arithmetic follows IEEE 754: dividing a float by zero gives an infinity instead of an error.
+**Common mistakes.** Mixing `int` and `float`, or a string and a number, is a compile error. See
+[No implicit conversions](/docs/guide/types/#no-implicit-conversions).
+
+**Related:** [Checked integer arithmetic](#checked-integer-arithmetic).
+
+## Checked integer arithmetic {#checked-integer-arithmetic}
+
+**What it is.** Integer `+`, `-`, `*`, `/`, `%`, and unary `-` are checked at run time. Signed overflow, division by
+zero, and remainder by zero stop the program with exit status `1`.
+
+**Why.** In C, signed overflow is undefined behavior and division by zero crashes or gives garbage. Trux turns both into
+a clear error with the source line, so a wrong result never goes unnoticed.
+
+**How to use it.** Nothing to write: every integer operation is checked. The checks also run inside GPU kernels, where a
+failure traps the kernel instead of printing a message (see [GPU programming](/docs/guide/gpu/#kernel-errors)).
+
+**Common mistakes.** Overflowing the 64-bit range:
+
+{{< include "examples/errors/operators_overflow.tx" "trux" >}}
+
+{{< include "website/outputs/errors/operators_overflow.txt" "text" >}}
+
+Dividing by a value that turns out to be zero:
+
+{{< include "examples/errors/operators_divide_by_zero.tx" "trux" >}}
+
+{{< include "website/outputs/errors/operators_divide_by_zero.txt" "text" >}}
+
+The `at` line names the file and line of the failing operation. The `execute …` line is printed by `trux run`; see
+[Errors and failures](/docs/guide/errors/#runtime-errors).
+
+**When you don't need it.** Float arithmetic is not checked; it follows IEEE 754, so `1.0 / 0.0` is `inf`. If a value
+can legitimately be zero, test it before dividing.
+
+**Related:** [Bounds checks](/docs/guide/collections/#bounds-checks), [Errors and failures](/docs/guide/errors/).
 
 ## Comparison
 
-| Operator | Works on |
-| --- | --- |
-| `==`, `!=` | two values of the same scalar type: `int`, `float`, `string`, or `bool` |
-| `<`, `<=`, `>`, `>=` | two `int` or two `float` values |
+**What it is.** `==` and `!=` on two values of the same scalar type, and `<`, `<=`, `>`, `>=` on two `int` or two
+`float` values. The result is a `bool`.
 
-Comparisons produce `bool`. Strings compare by content (`"ab" == "a" + "b"` is `true`). Collections cannot be compared
-with `==`.
+**Why.** Comparisons feed `if` and `for` conditions, which must be `bool`.
+
+**How to use it.** Strings compare by content: `"ab" == "a" + "b"` is `true`.
+
+**Common mistakes.** Collections cannot be compared with `==`:
+
+{{< include "examples/errors/operators_compare_collections.tx" "trux" >}}
+
+{{< include "website/outputs/errors/operators_compare_collections.txt" "text" >}}
+
+Compare element by element in a loop instead.
+
+**Related:** [Control flow](/docs/guide/control-flow/).
 
 ## Logic
 
-| Operator | Meaning |
-| --- | --- |
-| `&&` | and (short-circuits: the right side runs only if the left is `true`) |
-| `||` | or (short-circuits: the right side runs only if the left is `false`) |
-| `!` | not |
+**What it is.** `&&` (and), `||` (or), and `!` (not) on `bool` values. `&&` and `||` short-circuit: the right side runs
+only when it can change the result.
 
-All operands must be `bool`. There is no "truthiness": `if count { ... }` is rejected, write `if count > 0 { ... }`.
+**Why.** Short-circuiting lets you guard a check, as in `i < len(xs) && xs[i] > 0`, without an out-of-bounds error.
+
+**How to use it.** All operands must be `bool`. There is no truthiness: `if count` is rejected, write `if count > 0`.
+
+**Related:** [Comparison](#comparison).
 
 ## String containment: `in`
 
-```trux
-let found bool = "ux" in "trux"   // true
-```
+**What it is.** `needle in haystack` is `true` when the string `needle` appears in the string `haystack`.
 
-The left side is the needle, the right side is the haystack. Both must be `string`. An empty needle is always found.
+**Why.** Substring search is common enough to deserve an operator.
+
+**How to use it.** Both sides must be `string`. An empty needle is always found.
+
+{{< include "examples/strings.tx" "trux" >}}
+
+{{< include "website/outputs/strings.txt" "text" >}}
+
+**When you don't need it.** To compare whole strings, use `==`.
 
 ## Precedence
 
@@ -71,23 +119,23 @@ From lowest to highest binding. Operators on the same row are left-associative.
 | 5 | `*` `/` `%` |
 | 6 (highest) | unary `-` and `!`, then calls, indexing `x[i]`, and slicing `x[a:b]` |
 
-Use parentheses whenever it makes intent clearer: `(a + b) / 2.0`.
-
-## Other expressions
-
-- **Calls**: `add(1, 2)`, `math.add(1, 2)` (a function from an imported package), `io.readLine()` (a standard package).
-- **Indexing and slicing**: `xs[0]`, `xs[1:3]`, `text[:2]`. See [collections](/docs/guide/collections/).
-- **Collection literals**: `[3]int{1, 2, 3}`, `list[string]{"a", "b"}`.
-- **Builtins**: `len(x)`, `clone(x)`, `make([]T, n)`.
+Use parentheses whenever they make the intent clearer: `(a + b) / 2.0`.
 
 ## Statement-only builtins
 
-Some operations produce no useful value and may only be used as a statement on their own line, never inside an
-expression: `print(...)`, `assert(...)`, `append(...)`, `io.writeFile`, `csv.write`, `image.writePpm`,
-`time.sleepMillis`, `http.serve`, `http.respond`, and the GPU copy, launch, `sync`, and `free` calls.
+**What it is.** Calls that produce no value and can only stand alone on a line: `print`, `assert`, `append`,
+`io.writeFile`, `csv.write`, `image.writePpm`, `time.sleepMillis`, `http.serve`, `http.respond`, and the GPU copy,
+launch, `sync`, and `free` calls.
 
-A call to one of your own functions can also be used as a statement; its return value is discarded:
+**Why.** They exist for their effect. Using one inside an expression is always a mistake, so the compiler rejects it.
 
-```trux
-printIterative(count)
-```
+**How to use it.** Put each on its own line. A call to your own function may also be used as a statement; its result is
+discarded.
+
+**Common mistakes.**
+
+{{< include "examples/errors/operators_print_value.tx" "trux" >}}
+
+{{< include "website/outputs/errors/operators_print_value.txt" "text" >}}
+
+**Related:** [Standard library](/docs/stdlib/).

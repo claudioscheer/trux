@@ -1,0 +1,9 @@
+package main
+
+import "csv"
+
+func main() int {
+  let cells list[string] = csv.read("examples/projects/csv_roster/roster.csv", 3)
+  print(len(cells))
+  return 0
+}

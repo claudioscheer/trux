@@ -1,0 +1,7 @@
+examples/errors/control_break_outside.tx:6:5: break outside of a loop
+4 |   let n int = 1
+5 |   if n > 0 {
+6 |     break
+  |     ^
+7 |   }
+8 |   return 0

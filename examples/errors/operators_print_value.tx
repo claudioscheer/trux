@@ -1,0 +1,6 @@
+package main
+
+func main() int {
+  let shown int = print("hi")
+  return shown
+}

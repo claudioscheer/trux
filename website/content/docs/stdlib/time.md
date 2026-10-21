@@ -9,6 +9,15 @@ weight: 300
 import "time"
 ```
 
+**What it is.** A wall clock, a monotonic clock for measuring durations, and sleep.
+
+**Why.** Timing code (the examples compare CPU and GPU runs) needs a clock that never jumps; logs and timestamps need the
+real date.
+
+**When you don't need it.** To measure elapsed time, never subtract `nowUnixMillis` readings, because the wall clock can
+be adjusted; use `monotonicNanos`. To time GPU work, call [`gpu.sync`](/docs/guide/gpu/#gpu-sync) before reading the
+clock.
+
 | Function | Returns | Description |
 | --- | --- | --- |
 | `time.nowUnixMillis()` | `int` | Wall-clock time as milliseconds since the Unix epoch. Use it for timestamps. |
@@ -29,5 +38,15 @@ func main() int {
   return 0
 }
 ```
+
+## Errors
+
+**Common mistakes.** A negative sleep:
+
+{{< include "examples/errors/time_negative_sleep.tx" "trux" >}}
+
+{{< include "website/outputs/errors/time_negative_sleep.txt" "text" >}}
+
+## Related
 
 `examples/performance_integer.tx` uses `time.monotonicNanos` to time a CPU-bound loop. See [Time package](/docs/design-notes/time/).

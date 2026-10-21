@@ -9,8 +9,13 @@ weight: 200
 import "image"
 ```
 
-A small package for experimenting with pixels. It reads and writes **P3 PPM** files: an uncompressed, plain-text RGB
-format with a maximum channel value of `255`.
+**What it is.** Reads and writes **P3 PPM** files, an uncompressed plain-text RGB format with channel values up to
+`255`, as flat `[]int` slices.
+
+**Why.** PPM is simple enough to parse without a library, which makes it a good format for pixel experiments on the CPU
+and GPU.
+
+**When you don't need it.** For PNG or JPEG files, convert them first (see below); there is no general image decoder.
 
 | Function | Returns | Description |
 | --- | --- | --- |
@@ -46,6 +51,16 @@ func main() int {
 ```
 
 Run it from the repository root; it writes `inverted.ppm` to the current directory.
+
+## Errors
+
+**Common mistakes.** A pixel slice whose length is not `width * height * 3`:
+
+{{< include "examples/errors/image_pixel_count.tx" "trux" >}}
+
+{{< include "website/outputs/errors/image_pixel_count.txt" "text" >}}
+
+Reading a missing or malformed file also stops the program with a `trux runtime error`.
 
 ## Converting images to PPM
 

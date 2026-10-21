@@ -12,7 +12,7 @@ hero:
     pill: false
     soft: true
   title: "Trux"
-  subtitle: "A small, Go-inspired programming language that compiles to **C**, and to **CUDA** when your program has GPU kernels. Explicit types, checked arithmetic, arena memory, and no garbage collector."
+  subtitle: "A small, explicitly typed language that compiles to readable **C**, and to **CUDA** for GPU kernels. Overflow, bad indexes, and failed asserts stop the program with a clear error. Built to learn how a compiler works, end to end."
   ctaButton:
     icon: rocket_launch
     btnText: "Get started"
@@ -27,24 +27,24 @@ featureGrid:
   enable: true
   weight: 20
   template: feature grid
-  title: "What you get"
-  subtitle: "Trux is a learning compiler: every stage, from the lexer to the C and CUDA backend, is small enough to read end to end."
+  title: "Where to go next"
+  subtitle: "Build the compiler, run hello.tx, then learn one feature at a time. Every feature page shows real output and the real errors."
   items:
     - title: Getting started
       icon: rocket_launch
-      description: Build the compiler from source and run your first program in a couple of minutes.
+      description: Clone, go build, and trux run examples/hello.tx. Needs Go and a C compiler.
       ctaLink:
         text: Install and build
         url: docs/getting-started/install/
     - title: Language guide
       icon: menu_book
-      description: Types, variables, functions, loops, arrays, slices, lists, modules, and tests, one small step at a time.
+      description: Every language feature, what it is, how to use it, and the errors you get when it goes wrong.
       ctaLink:
         text: Read the guide
         url: docs/guide/
     - title: GPU programming
       icon: developer_board
-      description: Write kernel func in Trux, move data with gpu.from and gpu.to, and launch over 1D or 2D grids.
+      description: Write kernel func in Trux, move data with gpu.from and gpu.to, launch over 1D or 2D grids, and know when gpu.sync matters.
       ctaLink:
         text: GPU guide
         url: docs/guide/gpu/
@@ -76,8 +76,8 @@ featureGrid:
       icon: verified_user
       description: Integer overflow, division by zero, and out-of-bounds indexing stop the program with a clear trux runtime error.
       ctaLink:
-        text: Operators
-        url: docs/guide/operators/
+        text: Errors and failures
+        url: docs/guide/errors/
     - title: FAQ
       icon: help
       description: What Trux does not have yet, and what common error messages mean.

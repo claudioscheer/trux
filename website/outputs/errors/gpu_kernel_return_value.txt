@@ -1,0 +1,7 @@
+examples/errors/gpu_kernel_return_value.tx:7:3: kernel functions cannot return values
+5 | kernel func fill(i int, out gpu.Buffer[int]) {
+6 |   out[i] = i
+7 |   return 1
+  |   ^
+8 | }
+9 | 

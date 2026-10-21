@@ -90,16 +90,17 @@ The website covers everything from installation to compiler internals:
 
 | Section | |
 | --- | --- |
-| [Getting started](https://claudioscheer.github.io/trux/getting-started/) | install, first program, editor setup |
-| [Language guide](https://claudioscheer.github.io/trux/guide/) | types, functions, control flow, collections, memory, modules, tests, GPU |
-| [Standard library](https://claudioscheer.github.io/trux/stdlib/) | `io`, `csv`, `image`, `time`, `http`, `gpu` |
-| [Examples](https://claudioscheer.github.io/trux/examples/) | every program in `examples/`, with its output |
-| [CLI reference](https://claudioscheer.github.io/trux/cli/) | `run`, `build`, `emit-c`, `fmt`, `test` |
-| [How it works](https://claudioscheer.github.io/trux/internals/) | the compilation pipeline, generated C and CUDA, codebase tour |
-| [FAQ](https://claudioscheer.github.io/trux/faq/) | limitations and common errors |
+| [Getting started](https://claudioscheer.github.io/trux/docs/getting-started/) | install, first program, editor setup |
+| [Language guide](https://claudioscheer.github.io/trux/docs/guide/) | types, functions, control flow, collections, memory, modules, tests, GPU |
+| [Standard library](https://claudioscheer.github.io/trux/docs/stdlib/) | `io`, `csv`, `image`, `time`, `http`, `gpu` |
+| [Examples](https://claudioscheer.github.io/trux/docs/examples/) | every program in `examples/`, with its output |
+| [CLI reference](https://claudioscheer.github.io/trux/docs/cli/) | `run`, `build`, `emit-c`, `fmt`, `test` |
+| [How it works](https://claudioscheer.github.io/trux/docs/internals/) | the compilation pipeline, generated C and CUDA, codebase tour |
+| [FAQ](https://claudioscheer.github.io/trux/docs/faq/) | limitations and common errors |
 
-The site's sources are the Markdown files in [`docs/`](docs/). The compact language specification is
-[`docs/SPECS.md`](docs/SPECS.md), and the other files in `docs/` are design notes (arenas, modules, GPU, IO, HTTP, ...).
+The site is built with [Hugo](https://gohugo.io) and the [Lotus Docs](https://lotusdocs.dev) theme from the pages in
+[`website/`](website/). The compact language specification is [`docs/SPECS.md`](docs/SPECS.md), and the other files in
+[`docs/`](docs/) are design notes (arenas, modules, GPU, IO, HTTP, ...); the site publishes them under "Design notes".
 
 ## Project layout
 
@@ -108,9 +109,8 @@ cmd/trux/            the trux command line tool
 internal/            compiler: lexer, parser, ast, modules, types, ir, codegen/c, runtime/c, formatter, stdlib
 examples/            runnable examples, module examples, and small projects
 tooling/             trux-lsp language server and the VS Code extension
-docs/                documentation site sources and design notes
-website/             site tooling (MkDocs requirements, Trux syntax highlighter, example outputs)
-mkdocs.yml           documentation site configuration
+docs/                language specification and design notes
+website/             documentation site (Hugo + Lotus Docs): config, pages, recorded example outputs
 ```
 
 ## Contributing
@@ -119,9 +119,9 @@ mkdocs.yml           documentation site configuration
 make test    # go test ./... (also compiles and runs generated C)
 ```
 
-See the [contributing guide](https://claudioscheer.github.io/trux/internals/contributing/) for how a language change flows
+See the [contributing guide](https://claudioscheer.github.io/trux/docs/internals/contributing/) for how a language change flows
 through the compiler, the project conventions, and how to preview the documentation site locally
-(`pip install -r website/requirements.txt && mkdocs serve`).
+(Hugo extended and Go: `cd website && hugo server`, then open <http://localhost:1313/trux/>).
 
 ## License
 

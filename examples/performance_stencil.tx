@@ -1,0 +1,164 @@
+package main
+
+import "gpu"
+import "time"
+
+// jacobiKernel runs one Jacobi step on the GPU.
+//
+// The grid is flat row-major storage:
+//
+//   cell(row, col) = buffer[row * width + col]
+//
+// Interior cells become the integer average of themselves and their four
+// neighbors. Border cells are copied unchanged so the CPU and GPU stay on the
+// same edge rule. Each thread writes one cell of nextGrid and only reads
+// currentGrid.
+kernel func jacobiKernel(currentGrid gpu.Buffer[int], nextGrid gpu.Buffer[int], width int, height int) {
+  let row int = gpu.globalY()
+  let col int = gpu.globalX()
+
+  if row < height {
+    if col < width {
+      let index int = row * width + col
+
+      if row == 0 || col == 0 || row == height - 1 || col == width - 1 {
+        nextGrid[index] = currentGrid[index]
+      } else {
+        let sum int = currentGrid[index]
+        sum = sum + currentGrid[(row - 1) * width + col]
+        sum = sum + currentGrid[(row + 1) * width + col]
+        sum = sum + currentGrid[index - 1]
+        sum = sum + currentGrid[index + 1]
+        nextGrid[index] = sum / 5
+      }
+    }
+  }
+}
+
+// jacobiCpu is the same step as jacobiKernel. The two must stay in lockstep:
+// a mismatch below means the GPU path drifted from this formula.
+func jacobiCpu(currentGrid []int, mut nextGrid []int, width int, height int) int {
+  for let row int = 0; row < height; row = row + 1 {
+    for let col int = 0; col < width; col = col + 1 {
+      let index int = row * width + col
+
+      if row == 0 || col == 0 || row == height - 1 || col == width - 1 {
+        nextGrid[index] = currentGrid[index]
+      } else {
+        let sum int = currentGrid[index]
+        sum = sum + currentGrid[(row - 1) * width + col]
+        sum = sum + currentGrid[(row + 1) * width + col]
+        sum = sum + currentGrid[index - 1]
+        sum = sum + currentGrid[index + 1]
+        nextGrid[index] = sum / 5
+      }
+    }
+  }
+
+  return 0
+}
+
+// checksum compares large grids without printing every cell.
+func checksum(values []int) int {
+  let total int = 0
+
+  for let i int = 0; i < len(values); i = i + 1 {
+    total = total + values[i]
+  }
+
+  return total
+}
+
+// printSeconds prints a nanosecond duration as seconds.milliseconds.
+// Trux has no int-to-float cast, so the millisecond part is padded by hand.
+func printSeconds(label string, nanos int) int {
+  let seconds int = nanos / 1000000000
+  let remainder int = nanos - seconds * 1000000000
+  let millis int = remainder / 1000000
+
+  if millis < 10 {
+    print(label, seconds, ".00", millis, " s")
+  } else if millis < 100 {
+    print(label, seconds, ".0", millis, " s")
+  } else {
+    print(label, seconds, ".", millis, " s")
+  }
+
+  return 0
+}
+
+func main() int {
+  // 1024x1024 for 200 steps is enough work that launch overhead does not hide
+  // the kernel, while the CPU pass still finishes on a laptop.
+  let width int = 1024
+  let height int = 1024
+  let steps int = 200
+  let total int = width * height
+
+  let source []int = make([]int, total)
+  let cpuCurrent []int = make([]int, total)
+  let cpuNext []int = make([]int, total)
+  let gpuOut []int = make([]int, total)
+
+  for let row int = 0; row < height; row = row + 1 {
+    for let col int = 0; col < width; col = col + 1 {
+      source[row * width + col] = row * 3 + col + 1
+    }
+  }
+
+  for let i int = 0; i < total; i = i + 1 {
+    cpuCurrent[i] = source[i]
+  }
+
+  // CPU baseline. Two slices swap roles each step so the next step reads the
+  // values just written. An even step count leaves the result in cpuCurrent.
+  let cpuStart int = time.monotonicNanos()
+  for let step int = 0; step < steps; step = step + 1 {
+    jacobiCpu(cpuCurrent, cpuNext, width, height)
+    let swap []int = cpuCurrent
+    cpuCurrent = cpuNext
+    cpuNext = swap
+  }
+  let cpuEnd int = time.monotonicNanos()
+
+  // GPU path. The host copies the source once, then launches one kernel per
+  // step into the other device buffer and swaps the two handles. The result
+  // is copied back once, after every launch has finished.
+  let gpuStart int = time.monotonicNanos()
+  let dCurrent gpu.Buffer[int] = gpu.alloc(total)
+  let dNext gpu.Buffer[int] = gpu.alloc(total)
+  gpu.copyToDevice(source, dCurrent)
+
+  let blockSize int = 16
+  let gridX int = (width + blockSize - 1) / blockSize
+  let gridY int = (height + blockSize - 1) / blockSize
+
+  for let step int = 0; step < steps; step = step + 1 {
+    gpu.launch(jacobiKernel, gridX, gridY, 1, blockSize, blockSize, 1, dCurrent, dNext, width, height)
+    let swap gpu.Buffer[int] = dCurrent
+    dCurrent = dNext
+    dNext = swap
+  }
+
+  gpu.sync()
+  gpu.copyToHost(dCurrent, gpuOut)
+  let gpuEnd int = time.monotonicNanos()
+
+  let mismatches int = 0
+  for let i int = 0; i < total; i = i + 1 {
+    if cpuCurrent[i] != gpuOut[i] {
+      mismatches = mismatches + 1
+    }
+  }
+
+  print("cpu checksum ", checksum(cpuCurrent))
+  print("gpu checksum ", checksum(gpuOut))
+  print("mismatches ", mismatches)
+  printSeconds("cpu seconds ", cpuEnd - cpuStart)
+  printSeconds("gpu seconds ", gpuEnd - gpuStart)
+
+  gpu.free(dCurrent)
+  gpu.free(dNext)
+
+  return 0
+}

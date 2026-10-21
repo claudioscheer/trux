@@ -457,7 +457,7 @@ static RT_UNUSED bool rt_http_parse_request(rt_http_request* req, size_t header_
             }
             req->headers = headers;
         }
-        req->headers[req->header_count++] = (rt_http_header_pair){name, name_len, value, value_len};
+        req->headers[req->header_count++] = RT_LIT(rt_http_header_pair, name, name_len, value, value_len);
         if (rt_http_token_equal_ci(name, name_len, (const uint8_t*)"Content-Length", 14)) {
             if (has_content_length || has_transfer_encoding) {
                 return false;
@@ -502,11 +502,11 @@ static RT_UNUSED bool rt_http_parse_request(rt_http_request* req, size_t header_
 
 static RT_UNUSED rt_string rt_http_clone_string(rt_arena* arena, const uint8_t* data, size_t len) {
     if (len == 0) {
-        return (rt_string){NULL, 0};
+        return RT_LIT(rt_string, NULL, 0);
     }
     uint8_t* out = (uint8_t*)rt_arena_alloc(arena, len);
     memcpy(out, data, len);
-    return (rt_string){out, len};
+    return RT_LIT(rt_string, out, len);
 }
 
 static RT_UNUSED rt_http_request* rt_http_request_from_handle(int64_t handle) {
@@ -545,7 +545,7 @@ static RT_UNUSED rt_string rt_http_header(rt_arena* arena, int64_t handle, rt_st
             return rt_http_clone_string(arena, header.value, header.value_len);
         }
     }
-    return (rt_string){NULL, 0};
+    return RT_LIT(rt_string, NULL, 0);
 }
 
 static RT_UNUSED void rt_http_respond(int64_t handle, int64_t status, rt_string content_type, rt_string body) {
@@ -722,11 +722,11 @@ static RT_UNUSED void rt_http_serve(rt_string host, int64_t port_value, int64_t 
 
 typedef int64_t (*rt_http_handler_fn)(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t request);
 
-static RT_UNUSED rt_string rt_http_method(rt_arena* arena, int64_t handle) { (void)arena; (void)handle; rt_runtime_fail("http is not supported on Windows"); return (rt_string){NULL, 0}; }
-static RT_UNUSED rt_string rt_http_path(rt_arena* arena, int64_t handle) { (void)arena; (void)handle; rt_runtime_fail("http is not supported on Windows"); return (rt_string){NULL, 0}; }
-static RT_UNUSED rt_string rt_http_query(rt_arena* arena, int64_t handle) { (void)arena; (void)handle; rt_runtime_fail("http is not supported on Windows"); return (rt_string){NULL, 0}; }
-static RT_UNUSED rt_string rt_http_header(rt_arena* arena, int64_t handle, rt_string name) { (void)arena; (void)handle; (void)name; rt_runtime_fail("http is not supported on Windows"); return (rt_string){NULL, 0}; }
-static RT_UNUSED rt_string rt_http_body(rt_arena* arena, int64_t handle) { (void)arena; (void)handle; rt_runtime_fail("http is not supported on Windows"); return (rt_string){NULL, 0}; }
+static RT_UNUSED rt_string rt_http_method(rt_arena* arena, int64_t handle) { (void)arena; (void)handle; rt_runtime_fail("http is not supported on Windows"); return RT_LIT(rt_string, NULL, 0); }
+static RT_UNUSED rt_string rt_http_path(rt_arena* arena, int64_t handle) { (void)arena; (void)handle; rt_runtime_fail("http is not supported on Windows"); return RT_LIT(rt_string, NULL, 0); }
+static RT_UNUSED rt_string rt_http_query(rt_arena* arena, int64_t handle) { (void)arena; (void)handle; rt_runtime_fail("http is not supported on Windows"); return RT_LIT(rt_string, NULL, 0); }
+static RT_UNUSED rt_string rt_http_header(rt_arena* arena, int64_t handle, rt_string name) { (void)arena; (void)handle; (void)name; rt_runtime_fail("http is not supported on Windows"); return RT_LIT(rt_string, NULL, 0); }
+static RT_UNUSED rt_string rt_http_body(rt_arena* arena, int64_t handle) { (void)arena; (void)handle; rt_runtime_fail("http is not supported on Windows"); return RT_LIT(rt_string, NULL, 0); }
 static RT_UNUSED void rt_http_respond(int64_t handle, int64_t status, rt_string content_type, rt_string body) { (void)handle; (void)status; (void)content_type; (void)body; rt_runtime_fail("http is not supported on Windows"); }
 static RT_UNUSED void rt_http_serve(rt_string host, int64_t port, int64_t workers, rt_http_handler_fn handler) { (void)host; (void)port; (void)workers; (void)handler; rt_runtime_fail("http is not supported on Windows"); }
 

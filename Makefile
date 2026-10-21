@@ -5,11 +5,16 @@
 GO := go
 BINARY := trux
 CMD := ./cmd/trux
+ifeq ($(OS),Windows_NT)
+RUN_BIN := bin/$(BINARY).exe
+else
+RUN_BIN := ./bin/$(BINARY)
+endif
 
-.PHONY: build run test fmt emit-c lsp clean
+.PHONY: build run test bench fmt emit-c lsp clean
 
 build:
-	$(GO) build -o bin/$(BINARY) $(CMD)
+	$(GO) build -o $(RUN_BIN) $(CMD)
 
 # Usage: make run FILE=examples/hello.tx
 run: build
@@ -29,6 +34,16 @@ emit-c: build
 
 test:
 	$(GO) test ./...
+
+# Integer workload, GPU matrix multiply, and the Jacobi stencil.
+# On Windows, run `vs` in this shell first so nvcc can find cl.exe.
+bench: build
+	@echo ===== examples/performance_integer.tx =====
+	$(RUN_BIN) run examples/performance_integer.tx
+	@echo ===== examples/gpu_matrix_multiply.tx =====
+	$(RUN_BIN) run examples/gpu_matrix_multiply.tx
+	@echo ===== examples/performance_stencil.tx =====
+	$(RUN_BIN) run examples/performance_stencil.tx
 
 fmt: build
 	./bin/$(BINARY) fmt -r

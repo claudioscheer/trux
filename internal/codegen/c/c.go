@@ -1409,7 +1409,7 @@ func (e *funcEmitter) emitOrderedValueArray(elements []ir.Expr, targetArena stri
 		prelude = append(prelude, value.prelude...)
 		values = append(values, value.value)
 	}
-	return emittedExpr{prelude: prelude, value: fmt.Sprintf("(%s[]){%s}", cType, strings.Join(values, ", "))}, nil
+	return emittedExpr{prelude: prelude, value: fmt.Sprintf("RT_ARRAY(%s, %d, %s)", cType, len(values), strings.Join(values, ", "))}, nil
 }
 
 func (e *funcEmitter) emitOrderedOptionalBound(expr ir.Expr) (string, emittedExpr, error) {
@@ -1479,7 +1479,7 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 	case *ir.FloatLiteral:
 		return expr.Value, nil
 	case *ir.StringLiteral:
-		return fmt.Sprintf("(rt_string){(const uint8_t*)%s, %d}", cStringLiteral(expr.Value), len(expr.Value)), nil
+		return fmt.Sprintf("RT_LIT(rt_string, (const uint8_t*)%s, %d)", cStringLiteral(expr.Value), len(expr.Value)), nil
 	case *ir.BoolLiteral:
 		if expr.Value {
 			return "true", nil
@@ -1818,7 +1818,7 @@ func emitValueArray(elemType ast.Type, elements []ir.Expr, targetArena string) (
 		}
 		values = append(values, value)
 	}
-	return fmt.Sprintf("(%s[]){%s}", cType, strings.Join(values, ", ")), nil
+	return fmt.Sprintf("RT_ARRAY(%s, %d, %s)", cType, len(values), strings.Join(values, ", ")), nil
 }
 
 func emitClone(typ ast.Type, targetArena string, value string) (string, error) {

@@ -21,6 +21,15 @@ const Source = `#ifndef TRUX_RUNTIME_H
 #include <fcntl.h>
 #include <io.h>
 #endif
+#if !defined(__CUDA_ARCH__) && (defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__)))
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #ifdef TRUX_RUNTIME_CUDA
 #include <cuda_runtime.h>
@@ -34,8 +43,20 @@ const Source = `#ifndef TRUX_RUNTIME_H
 
 #if defined(__cplusplus)
 #define RT_ALIGNOF(T) alignof(T)
+#define RT_LIT(TYPE, ...) TYPE{__VA_ARGS__}
+template <typename T, size_t N>
+struct rt_c_array {
+    T values[N];
+#if defined(__CUDACC__)
+    __host__ __device__
+#endif
+    operator T*() { return values; }
+};
+#define RT_ARRAY(T, N, ...) (rt_c_array<T, N>{{__VA_ARGS__}})
 #else
 #define RT_ALIGNOF(T) _Alignof(T)
+#define RT_LIT(TYPE, ...) ((TYPE){__VA_ARGS__})
+#define RT_ARRAY(T, N, ...) ((T[]){__VA_ARGS__})
 #endif
 
 #define RT_ARENA_DEFAULT_CHUNK_SIZE ((size_t)4096)
@@ -352,11 +373,11 @@ static RT_UNUSED void rt_arena_deinit(rt_arena* arena) {
 }
 
 static RT_UNUSED rt_arena_mark rt_arena_mark_current(rt_arena* arena) {
-    return (rt_arena_mark){
+    return RT_LIT(rt_arena_mark, 
         arena->chunks,
         arena->chunks == NULL ? 0 : arena->chunks->used,
         arena->lists,
-    };
+    );
 }
 
 static RT_UNUSED void rt_arena_rewind(rt_arena* arena, rt_arena_mark mark) {
@@ -451,7 +472,7 @@ static RT_UNUSED rt_range rt_check_slice(size_t len, bool has_start, int64_t sta
         fprintf(stderr, "trux runtime error: slice %" PRId64 ":%" PRId64 " out of bounds for length %zu\n", start, end, len);
         exit(1);
     }
-    return (rt_range){(size_t)start, (size_t)end};
+    return RT_LIT(rt_range, (size_t)start, (size_t)end);
 }
 
 static RT_UNUSED void rt_check_string(rt_string value) {
@@ -547,11 +568,11 @@ static RT_UNUSED void rt_byte_buffer_append_bytes(rt_byte_buffer* buffer, const 
 
 static RT_UNUSED rt_string rt_byte_buffer_to_string(rt_arena* arena, const rt_byte_buffer* buffer) {
     if (buffer->len == 0) {
-        return (rt_string){NULL, 0};
+        return RT_LIT(rt_string, NULL, 0);
     }
     uint8_t* data = (uint8_t*)rt_arena_alloc(arena, buffer->len);
     memcpy(data, buffer->data, buffer->len);
-    return (rt_string){data, buffer->len};
+    return RT_LIT(rt_string, data, buffer->len);
 }
 
 static RT_UNUSED rt_string rt_string_trim_ascii(rt_string value) {
@@ -564,7 +585,7 @@ static RT_UNUSED rt_string rt_string_trim_ascii(rt_string value) {
     while (end > start && isspace((unsigned char)value.data[end - 1])) {
         end--;
     }
-    return (rt_string){value.data == NULL ? NULL : value.data + start, end - start};
+    return RT_LIT(rt_string, value.data == NULL ? NULL : value.data + start, end - start);
 }
 
 static RT_UNUSED bool rt_string_equal_c(rt_string value, const char* text) {
@@ -691,9 +712,41 @@ static RT_UNUSED int64_t rt_time_from_timespec_nanos(struct timespec ts) {
     return (int64_t)ts.tv_sec * 1000000000 + (int64_t)ts.tv_nsec;
 }
 
+static RT_UNUSED int rt_clock_realtime(struct timespec* ts) {
+#if defined(__CUDA_ARCH__)
+    (void)ts;
+    return -1;
+#elif defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__))
+    return timespec_get(ts, TIME_UTC) == TIME_UTC ? 0 : -1;
+#else
+    return clock_gettime(CLOCK_REALTIME, ts);
+#endif
+}
+
+static RT_UNUSED int rt_clock_monotonic(struct timespec* ts) {
+#if defined(__CUDA_ARCH__)
+    (void)ts;
+    return -1;
+#elif defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__))
+    static LARGE_INTEGER frequency;
+    LARGE_INTEGER counter;
+    if (frequency.QuadPart == 0 && !QueryPerformanceFrequency(&frequency)) {
+        return -1;
+    }
+    if (!QueryPerformanceCounter(&counter)) {
+        return -1;
+    }
+    ts->tv_sec = (time_t)(counter.QuadPart / frequency.QuadPart);
+    ts->tv_nsec = (long)((counter.QuadPart % frequency.QuadPart) * 1000000000 / frequency.QuadPart);
+    return 0;
+#else
+    return clock_gettime(CLOCK_MONOTONIC, ts);
+#endif
+}
+
 static RT_UNUSED int64_t rt_time_now_unix_millis(void) {
     struct timespec ts;
-    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+    if (rt_clock_realtime(&ts) != 0) {
         rt_runtime_fail("clock_gettime failed");
     }
     return rt_time_from_timespec_millis(ts);
@@ -701,7 +754,7 @@ static RT_UNUSED int64_t rt_time_now_unix_millis(void) {
 
 static RT_UNUSED int64_t rt_time_monotonic_nanos(void) {
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+    if (rt_clock_monotonic(&ts) != 0) {
         rt_runtime_fail("clock_gettime failed");
     }
     return rt_time_from_timespec_nanos(ts);
@@ -709,6 +762,11 @@ static RT_UNUSED int64_t rt_time_monotonic_nanos(void) {
 
 static RT_UNUSED void rt_time_sleep_millis(int64_t millis) {
     size_t checked = rt_checked_count(millis, "sleep milliseconds");
+#if defined(__CUDA_ARCH__)
+    (void)checked;
+#elif defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__))
+    Sleep(checked > 0xffffffffu ? 0xffffffffu : (DWORD)checked);
+#else
     struct timespec remaining;
     remaining.tv_sec = (time_t)(checked / 1000);
     remaining.tv_nsec = (long)((checked % 1000) * 1000000);
@@ -717,6 +775,7 @@ static RT_UNUSED void rt_time_sleep_millis(int64_t millis) {
             rt_runtime_fail("sleep failed");
         }
     }
+#endif
 }
 
 static RT_UNUSED rt_string rt_read_file(rt_arena* arena, rt_string path) {
@@ -748,7 +807,7 @@ static RT_UNUSED rt_string rt_read_file(rt_arena* arena, rt_string path) {
         rt_file_fail("close file after reading", c_path);
     }
     free(c_path);
-    return (rt_string){data, size};
+    return RT_LIT(rt_string, data, size);
 }
 
 static RT_UNUSED void rt_write_file(rt_string path, rt_string contents) {
@@ -810,7 +869,7 @@ static RT_UNUSED rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_
 
     size_t len = left.len + right.len;
     if (len == 0) {
-        return (rt_string){NULL, 0};
+        return RT_LIT(rt_string, NULL, 0);
     }
 
     uint8_t* data = (uint8_t*)rt_arena_alloc(arena, len);
@@ -822,30 +881,30 @@ static RT_UNUSED rt_string rt_string_concat(rt_arena* arena, rt_string left, rt_
         rt_check_string(right);
         memcpy(data + left.len, right.data, right.len);
     }
-    return (rt_string){data, len};
+    return RT_LIT(rt_string, data, len);
 }
 
 static RT_UNUSED rt_string rt_string_clone(rt_arena* arena, rt_string value) {
     if (value.len == 0) {
-        return (rt_string){NULL, 0};
+        return RT_LIT(rt_string, NULL, 0);
     }
     rt_check_string(value);
     uint8_t* data = (uint8_t*)rt_arena_alloc(arena, value.len);
     memcpy(data, value.data, value.len);
-    return (rt_string){data, value.len};
+    return RT_LIT(rt_string, data, value.len);
 }
 
 static RT_UNUSED rt_string rt_string_index(rt_string value, int64_t index) {
     rt_check_string(value);
     size_t checked = rt_check_index(value.len, index);
-    return (rt_string){value.data + checked, 1};
+    return RT_LIT(rt_string, value.data + checked, 1);
 }
 
 static RT_UNUSED rt_string rt_string_slice(rt_string value, bool has_start, int64_t start, bool has_end, int64_t end) {
     rt_check_string(value);
     rt_range range = rt_check_slice(value.len, has_start, start, has_end, end);
     const uint8_t* data = value.data == NULL ? NULL : value.data + range.start;
-    return (rt_string){data, range.end - range.start};
+    return RT_LIT(rt_string, data, range.end - range.start);
 }
 
 static RT_UNUSED bool rt_string_contains(rt_string needle, rt_string haystack) {
@@ -901,7 +960,7 @@ static RT_UNUSED rt_array_##NAME rt_array_##NAME##_from_values(rt_arena* arena, 
     if (len > 0) { \
         memcpy(data, values, len * sizeof(CTYPE)); \
     } \
-    return (rt_array_##NAME){data, len}; \
+    return RT_LIT(rt_array_##NAME, data, len); \
 } \
 static RT_UNUSED rt_array_##NAME rt_array_##NAME##_clone(rt_arena* arena, rt_array_##NAME value) { \
     rt_check_array_like(value.data, value.len, "array"); \
@@ -909,12 +968,12 @@ static RT_UNUSED rt_array_##NAME rt_array_##NAME##_clone(rt_arena* arena, rt_arr
     for (size_t i = 0; i < value.len; i++) { \
         data[i] = RT_CLONE_VALUE_##NAME(arena, value.data[i]); \
     } \
-    return (rt_array_##NAME){data, value.len}; \
+    return RT_LIT(rt_array_##NAME, data, value.len); \
 } \
 static RT_UNUSED rt_slice_##NAME rt_make_slice_##NAME(rt_arena* arena, int64_t count) { \
     size_t len = rt_checked_count(count, "slice length"); \
     CTYPE* data = (CTYPE*)rt_arena_alloc_count(arena, len, sizeof(CTYPE), true); \
-    return (rt_slice_##NAME){data, len}; \
+    return RT_LIT(rt_slice_##NAME, data, len); \
 } \
 static RT_UNUSED rt_slice_##NAME rt_slice_##NAME##_clone(rt_arena* arena, rt_slice_##NAME value) { \
     rt_check_array_like(value.data, value.len, "slice"); \
@@ -922,7 +981,7 @@ static RT_UNUSED rt_slice_##NAME rt_slice_##NAME##_clone(rt_arena* arena, rt_sli
     for (size_t i = 0; i < value.len; i++) { \
         data[i] = RT_CLONE_VALUE_##NAME(arena, value.data[i]); \
     } \
-    return (rt_slice_##NAME){data, value.len}; \
+    return RT_LIT(rt_slice_##NAME, data, value.len); \
 } \
 static RT_UNUSED CTYPE rt_array_##NAME##_get(rt_array_##NAME value, int64_t index) { \
     rt_check_array_like(value.data, value.len, "array"); \
@@ -952,19 +1011,19 @@ static RT_UNUSED rt_slice_##NAME rt_array_##NAME##_slice(rt_array_##NAME value, 
     rt_check_array_like(value.data, value.len, "array"); \
     rt_range range = rt_check_slice(value.len, has_start, start, has_end, end); \
     CTYPE* data = value.data == NULL ? NULL : value.data + range.start; \
-    return (rt_slice_##NAME){data, range.end - range.start}; \
+    return RT_LIT(rt_slice_##NAME, data, range.end - range.start); \
 } \
 static RT_UNUSED rt_slice_##NAME rt_slice_##NAME##_slice(rt_slice_##NAME value, bool has_start, int64_t start, bool has_end, int64_t end) { \
     rt_check_array_like(value.data, value.len, "slice"); \
     rt_range range = rt_check_slice(value.len, has_start, start, has_end, end); \
     CTYPE* data = value.data == NULL ? NULL : value.data + range.start; \
-    return (rt_slice_##NAME){data, range.end - range.start}; \
+    return RT_LIT(rt_slice_##NAME, data, range.end - range.start); \
 } \
 static RT_UNUSED rt_slice_##NAME rt_list_##NAME##_slice(rt_list_##NAME* value, bool has_start, int64_t start, bool has_end, int64_t end) { \
     rt_check_array_like(value->data, value->len, "list"); \
     rt_range range = rt_check_slice(value->len, has_start, start, has_end, end); \
     CTYPE* data = value->data == NULL ? NULL : value->data + range.start; \
-    return (rt_slice_##NAME){data, range.end - range.start}; \
+    return RT_LIT(rt_slice_##NAME, data, range.end - range.start); \
 } \
 static RT_UNUSED void rt_list_##NAME##_free(void* ptr) { \
     rt_list_##NAME* list = (rt_list_##NAME*)ptr; \
@@ -1060,14 +1119,14 @@ static RT_UNUSED rt_gpu_buffer_int rt_gpu_alloc_int(int64_t count) {
     size_t len = rt_checked_count(count, "gpu buffer length");
     int64_t* data = NULL;
     rt_cuda_check(cudaMalloc((void**)&data, rt_checked_bytes(len, sizeof(int64_t))), "alloc");
-    return (rt_gpu_buffer_int){data, len};
+    return RT_LIT(rt_gpu_buffer_int, data, len);
 }
 
 static RT_UNUSED rt_gpu_buffer_float rt_gpu_alloc_float(int64_t count) {
     size_t len = rt_checked_count(count, "gpu buffer length");
     double* data = NULL;
     rt_cuda_check(cudaMalloc((void**)&data, rt_checked_bytes(len, sizeof(double))), "alloc");
-    return (rt_gpu_buffer_float){data, len};
+    return RT_LIT(rt_gpu_buffer_float, data, len);
 }
 
 static RT_UNUSED void rt_gpu_copy_to_device_int(rt_slice_int host, rt_gpu_buffer_int device) {
@@ -1163,7 +1222,7 @@ static RT_UNUSED rt_ppm_header rt_ppm_read_header(rt_string contents) {
         rt_runtime_fail("only 8-bit P3 ppm images with max value 255 are supported");
     }
     rt_ppm_skip_space_and_comments(contents, &index);
-    return (rt_ppm_header){width, height, max_value, index};
+    return RT_LIT(rt_ppm_header, width, height, max_value, index);
 }
 
 static RT_UNUSED size_t rt_ppm_pixel_count(rt_ppm_header header) {

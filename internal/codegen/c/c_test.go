@@ -226,17 +226,17 @@ func main() int {
 		"rt_string trux_f_5_label(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"bool trux_f_5_ready(rt_context* trux_ctx, rt_arena* trux_result_arena);",
 		"rt_string trux_return_value;",
-		"trux_return_value = (rt_string){(const uint8_t*)\"trux\", 4};",
+		"trux_return_value = RT_LIT(rt_string, (const uint8_t*)\"trux\", 4);",
 		"bool trux_return_value;",
 		"trux_return_value = true;",
 		"rt_string trux_v_4_name = trux_f_5_label(trux_ctx, &trux_frame);",
 		"bool trux_v_2_ok = false;",
 		"rt_print_string(trux_v_4_name);",
-		"rt_print_string((rt_string){(const uint8_t*)\" \", 1});",
+		"rt_print_string(RT_LIT(rt_string, (const uint8_t*)\" \", 1));",
 		"rt_print_int(1);",
 		"rt_print_newline();",
 		"rt_print_bool(trux_v_2_ok);",
-		"rt_print_string((rt_string){(const uint8_t*)\"quote: \\\"\", 8});",
+		"rt_print_string(RT_LIT(rt_string, (const uint8_t*)\"quote: \\\"\", 8));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -265,8 +265,8 @@ func main() int {
 		"#include \"trux_http_runtime.h\"",
 		"int64_t trux_f_6_handle(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_7_request);",
 		"rt_http_path(&trux_frame, trux_v_7_request)",
-		"rt_http_respond(trux_v_7_request, 200, (rt_string){(const uint8_t*)\"text/plain\", 10}, trux_v_4_path);",
-		"rt_http_serve((rt_string){(const uint8_t*)\"127.0.0.1\", 9}, 8080, 4, trux_f_6_handle);",
+		"rt_http_respond(trux_v_7_request, 200, RT_LIT(rt_string, (const uint8_t*)\"text/plain\", 10), trux_v_4_path);",
+		"rt_http_serve(RT_LIT(rt_string, (const uint8_t*)\"127.0.0.1\", 9), 8080, 4, trux_f_6_handle);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -409,14 +409,14 @@ func main() int {
 		"if (trux_v_1_x > 10.0) {",
 		"trux_v_1_x = 10.0;",
 		"} else {",
-		"if (rt_string_contains((rt_string){(const uint8_t*)\"ru\", 2}, trux_v_4_text)) {",
+		"if (rt_string_contains(RT_LIT(rt_string, (const uint8_t*)\"ru\", 2), trux_v_4_text)) {",
 		"trux_v_1_x = (trux_v_1_x + 1.0);",
 		"} else {",
 		"trux_v_1_x = 0.0;",
 		"for (; trux_v_1_x > 0.0;) {",
 		"trux_v_1_x = (trux_v_1_x - 1.0);",
 		"rt_print_float(trux_v_1_x);",
-		"rt_print_bool(rt_string_equal(trux_v_4_text, (rt_string){(const uint8_t*)\"trux\", 4}));",
+		"rt_print_bool(rt_string_equal(trux_v_4_text, RT_LIT(rt_string, (const uint8_t*)\"trux\", 4)));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -497,9 +497,9 @@ func main() int {
 	wantParts := []string{
 		"#include \"trux_runtime.h\"",
 		"rt_string trux_f_5_greet(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
-		"trux_return_value = rt_string_clone(trux_result_arena, rt_string_concat(&trux_frame, (rt_string){(const uint8_t*)\"hello \", 6}, trux_v_4_name));",
-		"rt_string trux_v_4_name = trux_f_5_greet(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"trux\", 4});",
-		"rt_print_string(rt_string_concat(&trux_frame, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1}));",
+		"trux_return_value = rt_string_clone(trux_result_arena, rt_string_concat(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"hello \", 6), trux_v_4_name));",
+		"rt_string trux_v_4_name = trux_f_5_greet(trux_ctx, &trux_frame, RT_LIT(rt_string, (const uint8_t*)\"trux\", 4));",
+		"rt_print_string(rt_string_concat(&trux_frame, trux_v_4_name, RT_LIT(rt_string, (const uint8_t*)\"!\", 1)));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -539,10 +539,10 @@ func main() int {
 
 	wantParts := []string{
 		"rt_string trux_f_4_bang(rt_context* trux_ctx, rt_arena* trux_result_arena, rt_string trux_v_4_name);",
-		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, trux_v_4_name, RT_LIT(rt_string, (const uint8_t*)\"!\", 1));",
 		"trux_return_value = rt_string_clone(trux_result_arena, trux_v_1_s);",
-		"rt_print_string(trux_f_4_bang(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"a\", 1}));",
-		"rt_print_string(trux_f_4_bang(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"b\", 1}));",
+		"rt_print_string(trux_f_4_bang(trux_ctx, &trux_frame, RT_LIT(rt_string, (const uint8_t*)\"a\", 1)));",
+		"rt_print_string(trux_f_4_bang(trux_ctx, &trux_frame, RT_LIT(rt_string, (const uint8_t*)\"b\", 1)));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -580,7 +580,7 @@ func main() int {
 
 	wantParts := []string{
 		"trux_return_value = trux_v_1_s;",
-		"rt_print_string(trux_f_2_id(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"x\", 1}));",
+		"rt_print_string(trux_f_2_id(trux_ctx, &trux_frame, RT_LIT(rt_string, (const uint8_t*)\"x\", 1)));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -622,7 +622,7 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, trux_v_4_name, RT_LIT(rt_string, (const uint8_t*)\"!\", 1));",
 		"trux_return_value = rt_string_clone(trux_result_arena, trux_f_2_id(trux_ctx, &trux_frame, trux_v_1_s));",
 	}
 	for _, part := range wantParts {
@@ -664,9 +664,9 @@ func main() int {
 
 	wantParts := []string{
 		"rt_list_string* trux_v_5_items = rt_list_string_from_values(&trux_frame, NULL, 0);",
-		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, trux_v_4_name, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, trux_v_4_name, RT_LIT(rt_string, (const uint8_t*)\"!\", 1));",
 		"rt_list_string_append(trux_v_5_items, trux_v_1_s);",
-		"rt_print_string(trux_f_5_stash(trux_ctx, &trux_frame, (rt_string){(const uint8_t*)\"x\", 1}));",
+		"rt_print_string(trux_f_5_stash(trux_ctx, &trux_frame, RT_LIT(rt_string, (const uint8_t*)\"x\", 1)));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -701,8 +701,8 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"!\", 1});",
-		"rt_list_string* trux_v_5_items = rt_list_string_from_values(&trux_frame, (rt_string[]){trux_v_1_s}, 1);",
+		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"a\", 1), RT_LIT(rt_string, (const uint8_t*)\"!\", 1));",
+		"rt_list_string* trux_v_5_items = rt_list_string_from_values(&trux_frame, RT_ARRAY(rt_string, 1, trux_v_1_s), 1);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -741,7 +741,7 @@ func main() int {
 	}
 
 	wantParts := []string{
-		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"!\", 1});",
+		"rt_string trux_v_1_s = rt_string_concat(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"a\", 1), RT_LIT(rt_string, (const uint8_t*)\"!\", 1));",
 		"rt_list_string* trux_v_5_items = trux_f_4_wrap(trux_ctx, &trux_frame, trux_v_1_s);",
 	}
 	for _, part := range wantParts {
@@ -783,17 +783,17 @@ func main() int {
 
 	wantParts := []string{
 		"#include \"trux_runtime.h\"",
-		"rt_array_int trux_v_2_xs = rt_array_int_from_values(&trux_frame, (int64_t[]){1, 2, 3}, 3);",
+		"rt_array_int trux_v_2_xs = rt_array_int_from_values(&trux_frame, RT_ARRAY(int64_t, 3, 1, 2, 3), 3);",
 		"rt_slice_int trux_v_4_view = rt_array_int_slice(trux_v_2_xs, true, 1, false, 0);",
 		"rt_slice_int_set(trux_v_4_view, 0, 9);",
-		"rt_list_int* trux_v_5_items = rt_list_int_from_values(&trux_frame, (int64_t[]){rt_array_int_get(trux_v_2_xs, 1)}, 1);",
+		"rt_list_int* trux_v_5_items = rt_list_int_from_values(&trux_frame, RT_ARRAY(int64_t, 1, rt_array_int_get(trux_v_2_xs, 1)), 1);",
 		"rt_list_int_append(trux_v_5_items, 4);",
 		"rt_slice_int trux_v_4_made = rt_make_slice_int(&trux_frame, rt_checked_len_i64(trux_v_5_items->len));",
 		"rt_slice_int_set(trux_v_4_made, 0, rt_list_int_get(trux_v_5_items, 1));",
 		"rt_print_int(rt_array_int_get(trux_v_2_xs, 1));",
-		"rt_print_string((rt_string){(const uint8_t*)\" \", 1});",
-		"rt_print_string(rt_string_index((rt_string){(const uint8_t*)\"abc\", 3}, 1));",
-		"rt_print_string(rt_string_slice((rt_string){(const uint8_t*)\"abcd\", 4}, true, 1, true, 3));",
+		"rt_print_string(RT_LIT(rt_string, (const uint8_t*)\" \", 1));",
+		"rt_print_string(rt_string_index(RT_LIT(rt_string, (const uint8_t*)\"abc\", 3), 1));",
+		"rt_print_string(rt_string_slice(RT_LIT(rt_string, (const uint8_t*)\"abcd\", 4), true, 1, true, 3));",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -830,13 +830,13 @@ func main() int {
 		"#define RT_CLONE_VALUE_slice_float(ARENA, VALUE) rt_slice_float_clone((ARENA), (VALUE))",
 		"RT_DEFINE_COLLECTIONS(slice_float, rt_slice_float)",
 		"rt_list_list_int* trux_f_5_build(rt_context* trux_ctx, rt_arena* trux_result_arena);",
-		"rt_list_list_int* trux_v_4_rows = rt_list_list_int_from_values(&trux_frame, (rt_list_int*[]){rt_list_int_from_values(&trux_frame, (int64_t[]){1, 2}, 2), rt_list_int_from_values(&trux_frame, (int64_t[]){3}, 1)}, 2);",
-		"rt_list_list_int_append(trux_v_4_rows, rt_list_int_from_values(&trux_frame, (int64_t[]){4, 5, 6}, 3));",
+		"rt_list_list_int* trux_v_4_rows = rt_list_list_int_from_values(&trux_frame, RT_ARRAY(rt_list_int*, 2, rt_list_int_from_values(&trux_frame, RT_ARRAY(int64_t, 2, 1, 2), 2), rt_list_int_from_values(&trux_frame, RT_ARRAY(int64_t, 1, 3), 1)), 2);",
+		"rt_list_list_int_append(trux_v_4_rows, rt_list_int_from_values(&trux_frame, RT_ARRAY(int64_t, 3, 4, 5, 6), 3));",
 		"trux_return_value = rt_list_list_int_clone(trux_result_arena, trux_v_4_rows);",
 		"rt_list_list_int* trux_v_4_rows = trux_f_5_build(trux_ctx, &trux_frame);",
 		"rt_list_list_int* trux_v_6_copied = rt_list_list_int_clone(&trux_frame, trux_v_4_rows);",
 		"rt_list_int_append(rt_list_list_int_get(trux_v_6_copied, 0), 9);",
-		"rt_array_array_int trux_v_5_fixed = rt_array_array_int_from_values(&trux_frame, (rt_array_int[]){rt_array_int_from_values(&trux_frame, (int64_t[]){1, 2}, 2), rt_array_int_from_values(&trux_frame, (int64_t[]){3, 4}, 2)}, 2);",
+		"rt_array_array_int trux_v_5_fixed = rt_array_array_int_from_values(&trux_frame, RT_ARRAY(rt_array_int, 2, rt_array_int_from_values(&trux_frame, RT_ARRAY(int64_t, 2, 1, 2), 2), rt_array_int_from_values(&trux_frame, RT_ARRAY(int64_t, 2, 3, 4), 2)), 2);",
 		"rt_slice_slice_float trux_v_6_slices = rt_make_slice_slice_float(&trux_frame, 2);",
 		"rt_slice_slice_float_set(trux_v_6_slices, 0, rt_make_slice_float(&trux_frame, 2));",
 		"rt_slice_float_set(rt_slice_slice_float_get(trux_v_6_slices, 0), 1, 2.5);",
@@ -875,10 +875,10 @@ func main() int {
 		"int64_t trux_v_5_count = rt_read_int(&trux_frame);",
 		"double trux_v_5_ratio = rt_read_float(&trux_frame);",
 		"bool trux_v_5_ready = rt_read_bool(&trux_frame);",
-		"rt_string trux_v_4_text = rt_read_file(&trux_frame, (rt_string){(const uint8_t*)\"input.txt\", 9});",
-		"rt_write_file((rt_string){(const uint8_t*)\"out.txt\", 7}, rt_string_concat(&trux_frame, trux_v_4_text, trux_v_4_line));",
-		"rt_list_string* trux_v_5_cells = rt_read_csv(&trux_frame, (rt_string){(const uint8_t*)\"in.csv\", 6}, 2);",
-		"rt_write_csv((rt_string){(const uint8_t*)\"out.csv\", 7}, trux_v_5_cells, 2);",
+		"rt_string trux_v_4_text = rt_read_file(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"input.txt\", 9));",
+		"rt_write_file(RT_LIT(rt_string, (const uint8_t*)\"out.txt\", 7), rt_string_concat(&trux_frame, trux_v_4_text, trux_v_4_line));",
+		"rt_list_string* trux_v_5_cells = rt_read_csv(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"in.csv\", 6), 2);",
+		"rt_write_csv(RT_LIT(rt_string, (const uint8_t*)\"out.csv\", 7), trux_v_5_cells, 2);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -899,7 +899,7 @@ func main() int {
 		"#line 2 \"main.tx\"",
 		"#line 4 \"main.tx\"",
 		"if (!(trux_v_1_x > 0)) {",
-		"rt_assert_fail_at((rt_string){(const uint8_t*)\"x must be positive\", 18}, \"main.tx\", 4, 5);",
+		"rt_assert_fail_at(RT_LIT(rt_string, (const uint8_t*)\"x must be positive\", 18), \"main.tx\", 4, 5);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
@@ -1319,7 +1319,7 @@ func main() int {
 }`)
 
 	wantParts := []string{
-		"rt_array_int trux_v_2_xs = rt_array_int_from_values(&trux_frame, (int64_t[]){1, 2, 3}, 3);",
+		"rt_array_int trux_v_2_xs = rt_array_int_from_values(&trux_frame, RT_ARRAY(int64_t, 3, 1, 2, 3), 3);",
 		"trux_return_value = rt_slice_int_clone(trux_result_arena, rt_array_int_slice(trux_v_2_xs, false, 0, false, 0));",
 	}
 	for _, part := range wantParts {
@@ -1435,7 +1435,7 @@ func main() int {
 
 	wantParts := []string{
 		"rt_list_string* trux_v_2_xs = rt_list_string_from_values(&trux_frame, NULL, 0);",
-		"rt_list_string_append(trux_v_2_xs, rt_string_concat(&trux_frame, (rt_string){(const uint8_t*)\"a\", 1}, (rt_string){(const uint8_t*)\"b\", 1}));",
+		"rt_list_string_append(trux_v_2_xs, rt_string_concat(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"a\", 1), RT_LIT(rt_string, (const uint8_t*)\"b\", 1)));",
 		"trux_return_value = rt_list_string_clone(trux_result_arena, trux_v_2_xs);",
 	}
 	for _, part := range wantParts {
@@ -1491,7 +1491,7 @@ func main() int {
 }`)
 
 	addGreeting := generatedFunctionBody(t, cSource, "addGreeting")
-	want := `rt_list_string_append(trux_v_5_words, rt_string_concat(trux_ctx->arena, (rt_string){(const uint8_t*)"hello ", 6}, trux_v_4_name));`
+	want := `rt_list_string_append(trux_v_5_words, rt_string_concat(trux_ctx->arena, RT_LIT(rt_string, (const uint8_t*)"hello ", 6), trux_v_4_name));`
 	if !strings.Contains(addGreeting, want) {
 		t.Fatalf("generated C missing durable append %q:\n%s", want, addGreeting)
 	}

@@ -780,7 +780,7 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 			return nil
 		}
 		var fieldInits []string
-		for i, valExpr := range stmt.Values {
+		for _, valExpr := range stmt.Values {
 			targetArena := e.scratch
 			_, directClone := valExpr.(*ir.CloneExpr)
 			if directClone {
@@ -800,13 +800,13 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 					return err
 				}
 			}
-			fieldInits = append(fieldInits, fmt.Sprintf(".f%d = %s", i, res))
+			fieldInits = append(fieldInits, res)
 		}
 		tupleType, err := emitType(e.fn.ReturnType)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "%strux_return_value = (%s){ %s };\n", indent, tupleType, strings.Join(fieldInits, ", "))
+		fmt.Fprintf(out, "%strux_return_value = RT_LIT(%s, %s);\n", indent, tupleType, strings.Join(fieldInits, ", "))
 		fmt.Fprintf(out, "%sgoto trux_return;\n", indent)
 	case *ir.AssignStmt:
 		if len(stmt.Targets) > 1 {

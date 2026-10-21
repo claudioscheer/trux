@@ -799,23 +799,23 @@ static RT_UNUSED trux_tuple_string_error rt_read_file(rt_arena* arena, rt_string
     FILE* file = fopen(c_path, "rb");
     if (file == NULL) {
         free(c_path);
-        return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to open file for reading", 31)) };
+        return RT_LIT(trux_tuple_string_error, RT_LIT(rt_string, NULL, 0), rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to open file for reading", 31)));
     }
     if (fseek(file, 0, SEEK_END) != 0) {
         fclose(file);
         free(c_path);
-        return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to seek file", 19)) };
+        return RT_LIT(trux_tuple_string_error, RT_LIT(rt_string, NULL, 0), rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to seek file", 19)));
     }
     long file_size = ftell(file);
     if (file_size < 0) {
         fclose(file);
         free(c_path);
-        return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to tell file size", 24)) };
+        return RT_LIT(trux_tuple_string_error, RT_LIT(rt_string, NULL, 0), rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to tell file size", 24)));
     }
     if (fseek(file, 0, SEEK_SET) != 0) {
         fclose(file);
         free(c_path);
-        return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to rewind file", 21)) };
+        return RT_LIT(trux_tuple_string_error, RT_LIT(rt_string, NULL, 0), rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to rewind file", 21)));
     }
 
     size_t size = (size_t)file_size;
@@ -825,15 +825,15 @@ static RT_UNUSED trux_tuple_string_error rt_read_file(rt_arena* arena, rt_string
         if (fread(data, 1, size, file) != size) {
             fclose(file);
             free(c_path);
-            return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"read failed", 11)) };
+            return RT_LIT(trux_tuple_string_error, RT_LIT(rt_string, NULL, 0), rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"read failed", 11)));
         }
     }
     if (fclose(file) != 0) {
         free(c_path);
-        return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, NULL, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to close file", 20)) };
+        return RT_LIT(trux_tuple_string_error, RT_LIT(rt_string, NULL, 0), rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to close file", 20)));
     }
     free(c_path);
-    return (trux_tuple_string_error){ .f0 = RT_LIT(rt_string, data, size), .f1 = NULL };
+    return RT_LIT(trux_tuple_string_error, RT_LIT(rt_string, data, size), NULL);
 }
 
 static RT_UNUSED rt_error rt_write_file(rt_arena* arena, rt_string path, rt_string contents) {
@@ -978,7 +978,7 @@ static RT_UNUSED rt_error rt_error_new(rt_arena* arena, rt_string message) {
 
 static RT_UNUSED rt_string rt_error_message(rt_error err) {
     if (err == NULL) {
-        return (rt_string){(const uint8_t*)"", 0};
+        return RT_LIT(rt_string, (const uint8_t*)"", 0);
     }
     return err->message;
 }
@@ -1373,17 +1373,17 @@ static RT_UNUSED int64_t rt_image_height(rt_string path) {
 static RT_UNUSED trux_tuple_slice_int_error rt_read_ppm(rt_arena* arena, rt_string path) {
     trux_tuple_string_error res = rt_read_file(arena, path);
     if (res.f1 != NULL) {
-        return (trux_tuple_slice_int_error){ .f0 = rt_make_slice_int(arena, 0), .f1 = res.f1 };
+        return RT_LIT(trux_tuple_slice_int_error, rt_make_slice_int(arena, 0), res.f1);
     }
     rt_string contents = res.f0;
     rt_ppm_header header;
     rt_error header_err = NULL;
     if (!rt_ppm_try_read_header(arena, contents, &header, &header_err)) {
-        return (trux_tuple_slice_int_error){ .f0 = rt_make_slice_int(arena, 0), .f1 = header_err };
+        return RT_LIT(trux_tuple_slice_int_error, rt_make_slice_int(arena, 0), header_err);
     }
     size_t count = rt_ppm_pixel_count(header);
     if (count > (size_t)INT64_MAX) {
-        return (trux_tuple_slice_int_error){ .f0 = rt_make_slice_int(arena, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm image too large", 19)) };
+        return RT_LIT(trux_tuple_slice_int_error, rt_make_slice_int(arena, 0), rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm image too large", 19)));
     }
 
     rt_slice_int pixels = rt_make_slice_int(arena, (int64_t)count);
@@ -1391,19 +1391,19 @@ static RT_UNUSED trux_tuple_slice_int_error rt_read_ppm(rt_arena* arena, rt_stri
     for (size_t i = 0; i < count; i++) {
         int64_t value = 0;
         if (!rt_ppm_try_read_int_token(contents, &index, &value)) {
-            return (trux_tuple_slice_int_error){ .f0 = pixels, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"expected ppm pixel value", 24)) };
+            return RT_LIT(trux_tuple_slice_int_error, pixels, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"expected ppm pixel value", 24)));
         }
         if (value < 0 || value > 255) {
-            return (trux_tuple_slice_int_error){ .f0 = pixels, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm pixel value must be between 0 and 255", 41)) };
+            return RT_LIT(trux_tuple_slice_int_error, pixels, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"ppm pixel value must be between 0 and 255", 41)));
         }
         pixels.data[i] = value;
     }
 
     rt_ppm_skip_space_and_comments(contents, &index);
     if (index < contents.len) {
-        return (trux_tuple_slice_int_error){ .f0 = pixels, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"unexpected trailing data in ppm image", 37)) };
+        return RT_LIT(trux_tuple_slice_int_error, pixels, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"unexpected trailing data in ppm image", 37)));
     }
-    return (trux_tuple_slice_int_error){ .f0 = pixels, .f1 = NULL };
+    return RT_LIT(trux_tuple_slice_int_error, pixels, NULL);
 }
 
 static RT_UNUSED rt_error rt_write_ppm(rt_arena* arena, rt_string path, rt_slice_int pixels, int64_t width_value, int64_t height_value) {
@@ -1487,17 +1487,17 @@ static RT_UNUSED rt_string rt_csv_finish_cell(rt_arena* arena, rt_byte_buffer* f
 
 static RT_UNUSED trux_tuple_list_string_error rt_read_csv(rt_arena* arena, rt_string path, int64_t columns_value) {
     if (columns_value <= 0) {
-        return (trux_tuple_list_string_error){ .f0 = rt_list_string_new(arena, 0), .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv columns must be positive", 28)) };
+        return RT_LIT(trux_tuple_list_string_error, rt_list_string_new(arena, 0), rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv columns must be positive", 28)));
     }
     size_t columns = (size_t)columns_value;
     trux_tuple_string_error file_res = rt_read_file(arena, path);
     if (file_res.f1 != NULL) {
-        return (trux_tuple_list_string_error){ .f0 = rt_list_string_new(arena, 0), .f1 = file_res.f1 };
+        return RT_LIT(trux_tuple_list_string_error, rt_list_string_new(arena, 0), file_res.f1);
     }
     rt_string contents = file_res.f0;
     rt_list_string* cells = rt_list_string_new(arena, 0);
     if (contents.len == 0) {
-        return (trux_tuple_list_string_error){ .f0 = cells, .f1 = NULL };
+        return RT_LIT(trux_tuple_list_string_error, cells, NULL);
     }
 
     size_t index = 0;
@@ -1528,15 +1528,15 @@ static RT_UNUSED trux_tuple_list_string_error rt_read_csv(rt_arena* arena, rt_st
                 break;
             }
             if (!closed) {
-                return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"unterminated csv quoted field", 29)) };
+                return RT_LIT(trux_tuple_list_string_error, cells, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"unterminated csv quoted field", 29)));
             }
             if (index < contents.len && contents.data[index] != ',' && !rt_csv_is_newline(contents.data[index])) {
-                return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"expected csv delimiter after quoted field", 41)) };
+                return RT_LIT(trux_tuple_list_string_error, cells, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"expected csv delimiter after quoted field", 41)));
             }
         } else {
             while (index < contents.len && contents.data[index] != ',' && !rt_csv_is_newline(contents.data[index])) {
                 if (contents.data[index] == '"') {
-                    return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"unexpected quote in csv field", 29)) };
+                    return RT_LIT(trux_tuple_list_string_error, cells, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"unexpected quote in csv field", 29)));
                 }
                 rt_byte_buffer_append_byte(&field, contents.data[index]);
                 index++;
@@ -1548,7 +1548,7 @@ static RT_UNUSED trux_tuple_list_string_error rt_read_csv(rt_arena* arena, rt_st
 
         if (index >= contents.len) {
             if (row_columns != columns) {
-                return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv row column count mismatch", 29)) };
+                return RT_LIT(trux_tuple_list_string_error, cells, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv row column count mismatch", 29)));
             }
             break;
         }
@@ -1562,16 +1562,16 @@ static RT_UNUSED trux_tuple_list_string_error rt_read_csv(rt_arena* arena, rt_st
         if (rt_csv_is_newline(contents.data[index])) {
             rt_csv_consume_newline(contents, &index);
             if (row_columns != columns) {
-                return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv row column count mismatch", 29)) };
+                return RT_LIT(trux_tuple_list_string_error, cells, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"csv row column count mismatch", 29)));
             }
             row_columns = 0;
             continue;
         }
 
-        return (trux_tuple_list_string_error){ .f0 = cells, .f1 = rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"invalid csv parser state", 24)) };
+        return RT_LIT(trux_tuple_list_string_error, cells, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"invalid csv parser state", 24)));
     }
 
-    return (trux_tuple_list_string_error){ .f0 = cells, .f1 = NULL };
+    return RT_LIT(trux_tuple_list_string_error, cells, NULL);
 }
 
 static RT_UNUSED bool rt_csv_cell_needs_quotes(rt_string cell) {

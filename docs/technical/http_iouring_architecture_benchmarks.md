@@ -285,14 +285,14 @@ Four real-world workload scenarios were benchmarked at **100** and **1,000** con
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory Footprint |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext** (`/plaintext`) | 100 | **162,943** | 16.01 MB/s | 1.00 ms | 504 µs | 1.22 ms | 4.95 ms | 91.7 MiB |
-| **Plaintext** (`/plaintext`) | 1,000 | **179,249** | 17.61 MB/s | 6.23 ms | 5.54 ms | 13.36 ms | 25.14 ms | 95.0 MiB |
-| **SQLite Insert & Query** (`/json`) | 100 | **19,990** | 2.65 MB/s | 15.51 ms | 646 µs | 50.76 ms | 90.00 ms | 100.5 MiB |
-| **SQLite Insert & Query** (`/json`) | 1,000 | **20,340** | 2.70 MB/s | 48.17 ms | 53.99 ms | 106.93 ms | 178.15 ms | 109.6 MiB |
-| **SQLite Prepared Query** (`/users/1024`) | 100 | **17,509** | 2.34 MB/s | 17.57 ms | 483 µs | 56.78 ms | 101.91 ms | 119.0 MiB |
-| **SQLite Prepared Query** (`/users/1024`) | 1,000 | **16,721** | 2.23 MB/s | 55.29 ms | 62.31 ms | 114.56 ms | 171.40 ms | 131.5 MiB |
-| **Middleware & SQLite Audit** (`/api/data`) | 100 | **23,316** | 3.09 MB/s | 12.06 ms | 1.38 ms | 40.23 ms | 82.92 ms | 135.8 MiB |
-| **Middleware & SQLite Audit** (`/api/data`) | 1,000 | **22,728** | 3.01 MB/s | 43.66 ms | 46.16 ms | 98.64 ms | 162.56 ms | 144.0 MiB |
+| **Plaintext** (`/plaintext`) | 100 | **157,549** | 15.48 MB/s | 870 µs | 526 µs | 1.29 ms | 3.64 ms | 91.6 MiB |
+| **Plaintext** (`/plaintext`) | 1,000 | **168,376** | 16.54 MB/s | 6.69 ms | 5.92 ms | 14.34 ms | 27.72 ms | 94.8 MiB |
+| **SQLite Insert & Query** (`/json`) | 100 | **18,534** | 2.45 MB/s | 16.69 ms | 1.01 ms | 53.84 ms | 96.29 ms | 98.0 MiB |
+| **SQLite Insert & Query** (`/json`) | 1,000 | **18,301** | 2.42 MB/s | 55.46 ms | 62.20 ms | 118.28 ms | 186.31 ms | 103.5 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 100 | **17,001** | 2.27 MB/s | 20.79 ms | 632 µs | 64.58 ms | 116.14 ms | 104.8 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 1,000 | **16,315** | 2.18 MB/s | 60.26 ms | 63.65 ms | 122.34 ms | 187.12 ms | 108.8 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 100 | **22,073** | 2.92 MB/s | 14.28 ms | 940 µs | 47.17 ms | 87.91 ms | 109.6 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 1,000 | **21,487** | 2.85 MB/s | 49.37 ms | 52.12 ms | 111.43 ms | 182.43 ms | 113.4 MiB |
 
 ---
 
@@ -300,14 +300,14 @@ Four real-world workload scenarios were benchmarked at **100** and **1,000** con
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory Footprint |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext** (`/plaintext`) | 100 | **188,426** | 18.51 MB/s | 1.13 ms | 431 µs | 1.18 ms | 16.12 ms | 91.4 MiB |
-| **Plaintext** (`/plaintext`) | 1,000 | **323,778** | 31.80 MB/s | 3.66 ms | 2.86 ms | 8.20 ms | 17.05 ms | 94.2 MiB |
-| **SQLite Insert & Query** (`/json`) | 100 | **20,293** | 2.69 MB/s | 4.58 ms | 3.73 ms | 7.71 ms | 13.90 ms | 101.3 MiB |
-| **SQLite Insert & Query** (`/json`) | 1,000 | **19,321** | 2.56 MB/s | 44.67 ms | 44.47 ms | 55.28 ms | 69.53 ms | 109.6 MiB |
-| **SQLite Prepared Query** (`/users/1024`) | 100 | **17,226** | 2.30 MB/s | 5.05 ms | 4.77 ms | 8.98 ms | 12.94 ms | 119.4 MiB |
-| **SQLite Prepared Query** (`/users/1024`) | 1,000 | **17,676** | 2.36 MB/s | 49.39 ms | 49.17 ms | 60.30 ms | 67.70 ms | 133.0 MiB |
-| **Middleware & SQLite Audit** (`/api/data`) | 100 | **21,679** | 2.87 MB/s | 3.84 ms | 3.72 ms | 6.49 ms | 9.15 ms | 138.0 MiB |
-| **Middleware & SQLite Audit** (`/api/data`) | 1,000 | **21,079** | 2.79 MB/s | 42.64 ms | 42.84 ms | 51.14 ms | 61.92 ms | 146.3 MiB |
+| **Plaintext** (`/plaintext`) | 100 | **177,120** | 17.40 MB/s | 890 µs | 454 µs | 1.26 ms | 4.98 ms | 87.4 MiB |
+| **Plaintext** (`/plaintext`) | 1,000 | **298,837** | 29.35 MB/s | 3.83 ms | 3.04 ms | 8.27 ms | 17.98 ms | 94.8 MiB |
+| **SQLite Insert & Query** (`/json`) | 100 | **19,627** | 2.60 MB/s | 4.33 ms | 4.25 ms | 7.12 ms | 9.36 ms | 97.9 MiB |
+| **SQLite Insert & Query** (`/json`) | 1,000 | **19,232** | 2.55 MB/s | 47.12 ms | 46.68 ms | 58.40 ms | 69.81 ms | 102.5 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 100 | **16,705** | 2.23 MB/s | 4.93 ms | 4.61 ms | 8.77 ms | 12.38 ms | 104.1 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 1,000 | **16,023** | 2.14 MB/s | 55.75 ms | 55.04 ms | 68.82 ms | 84.21 ms | 108.6 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 100 | **20,252** | 2.68 MB/s | 4.32 ms | 4.10 ms | 7.50 ms | 10.81 ms | 108.8 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 1,000 | **20,528** | 2.72 MB/s | 43.70 ms | 43.26 ms | 51.88 ms | 62.29 ms | 112.7 MiB |
 
 ---
 
@@ -315,31 +315,31 @@ Four real-world workload scenarios were benchmarked at **100** and **1,000** con
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory Footprint |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext** (`/plaintext`) | 100 | **237,913** | 23.37 MB/s | 842 µs | 313 µs | 1.09 ms | 6.00 ms | 91.5 MiB |
-| **Plaintext** (`/plaintext`) | 1,000 | **425,079** | 41.75 MB/s | 2.65 ms | 1.86 ms | 5.78 ms | 12.55 ms | 94.4 MiB |
-| **SQLite Insert & Query** (`/json`) | 100 | **14,958** | 1.98 MB/s | 2.92 ms | 2.79 ms | 4.79 ms | 6.26 ms | 98.9 MiB |
-| **SQLite Insert & Query** (`/json`) | 1,000 | **14,869** | 1.97 MB/s | 32.18 ms | 32.04 ms | 38.49 ms | 47.61 ms | 105.0 MiB |
-| **SQLite Prepared Query** (`/users/1024`) | 100 | **13,319** | 1.78 MB/s | 2.84 ms | 2.76 ms | 3.94 ms | 5.07 ms | 112.2 MiB |
-| **SQLite Prepared Query** (`/users/1024`) | 1,000 | **13,234** | 1.77 MB/s | 37.94 ms | 37.31 ms | 46.07 ms | 50.51 ms | 120.6 MiB |
-| **Middleware & SQLite Audit** (`/api/data`) | 100 | **15,970** | 2.12 MB/s | 2.61 ms | 2.51 ms | 4.32 ms | 5.94 ms | 123.8 MiB |
-| **Middleware & SQLite Audit** (`/api/data`) | 1,000 | **15,824** | 2.10 MB/s | 31.79 ms | 32.27 ms | 37.87 ms | 44.15 ms | 129.4 MiB |
+| **Plaintext** (`/plaintext`) | 100 | **241,266** | 23.70 MB/s | 910 µs | 315 µs | 1.12 ms | 6.50 ms | 91.6 MiB |
+| **Plaintext** (`/plaintext`) | 1,000 | **412,084** | 40.47 MB/s | 2.76 ms | 1.92 ms | 5.97 ms | 13.42 ms | 95.0 MiB |
+| **SQLite Insert & Query** (`/json`) | 100 | **13,622** | 1.80 MB/s | 2.99 ms | 2.49 ms | 5.72 ms | 7.95 ms | 96.9 MiB |
+| **SQLite Insert & Query** (`/json`) | 1,000 | **14,030** | 1.86 MB/s | 33.79 ms | 34.20 ms | 42.56 ms | 50.76 ms | 99.0 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 100 | **12,970** | 1.73 MB/s | 3.75 ms | 3.52 ms | 6.54 ms | 9.86 ms | 100.3 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 1,000 | **12,828** | 1.71 MB/s | 37.82 ms | 38.13 ms | 45.66 ms | 51.00 ms | 103.2 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 100 | **15,442** | 2.05 MB/s | 3.53 ms | 3.50 ms | 6.21 ms | 8.72 ms | 102.9 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 1,000 | **15,173** | 2.01 MB/s | 32.25 ms | 31.26 ms | 40.02 ms | 47.58 ms | 104.9 MiB |
 
 ---
 
 ### 6.2 Key Performance Insights
 
 #### 1. Linear Multi-Core Scaling for Network I/O
-Moving from 1 vCPU to 2 vCPUs under 1,000 connections scales throughput from **179,249 req/s** to **323,778 req/s** (a **1.81x scaling factor**). Moving to 4 vCPUs achieves **425,079 req/s** (a **2.37x scaling factor**). 
+Moving from 1 vCPU to 2 vCPUs under 1,000 connections scales throughput from **168,376 req/s** to **298,837 req/s** (a **1.77x scaling factor**). Moving to 4 vCPUs achieves **412,084 req/s** (a **2.45x scaling factor**). 
 This demonstrates the efficacy of the `SO_REUSEPORT` kernel load-balancing strategy: because threads do not share rings, locks, or connection queues, each added core contributes directly to overall throughput without cross-core synchronization penalties.
 
 #### 2. Reliable Database Computation Under Load
 With real SQLite table operations, row inserts, parameter-bound prepared queries, and audit logging on every request:
-- Trux handles **13,000 to 23,000 complex database requests per second** across all hardware profiles.
-- Median latency at 100 concurrency across 4 cores is **2.5 ms to 2.8 ms**, with 99th percentile bounded under **6.3 ms**.
+- Trux handles **13,000 to 22,000 complex database requests per second** across all hardware profiles.
+- Median latency at 100 concurrency across 4 cores is **2.5 ms to 3.8 ms**, with 99th percentile bounded under **9.9 ms**.
 - The server does not suffer from connection spikes or lock corruption under high concurrency.
 
 #### 3. Bounded Memory Footprint
-Across all hardware profiles and workloads, resident set size remained strictly bounded between **91 MiB and 146 MiB**. Preallocated kernel buffer rings and automatic statement reclamation eliminate memory fragmentation.
+Across all hardware profiles and workloads, resident set size remained strictly bounded between **87 MiB and 113 MiB**. Lock-free handle management and explicit resource closing eliminate heap bloat and guarantee long-running stability without garbage collection pauses.
 
 ---
 

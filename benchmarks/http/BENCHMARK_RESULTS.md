@@ -8,38 +8,38 @@
 
 | Endpoint | Concurrency | Throughput (req/s) | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Plaintext Baseline (/plaintext) | 100 | **168,601** | 1.02ms | 489.00us | 1.20ms | 7.82ms | 91.48MiB |
-| Plaintext Baseline (/plaintext) | 1000 | **182,692** | 6.07ms | 5.43ms | 12.83ms | 24.13ms | 94.73MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **1,393** | 26.33ms | 3.63ms | 5.84ms | 915.55ms | 98.89MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **1,457** | 47.98ms | 30.38ms | 37.12ms | 881.62ms | 105.4MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **113,213** | 1.54ms | 725.00us | 1.60ms | 4.16ms | 105.2MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **110,632** | 14.89ms | 8.28ms | 42.83ms | 81.60ms | 108.8MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **1,534** | 40.61ms | 4.01ms | 5.57ms | 1.25s | 109.8MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **1,576** | 49.38ms | 36.92ms | 40.91ms | 948.47ms | 113.3MiB |
+| Plaintext Baseline (/plaintext) | 100 | **173,596** | 0.99ms | 476.00us | 1.15ms | 10.40ms | 91.7MiB |
+| Plaintext Baseline (/plaintext) | 1000 | **179,170** | 6.39ms | 5.51ms | 13.83ms | 27.01ms | 94.93MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **37,405** | 3.54ms | 1.83ms | 9.09ms | 20.55ms | 99.82MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **38,948** | 53.53ms | 17.27ms | 159.50ms | 301.04ms | 103.9MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **110,655** | 797.37us | 643.00us | 1.41ms | 3.05ms | 104.1MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **106,370** | 14.46ms | 6.98ms | 41.78ms | 81.86ms | 106.2MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **45,157** | 3.04ms | 1.40ms | 8.18ms | 17.60ms | 108.2MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **46,486** | 45.04ms | 2.86ms | 135.57ms | 273.89ms | 111MiB |
 
 ### Cloud Standard (2 vCPUs, 1GB)
 
 | Endpoint | Concurrency | Throughput (req/s) | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Plaintext Baseline (/plaintext) | 100 | **187,769** | 813.80us | 435.00us | 1.18ms | 4.95ms | 91.62MiB |
-| Plaintext Baseline (/plaintext) | 1000 | **318,316** | 3.72ms | 2.89ms | 8.27ms | 17.54ms | 94.71MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **1,315** | 131.62ms | 4.01ms | 546.36ms | 1.49s | 98.93MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **1,352** | 209.24ms | 36.87ms | 867.66ms | 1.81s | 103.6MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **121,268** | 600.45us | 454.00us | 1.18ms | 2.59ms | 103.8MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **189,167** | 3.60ms | 2.92ms | 7.72ms | 14.24ms | 106.2MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **1,517** | 103.06ms | 3.64ms | 347.50ms | 1.50s | 106.9MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **1,545** | 116.20ms | 31.64ms | 264.53ms | 1.46s | 109.1MiB |
+| Plaintext Baseline (/plaintext) | 100 | **192,070** | 763.92us | 430.00us | 1.12ms | 3.37ms | 87.7MiB |
+| Plaintext Baseline (/plaintext) | 1000 | **322,706** | 3.79ms | 2.86ms | 8.40ms | 19.24ms | 95.31MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **38,515** | 2.81ms | 1.83ms | 7.20ms | 11.37ms | 101.1MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **37,797** | 23.48ms | 23.55ms | 30.91ms | 41.36ms | 105.5MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **146,633** | 625.42us | 499.00us | 1.18ms | 2.45ms | 104.8MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **188,478** | 5.82ms | 4.40ms | 12.99ms | 26.70ms | 108.7MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **40,513** | 2.63ms | 1.59ms | 7.02ms | 11.01ms | 109.2MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **41,417** | 21.12ms | 21.31ms | 29.84ms | 40.09ms | 111.6MiB |
 
 ### Compute Node (4 vCPUs, 2GB)
 
 | Endpoint | Concurrency | Throughput (req/s) | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Plaintext Baseline (/plaintext) | 100 | **248,440** | 762.55us | 307.00us | 1.05ms | 5.57ms | 91.3MiB |
-| Plaintext Baseline (/plaintext) | 1000 | **436,352** | 2.60ms | 1.83ms | 5.65ms | 12.52ms | 95.54MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **1,318** | 170.80ms | 5.49ms | 661.51ms | 1.53s | 101MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **1,375** | 324.28ms | 52.86ms | 1.08s | 1.79s | 106.7MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **157,146** | 648.72us | 509.00us | 1.23ms | 2.63ms | 107.1MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **310,436** | 3.36ms | 2.35ms | 7.68ms | 15.26ms | 111MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **1,428** | 76.88ms | 4.24ms | 248.18ms | 1.09s | 111.9MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **1,452** | 108.44ms | 34.14ms | 212.10ms | 1.42s | 115.7MiB |
+| Plaintext Baseline (/plaintext) | 100 | **243,186** | 846.47us | 313.00us | 1.04ms | 6.10ms | 91.7MiB |
+| Plaintext Baseline (/plaintext) | 1000 | **431,069** | 2.69ms | 1.88ms | 5.92ms | 13.35ms | 95.18MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **21,909** | 2.81ms | 2.11ms | 5.67ms | 12.31ms | 98.1MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **21,381** | 27.95ms | 27.94ms | 37.25ms | 46.80ms | 102.1MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **115,832** | 539.52us | 409.00us | 1.06ms | 2.39ms | 102MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **298,624** | 2.03ms | 1.29ms | 4.74ms | 9.37ms | 103.4MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **23,219** | 2.83ms | 2.10ms | 5.94ms | 11.60ms | 103MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **22,651** | 26.38ms | 26.29ms | 35.47ms | 44.20ms | 106.4MiB |
 

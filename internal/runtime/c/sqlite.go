@@ -15,6 +15,10 @@ const SQLiteHeaderSource = `
 #define TRUX_SQLITE_RUNTIME_H
 
 #include "sqlite3.h"
+#ifndef _WIN32
+#include <sched.h>
+#include <unistd.h>
+#endif
 
 typedef struct trux_sqlite_db trux_sqlite_db;
 struct trux_sqlite_db {
@@ -52,6 +56,43 @@ static __thread rt_sqlite_tls_entry g_trux_sqlite_tls_cache[RT_SQLITE_TLS_CACHE_
 static __thread size_t g_trux_sqlite_tls_count = 0;
 #endif
 
+static int rt_sqlite_busy_handler(void* ptr, int count) {
+    (void)ptr;
+    if (count < 5) {
+#if defined(_WIN32)
+        Sleep(0);
+#else
+        sched_yield();
+#endif
+        return 1;
+    }
+    if (count < 500) {
+#if defined(_WIN32)
+        Sleep(1);
+#else
+        usleep(25);
+#endif
+        return 1;
+    }
+    if (count < 25000) {
+#if defined(_WIN32)
+        Sleep(1);
+#else
+        usleep(100);
+#endif
+        return 1;
+    }
+    return 0;
+}
+
+static int rt_sqlite_wal_hook(void* arg, sqlite3* db, const char* zDb, int nEntry) {
+    (void)arg;
+    if (nEntry >= 1000) {
+        sqlite3_wal_checkpoint_v2(db, zDb, SQLITE_CHECKPOINT_TRUNCATE, NULL, NULL);
+    }
+    return SQLITE_OK;
+}
+
 static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt_arena* arena, rt_string path) {
     char* c_path = rt_string_to_c_string(path, "sqlite open path");
     trux_sqlite_db* db = (trux_sqlite_db*)malloc(sizeof(trux_sqlite_db));
@@ -75,7 +116,9 @@ static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt
         free(db);
         return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, NULL, err);
     }
-    sqlite3_busy_timeout(db->handle, 5000);
+    sqlite3_busy_handler(db->handle, rt_sqlite_busy_handler, NULL);
+    (void)sqlite3_exec(db->handle, "PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA journal_size_limit=4194304;", NULL, NULL, NULL);
+    sqlite3_wal_hook(db->handle, rt_sqlite_wal_hook, NULL);
     db->is_open = 1;
     return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, db, NULL);
 }

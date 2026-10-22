@@ -651,128 +651,161 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
             break;
         }
 
-        uint64_t udata = cqe->user_data;
-        if (udata == (uint64_t)-1) {
-            int client_fd = cqe->res;
-            if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
-                int nodelay = 1;
-                (void)setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+        unsigned head;
+        bool need_submit = false;
 
-                rt_http_conn* c = &conns[client_fd];
-                c->fd = client_fd;
-                c->len = 0;
-                c->header_scan_start = 0;
-                c->in_use = true;
-                if (c->buffer == NULL) {
-                    c->cap = 8192;
-                    c->buffer = (uint8_t*)malloc(c->cap);
-                }
+        io_uring_for_each_cqe(&ring, head, cqe) {
+            uint64_t udata = cqe->user_data;
+            if (udata == (uint64_t)-1) {
+                int client_fd = cqe->res;
+                io_uring_cq_advance(&ring, 1);
+                if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
+                    int nodelay = 1;
+                    (void)setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
 
-                struct io_uring_sqe* rsqe = io_uring_get_sqe(&ring);
-                if (rsqe) {
-                    io_uring_prep_recv_multishot(rsqe, client_fd, NULL, 0, 0);
-                    rsqe->flags |= IOSQE_BUFFER_SELECT;
-                    rsqe->buf_group = RT_BUF_GROUP_ID;
-                    rsqe->user_data = (uint64_t)client_fd;
-                    io_uring_submit(&ring);
+                    rt_http_conn* c = &conns[client_fd];
+                    c->fd = client_fd;
+                    c->len = 0;
+                    c->header_scan_start = 0;
+                    c->in_use = true;
+                    if (c->buffer == NULL) {
+                        c->cap = 8192;
+                        c->buffer = (uint8_t*)malloc(c->cap);
+                    }
+
+                    struct io_uring_sqe* rsqe = io_uring_get_sqe(&ring);
+                    if (!rsqe) {
+                        io_uring_submit(&ring);
+                        rsqe = io_uring_get_sqe(&ring);
+                    }
+                    if (rsqe) {
+                        io_uring_prep_recv_multishot(rsqe, client_fd, NULL, 0, 0);
+                        rsqe->flags |= IOSQE_BUFFER_SELECT;
+                        rsqe->buf_group = RT_BUF_GROUP_ID;
+                        rsqe->user_data = (uint64_t)client_fd;
+                        need_submit = true;
+                    }
                 }
-            }
-        } else {
-            int client_fd = (int)udata;
-            if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
-                rt_http_conn* c = &conns[client_fd];
-                if (cqe->res <= 0) {
-                    if (c->in_use) {
-                        close(client_fd);
-                        c->in_use = false;
-                        c->len = 0;
+            } else {
+                int client_fd = (int)udata;
+                int res = cqe->res;
+                unsigned flags = cqe->flags;
+                if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
+                    rt_http_conn* c = &conns[client_fd];
+                    if (res <= 0) {
+                        io_uring_cq_advance(&ring, 1);
+                        if (c->in_use) {
+                            close(client_fd);
+                            c->in_use = false;
+                            c->len = 0;
+                        }
+                    } else {
+                        int bid = flags >> IORING_CQE_BUFFER_SHIFT;
+                        uint8_t* in_data = buf_storage + bid * RT_BUF_SIZE;
+                        size_t bytes = (size_t)res;
+
+                        if (c->len + bytes > c->cap) {
+                            size_t ncap = c->cap * 2;
+                            while (ncap < c->len + bytes) ncap *= 2;
+                            uint8_t* nbuf = (uint8_t*)realloc(c->buffer, ncap);
+                            if (nbuf) {
+                                c->buffer = nbuf;
+                                c->cap = ncap;
+                            }
+                        }
+
+                        if (c->len + bytes <= c->cap) {
+                            memcpy(c->buffer + c->len, in_data, bytes);
+                            c->len += bytes;
+                        }
+
+                        io_uring_buf_ring_add(br, in_data, RT_BUF_SIZE, bid, io_uring_buf_ring_mask(RT_BUF_RING_SIZE), 0);
+                        io_uring_buf_ring_advance(br, 1);
+                        io_uring_cq_advance(&ring, 1);
+
+                        for (;;) {
+                            ssize_t hdr_end = rt_http_find_header_end(c->buffer, c->len, c->header_scan_start);
+                            if (hdr_end < 0) {
+                                if (c->len > 3) c->header_scan_start = c->len - 3;
+                                break;
+                            }
+
+                            rt_http_request req;
+                            memset(&req, 0, sizeof(req));
+                            req.fd = client_fd;
+
+                            size_t content_length = 0;
+                            if (!rt_http_parse_request_headers(c->buffer, c->len, (size_t)hdr_end, &req, &content_length)) {
+                                rt_http_send_simple(client_fd, 400, "bad request\n", true);
+                                shutdown(client_fd, SHUT_RDWR);
+                                close(client_fd);
+                                c->in_use = false;
+                                c->len = 0;
+                                break;
+                            }
+
+                            if (content_length > RT_HTTP_MAX_BODY_BYTES) {
+                                rt_http_send_simple(client_fd, 413, "payload too large\n", true);
+                                shutdown(client_fd, SHUT_RDWR);
+                                close(client_fd);
+                                c->in_use = false;
+                                c->len = 0;
+                                break;
+                            }
+
+                            if (c->len < (size_t)hdr_end + content_length) {
+                                break;
+                            }
+
+                            req.body = c->buffer + hdr_end;
+                            req.body_len = content_length;
+
+                            rt_http_dispatch(&req);
+
+                            size_t consumed = (size_t)hdr_end + content_length;
+                            if (consumed < c->len) {
+                                memmove(c->buffer, c->buffer + consumed, c->len - consumed);
+                                c->len -= consumed;
+                                c->header_scan_start = 0;
+                            } else {
+                                c->len = 0;
+                                c->header_scan_start = 0;
+                            }
+
+                            if (req.close_after_response) {
+                                shutdown(client_fd, SHUT_RDWR);
+                                close(client_fd);
+                                c->in_use = false;
+                                c->len = 0;
+                                break;
+                            }
+
+                            if (c->len == 0) break;
+                        }
+
+                        if (c->in_use && !(flags & IORING_CQE_F_MORE)) {
+                            struct io_uring_sqe* rsqe = io_uring_get_sqe(&ring);
+                            if (!rsqe) {
+                                io_uring_submit(&ring);
+                                rsqe = io_uring_get_sqe(&ring);
+                            }
+                            if (rsqe) {
+                                io_uring_prep_recv_multishot(rsqe, client_fd, NULL, 0, 0);
+                                rsqe->flags |= IOSQE_BUFFER_SELECT;
+                                rsqe->buf_group = RT_BUF_GROUP_ID;
+                                rsqe->user_data = (uint64_t)client_fd;
+                                need_submit = true;
+                            }
+                        }
                     }
                 } else {
-                    int bid = cqe->flags >> IORING_CQE_BUFFER_SHIFT;
-                    uint8_t* in_data = buf_storage + bid * RT_BUF_SIZE;
-                    size_t bytes = (size_t)cqe->res;
-
-                    if (c->len + bytes > c->cap) {
-                        size_t ncap = c->cap * 2;
-                        while (ncap < c->len + bytes) ncap *= 2;
-                        uint8_t* nbuf = (uint8_t*)realloc(c->buffer, ncap);
-                        if (nbuf) {
-                            c->buffer = nbuf;
-                            c->cap = ncap;
-                        }
-                    }
-
-                    if (c->len + bytes <= c->cap) {
-                        memcpy(c->buffer + c->len, in_data, bytes);
-                        c->len += bytes;
-                    }
-
-                    io_uring_buf_ring_add(br, in_data, RT_BUF_SIZE, bid, io_uring_buf_ring_mask(RT_BUF_RING_SIZE), 0);
-                    io_uring_buf_ring_advance(br, 1);
-
-                    for (;;) {
-                        ssize_t hdr_end = rt_http_find_header_end(c->buffer, c->len, c->header_scan_start);
-                        if (hdr_end < 0) {
-                            if (c->len > 3) c->header_scan_start = c->len - 3;
-                            break;
-                        }
-
-                        rt_http_request req;
-                        memset(&req, 0, sizeof(req));
-                        req.fd = client_fd;
-
-                        size_t content_length = 0;
-                        if (!rt_http_parse_request_headers(c->buffer, c->len, (size_t)hdr_end, &req, &content_length)) {
-                            rt_http_send_simple(client_fd, 400, "bad request\n", true);
-                            shutdown(client_fd, SHUT_RDWR);
-                            close(client_fd);
-                            c->in_use = false;
-                            c->len = 0;
-                            break;
-                        }
-
-                        if (content_length > RT_HTTP_MAX_BODY_BYTES) {
-                            rt_http_send_simple(client_fd, 413, "payload too large\n", true);
-                            shutdown(client_fd, SHUT_RDWR);
-                            close(client_fd);
-                            c->in_use = false;
-                            c->len = 0;
-                            break;
-                        }
-
-                        if (c->len < (size_t)hdr_end + content_length) {
-                            break;
-                        }
-
-                        req.body = c->buffer + hdr_end;
-                        req.body_len = content_length;
-
-                        rt_http_dispatch(&req);
-
-                        size_t consumed = (size_t)hdr_end + content_length;
-                        if (consumed < c->len) {
-                            memmove(c->buffer, c->buffer + consumed, c->len - consumed);
-                            c->len -= consumed;
-                            c->header_scan_start = 0;
-                        } else {
-                            c->len = 0;
-                            c->header_scan_start = 0;
-                        }
-
-                        if (req.close_after_response) {
-                            shutdown(client_fd, SHUT_RDWR);
-                            close(client_fd);
-                            c->in_use = false;
-                            c->len = 0;
-                            break;
-                        }
-
-                        if (c->len == 0) break;
-                    }
+                    io_uring_cq_advance(&ring, 1);
                 }
             }
         }
-        io_uring_cqe_seen(&ring, cqe);
+        if (need_submit) {
+            io_uring_submit(&ring);
+        }
     }
 
     free(conns);

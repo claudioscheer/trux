@@ -20,6 +20,7 @@ typedef struct trux_sqlite_db trux_sqlite_db;
 struct trux_sqlite_db {
     sqlite3* handle;
     int is_open;
+    int is_thread_local;
 };
 
 typedef struct trux_sqlite_stmt trux_sqlite_stmt;
@@ -36,6 +37,21 @@ static inline void rt_sqlite_cleanup_all(void) {}
 
 const SQLiteImplSource = `
 /* --- SQLite Runtime Implementation --- */
+#define RT_SQLITE_TLS_CACHE_SIZE 16
+
+typedef struct {
+    char path[512];
+    trux_sqlite_db* db;
+} rt_sqlite_tls_entry;
+
+#if defined(_MSC_VER)
+static __declspec(thread) rt_sqlite_tls_entry g_trux_sqlite_tls_cache[RT_SQLITE_TLS_CACHE_SIZE];
+static __declspec(thread) size_t g_trux_sqlite_tls_count = 0;
+#else
+static __thread rt_sqlite_tls_entry g_trux_sqlite_tls_cache[RT_SQLITE_TLS_CACHE_SIZE];
+static __thread size_t g_trux_sqlite_tls_count = 0;
+#endif
+
 static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt_arena* arena, rt_string path) {
     char* c_path = rt_string_to_c_string(path, "sqlite open path");
     trux_sqlite_db* db = (trux_sqlite_db*)malloc(sizeof(trux_sqlite_db));
@@ -45,6 +61,7 @@ static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt
     }
     db->handle = NULL;
     db->is_open = 0;
+    db->is_thread_local = 0;
 
     int rc = sqlite3_open(c_path, &db->handle);
     free(c_path);
@@ -63,9 +80,42 @@ static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt
     return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, db, NULL);
 }
 
+static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open_thread_local(rt_arena* arena, rt_string path) {
+    char* c_path = rt_string_to_c_string(path, "sqlite open path");
+    for (size_t i = 0; i < g_trux_sqlite_tls_count; i++) {
+        if (g_trux_sqlite_tls_cache[i].db != NULL &&
+            g_trux_sqlite_tls_cache[i].db->is_open &&
+            strcmp(g_trux_sqlite_tls_cache[i].path, c_path) == 0) {
+            free(c_path);
+            return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, g_trux_sqlite_tls_cache[i].db, NULL);
+        }
+    }
+
+    trux_tuple_ptr_struct_14_trux_sqlite_db_error res = rt_sqlite_open(arena, path);
+    if (res.f1 != NULL) {
+        free(c_path);
+        return res;
+    }
+
+    trux_sqlite_db* db = res.f0;
+    db->is_thread_local = 1;
+
+    if (g_trux_sqlite_tls_count < RT_SQLITE_TLS_CACHE_SIZE) {
+        strncpy(g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].path, c_path, sizeof(g_trux_sqlite_tls_cache[0].path) - 1);
+        g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].path[sizeof(g_trux_sqlite_tls_cache[0].path) - 1] = '\0';
+        g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].db = db;
+        g_trux_sqlite_tls_count++;
+    }
+    free(c_path);
+    return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, db, NULL);
+}
+
 static RT_UNUSED rt_error rt_sqlite_close(rt_arena* arena, trux_sqlite_db* db) {
     if (db == NULL || !db->is_open || db->handle == NULL) {
         return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"database connection is not open", 31));
+    }
+    if (db->is_thread_local) {
+        return NULL;
     }
     int rc = sqlite3_close_v2(db->handle);
     db->handle = NULL;

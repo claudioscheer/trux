@@ -4139,6 +4139,8 @@ func sqliteRuntimeFnName(kind semtypes.SQLiteCallKind) string {
 	switch kind {
 	case semtypes.SQLiteCallOpen:
 		return "rt_sqlite_open"
+	case semtypes.SQLiteCallOpenThreadLocal:
+		return "rt_sqlite_open_thread_local"
 	case semtypes.SQLiteCallClose:
 		return "rt_sqlite_close"
 	case semtypes.SQLiteCallExec:

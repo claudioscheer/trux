@@ -26,7 +26,7 @@ func authMiddleware(request int) int {
     return 1
   }
 
-  let db *sqlite.DB, err error = sqlite.open("/tmp/bench.db")
+  let db *sqlite.DB, err error = sqlite.openThreadLocal("/tmp/bench.db")
   if err == nil {
     let _ error = sqlite.exec(db, "INSERT INTO audit (path) VALUES ('/api/data');")
     let _ error = sqlite.close(db)
@@ -42,7 +42,7 @@ func plaintext(request int) int {
 }
 
 func jsonLogging(request int) int {
-  let db *sqlite.DB, err error = sqlite.open("/tmp/bench.db")
+  let db *sqlite.DB, err error = sqlite.openThreadLocal("/tmp/bench.db")
   if err != nil {
     http.json(request, 500, "{\"error\":\"db open failed\"}\n")
     return 1
@@ -63,7 +63,7 @@ func jsonLogging(request int) int {
 
 func userById(request int) int {
   let id string = http.param(request, "id")
-  let db *sqlite.DB, err error = sqlite.open("/tmp/bench.db")
+  let db *sqlite.DB, err error = sqlite.openThreadLocal("/tmp/bench.db")
   if err != nil {
     http.json(request, 500, "{\"error\":\"db open failed\"}\n")
     return 1

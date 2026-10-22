@@ -101,6 +101,7 @@ type SQLiteCallKind string
 
 const (
 	SQLiteCallOpen            SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteOpen)
+	SQLiteCallOpenThreadLocal SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteOpenThreadLocal)
 	SQLiteCallClose           SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteClose)
 	SQLiteCallExec            SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteExec)
 	SQLiteCallQuery           SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteQuery)

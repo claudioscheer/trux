@@ -32,8 +32,12 @@ emit-c: build
 	@if [ -z "$(FILE)" ]; then echo "Usage: make emit-c FILE=path/to/file.tx"; exit 1; fi
 	./bin/$(BINARY) emit-c $(FILE)
 
+# Usage: make test           (verbose, prints every test)
+#        make test VERBOSE=0 (quiet, summary only)
+VERBOSE ?= 1
+
 test:
-	$(GO) test ./...
+	$(GO) test $(if $(filter 1,$(VERBOSE)),-v )$(GO_TEST_FLAGS) ./...
 
 # Integer workload, GPU matrix multiply, Jacobi stencil, and a four-layer conv net.
 # On Windows, run `vs` in this shell first so nvcc can find cl.exe.

@@ -275,8 +275,16 @@ type Expression interface {
 }
 
 type IdentExpr struct {
-	Start token.Position
-	Name  string
+	Start   token.Position
+	Package string
+	Name    string
+}
+
+func (e *IdentExpr) SourceName() string {
+	if e.Package != "" {
+		return e.Package + "." + e.Name
+	}
+	return e.Name
 }
 
 func (e *IdentExpr) Pos() token.Position { return e.Start }

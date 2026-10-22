@@ -211,7 +211,7 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 		}
 		args = []string{"-x", "cu", sourcePath, "-o", outputPath}
 	} else if opts.UsesHTTP {
-		args = append(args, "-pthread")
+		args = append(args, "-D_GNU_SOURCE", "-pthread", "-luring")
 	}
 
 	cmd := exec.Command(compiler, args...)

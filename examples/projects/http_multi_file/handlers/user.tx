@@ -1,0 +1,20 @@
+package handlers
+
+import "http"
+
+pub func getUser(request int) int {
+  let id string = http.param(request, "id")
+  let userId string = http.context(request, "userId")
+  let role string = http.context(request, "role")
+  let body string = "{\"id\":\"" + id + "\",\"auth_user\":\"" + userId + "\",\"role\":\"" + role + "\"}\n"
+  http.json(request, 200, body)
+  return 0
+}
+
+pub func updateUser(request int) int {
+  let id string = http.param(request, "id")
+  let body string = http.body(request)
+  let resp string = "{\"updated_id\":\"" + id + "\",\"payload\":" + body + "}\n"
+  http.json(request, 200, resp)
+  return 0
+}

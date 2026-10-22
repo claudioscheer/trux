@@ -787,11 +787,7 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 
 			return &ast.CallExpr{Start: ident.Pos, Package: packageName, Callee: callee, Args: args}, nil
 		}
-		if packageName != "" {
-			return nil, p.errorf(p.current(), "expected %q, got %s", string(token.LParen), describe(p.current()))
-		}
-
-		return &ast.IdentExpr{Start: ident.Pos, Name: ident.Lexeme}, nil
+		return &ast.IdentExpr{Start: ident.Pos, Package: packageName, Name: callee}, nil
 	case p.match(token.LParen):
 		expr, err := p.parseExpression(0)
 		if err != nil {

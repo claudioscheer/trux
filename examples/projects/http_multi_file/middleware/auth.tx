@@ -1,0 +1,20 @@
+package middleware
+
+import "http"
+
+pub func authenticate(request int) int {
+  let token string = http.header(request, "Authorization")
+  if token == "Bearer secret-token" {
+    http.set(request, "userId", "user-42")
+    http.set(request, "role", "admin")
+    return 0
+  }
+  http.setHeader(request, "WWW-Authenticate", "Bearer")
+  http.json(request, 401, "{\"error\":\"unauthorized\"}\n")
+  return 1
+}
+
+pub func serverHeader(request int) int {
+  http.setHeader(request, "X-Server", "trux-uring")
+  return 0
+}

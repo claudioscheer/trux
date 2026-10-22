@@ -481,7 +481,8 @@ func handle(request int) int {
 }
 
 func main() int {
-    http.serve("127.0.0.1", 8080, 4, handle)
+    http.get("/hello", handle)
+    http.listen(8080)
     return 0
 }`)
 	info, err := semtypes.Check(program)
@@ -515,13 +516,18 @@ func main() int {
 	if _, ok := handle.Body[2].(*HTTPRespondStmt); !ok {
 		t.Fatalf("third handler statement = %T, want HTTPRespondStmt", handle.Body[2])
 	}
-	serve, ok := irProgram.Functions[1].Body[0].(*HTTPServeStmt)
+	route, ok := irProgram.Functions[1].Body[0].(*HTTPRouteStmt)
 	if !ok {
-		t.Fatalf("main first statement = %T, want HTTPServeStmt", irProgram.Functions[1].Body[0])
+		t.Fatalf("main first statement = %T, want HTTPRouteStmt", irProgram.Functions[1].Body[0])
 	}
-	if serve.HandlerName != "handle" {
-		t.Fatalf("handler = %q, want handle", serve.HandlerName)
+	if route.HandlerName != "handle" {
+		t.Fatalf("handler = %q, want handle", route.HandlerName)
 	}
+	listen, ok := irProgram.Functions[1].Body[1].(*HTTPListenStmt)
+	if !ok {
+		t.Fatalf("main second statement = %T, want HTTPListenStmt", irProgram.Functions[1].Body[1])
+	}
+	_ = listen
 }
 
 func sameTypes(got []ast.Type, want []ast.Type) bool {

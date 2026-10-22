@@ -733,9 +733,15 @@ func main() int {
     let ready bool = io.readBool()
     let text string, err1 error = io.readFile("input.txt")
     let err2 error = io.writeFile("out.txt", text + line)
+    let err5 error = io.createDir("dir")
+    let err6 error = io.remove("dir")
+    let entries list[string], err7 error = io.readDir("dir")
+    let ex bool = io.exists("dir")
+    let isF bool = io.isFile("dir")
+    let isD bool = io.isDir("dir")
     let cells list[string], err3 error = csv.read("in.csv", 2)
     let err4 error = csv.write("out.csv", cells, 2)
-    print(line, " ", count, " ", ratio, " ", ready, " ", len(cells))
+    print(line, " ", count, " ", ratio, " ", ready, " ", len(cells), " ", len(entries), " ", ex, " ", isF, " ", isD)
     return 0
 }`)
 
@@ -755,6 +761,12 @@ func main() int {
 		IOCallReadBool,
 		IOCallReadFile,
 		IOCallWriteFile,
+		IOCallCreateDir,
+		IOCallRemove,
+		IOCallReadDir,
+		IOCallExists,
+		IOCallIsFile,
+		IOCallIsDir,
 		IOCallReadCSV,
 		IOCallWriteCSV,
 	} {
@@ -764,8 +776,16 @@ func main() int {
 	}
 
 	mainFn := program.Functions[0]
-	readCsvLet := mainFn.Body.Statements[6].(*ast.LetStmt)
+	readDirLet := mainFn.Body.Statements[8].(*ast.LetStmt)
 	wantType := &ast.TupleType{Types: []ast.Type{&ast.ListType{Elem: ast.StringType}, ast.ErrorType}}
+	if !ast.TypeEqual(info.ExprTypes[readDirLet.Value], wantType) {
+		t.Fatalf("readDir type = %s, want (list[string], error)", info.ExprTypes[readDirLet.Value])
+	}
+	if info.ExprOrigins[readDirLet.Value] != OriginFrameOwned {
+		t.Fatalf("readDir origin = %s, want %s", info.ExprOrigins[readDirLet.Value], OriginFrameOwned)
+	}
+
+	readCsvLet := mainFn.Body.Statements[12].(*ast.LetStmt)
 	if !ast.TypeEqual(info.ExprTypes[readCsvLet.Value], wantType) {
 		t.Fatalf("readCsv type = %s, want (list[string], error)", info.ExprTypes[readCsvLet.Value])
 	}
@@ -1346,6 +1366,28 @@ func main() int {
     return 0
 }`,
 			want: `io.readFile path has type int, want string`,
+		},
+		{
+			name: "createDir path type",
+			src: `package main
+import "io"
+
+func main() int {
+    let err error = io.createDir(true)
+    return 0
+}`,
+			want: `io.createDir path has type bool, want string`,
+		},
+		{
+			name: "readDir path type",
+			src: `package main
+import "io"
+
+func main() int {
+    let entries list[string], err error = io.readDir(10)
+    return 0
+}`,
+			want: `io.readDir path has type int, want string`,
 		},
 		{
 			name: "writeFile expression",

@@ -551,6 +551,55 @@ func (e *WriteFileExpr) Ownership() types.Origin { return e.Origin }
 
 func (*WriteFileExpr) exprNode() {}
 
+type CreateDirExpr struct {
+	Path   Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *CreateDirExpr) Type() ast.Type { return e.Typ }
+
+func (e *CreateDirExpr) Ownership() types.Origin { return e.Origin }
+
+func (*CreateDirExpr) exprNode() {}
+
+type RemoveExpr struct {
+	Path   Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *RemoveExpr) Type() ast.Type { return e.Typ }
+
+func (e *RemoveExpr) Ownership() types.Origin { return e.Origin }
+
+func (*RemoveExpr) exprNode() {}
+
+type ReadDirExpr struct {
+	Path   Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *ReadDirExpr) Type() ast.Type { return e.Typ }
+
+func (e *ReadDirExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ReadDirExpr) exprNode() {}
+
+type PathQueryExpr struct {
+	Kind   types.IOCallKind
+	Path   Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *PathQueryExpr) Type() ast.Type { return e.Typ }
+
+func (e *PathQueryExpr) Ownership() types.Origin { return e.Origin }
+
+func (*PathQueryExpr) exprNode() {}
+
 type WriteCSVExpr struct {
 	Path    Expr
 	Cells   Expr
@@ -1304,6 +1353,30 @@ func (b builder) buildIOExpr(expr *ast.CallExpr, sig types.IOCallSig, typ ast.Ty
 			return nil, err
 		}
 		return &WriteFileExpr{Path: args[0], Contents: args[1], Typ: typ, Origin: origin}, nil
+	case types.IOCallCreateDir:
+		path, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &CreateDirExpr{Path: path, Typ: typ, Origin: origin}, nil
+	case types.IOCallRemove:
+		path, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &RemoveExpr{Path: path, Typ: typ, Origin: origin}, nil
+	case types.IOCallReadDir:
+		path, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &ReadDirExpr{Path: path, Typ: typ, Origin: origin}, nil
+	case types.IOCallExists, types.IOCallIsFile, types.IOCallIsDir:
+		path, err := b.buildExpr(expr.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &PathQueryExpr{Kind: sig.Kind, Path: path, Typ: typ, Origin: origin}, nil
 	case types.IOCallWriteCSV:
 		args, err := b.buildExprs(expr.Args)
 		if err != nil {

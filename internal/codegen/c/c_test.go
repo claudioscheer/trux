@@ -934,9 +934,15 @@ func main() int {
     let ready bool = io.readBool()
     let text string, err1 error = io.readFile("input.txt")
     let err2 error = io.writeFile("out.txt", text + line)
+    let err5 error = io.createDir("dir")
+    let err6 error = io.remove("dir")
+    let entries list[string], err7 error = io.readDir("dir")
+    let ex bool = io.exists("dir")
+    let isF bool = io.isFile("dir")
+    let isD bool = io.isDir("dir")
     let cells list[string], err3 error = csv.read("in.csv", 2)
     let err4 error = csv.write("out.csv", cells, 2)
-    print(line, " ", count, " ", ratio, " ", ready, " ", len(cells))
+    print(line, " ", count, " ", ratio, " ", ready, " ", len(cells), " ", len(entries), " ", ex, " ", isF, " ", isD)
     return 0
 }`)
 
@@ -947,6 +953,12 @@ func main() int {
 		"bool trux_v_5_ready = rt_read_bool(&trux_frame);",
 		"rt_read_file(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"input.txt\", 9))",
 		"rt_write_file(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"out.txt\", 7), rt_string_concat(&trux_frame, trux_v_4_text, trux_v_4_line))",
+		"rt_create_dir(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"dir\", 3))",
+		"rt_remove(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"dir\", 3))",
+		"rt_read_dir(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"dir\", 3))",
+		"rt_exists(RT_LIT(rt_string, (const uint8_t*)\"dir\", 3))",
+		"rt_is_file(RT_LIT(rt_string, (const uint8_t*)\"dir\", 3))",
+		"rt_is_dir(RT_LIT(rt_string, (const uint8_t*)\"dir\", 3))",
 		"rt_read_csv(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"in.csv\", 6), 2)",
 		"rt_write_csv(&trux_frame, RT_LIT(rt_string, (const uint8_t*)\"out.csv\", 7), trux_v_5_cells, 2)",
 	}

@@ -387,9 +387,15 @@ func main() int {
     let count int = io.readInt()
     let text string, err1 error = io.readFile("input.txt")
     let err2 error = io.writeFile("out.txt", text + line)
+    let err5 error = io.createDir("dir")
+    let err6 error = io.remove("dir")
+    let entries list[string], err7 error = io.readDir("dir")
+    let ex bool = io.exists("dir")
+    let isF bool = io.isFile("dir")
+    let isD bool = io.isDir("dir")
     let cells list[string], err3 error = csv.read("in.csv", 2)
     let err4 error = csv.write("out.csv", cells, 2)
-    print(line, " ", count, " ", len(cells))
+    print(line, " ", count, " ", len(cells), " ", len(entries), " ", ex, " ", isF, " ", isD)
     return 0
 }`)
 	info, err := semtypes.Check(program)
@@ -415,7 +421,25 @@ func main() int {
 	if _, ok := mainFn.Body[3].(*LetStmt).Value.(*WriteFileExpr); !ok {
 		t.Fatalf("fourth statement = %T, want WriteFileExpr", mainFn.Body[3].(*LetStmt).Value)
 	}
-	readCsv := mainFn.Body[4].(*LetStmt).Value
+	if _, ok := mainFn.Body[4].(*LetStmt).Value.(*CreateDirExpr); !ok {
+		t.Fatalf("createDir statement = %T, want CreateDirExpr", mainFn.Body[4].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[5].(*LetStmt).Value.(*RemoveExpr); !ok {
+		t.Fatalf("remove statement = %T, want RemoveExpr", mainFn.Body[5].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[6].(*LetStmt).Value.(*ReadDirExpr); !ok {
+		t.Fatalf("readDir statement = %T, want ReadDirExpr", mainFn.Body[6].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[7].(*LetStmt).Value.(*PathQueryExpr); !ok {
+		t.Fatalf("exists statement = %T, want PathQueryExpr", mainFn.Body[7].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[8].(*LetStmt).Value.(*PathQueryExpr); !ok {
+		t.Fatalf("isFile statement = %T, want PathQueryExpr", mainFn.Body[8].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[9].(*LetStmt).Value.(*PathQueryExpr); !ok {
+		t.Fatalf("isDir statement = %T, want PathQueryExpr", mainFn.Body[9].(*LetStmt).Value)
+	}
+	readCsv := mainFn.Body[10].(*LetStmt).Value
 	wantCsvType := &ast.TupleType{Types: []ast.Type{&ast.ListType{Elem: ast.StringType}, ast.ErrorType}}
 	if !ast.TypeEqual(readCsv.Type(), wantCsvType) {
 		t.Fatalf("readCsv type = %s, want (list[string], error)", readCsv.Type())
@@ -423,8 +447,8 @@ func main() int {
 	if _, ok := readCsv.(*ReadCSVExpr); !ok {
 		t.Fatalf("cells let value = %T, want ReadCSVExpr", readCsv)
 	}
-	if _, ok := mainFn.Body[5].(*LetStmt).Value.(*WriteCSVExpr); !ok {
-		t.Fatalf("sixth statement = %T, want WriteCSVExpr", mainFn.Body[5].(*LetStmt).Value)
+	if _, ok := mainFn.Body[11].(*LetStmt).Value.(*WriteCSVExpr); !ok {
+		t.Fatalf("twelfth statement = %T, want WriteCSVExpr", mainFn.Body[11].(*LetStmt).Value)
 	}
 }
 

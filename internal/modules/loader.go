@@ -585,6 +585,8 @@ func (l *loader) rewriteExprCalls(unit *fileUnit, expr ast.Expression, ctx resol
 			packageName := public[0].unit.program.PackageName
 			return l.errorInUnit(unit, expr.Start, "cannot call imported function %q without a direct package import; import package %q and call %s.%s", expr.Callee, packageName, packageName, expr.Callee)
 		}
+	case *ast.UnaryExpr:
+		return l.rewriteExprCalls(unit, expr.Operand, ctx)
 	case *ast.BinaryExpr:
 		if err := l.rewriteExprCalls(unit, expr.Left, ctx); err != nil {
 			return err

@@ -568,6 +568,131 @@ int main(void) {
 	}
 }
 
+func TestRuntimeFilesystemOperations(t *testing.T) {
+	tempDir := t.TempDir()
+	subDir := filepath.Join(tempDir, "test_dir")
+	fileA := filepath.Join(subDir, "file_a.txt")
+	fileB := filepath.Join(subDir, "file_b.txt")
+
+	source := Source + `
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    rt_string dir_path = ` + cString(subDir) + `;
+    rt_string file_a_path = ` + cString(fileA) + `;
+    rt_string file_b_path = ` + cString(fileB) + `;
+
+    if (rt_exists(dir_path)) {
+        fprintf(stderr, "dir should not exist initially\n");
+        return 1;
+    }
+    if (rt_is_dir(dir_path)) {
+        fprintf(stderr, "dir should not be dir initially\n");
+        return 1;
+    }
+    if (rt_is_file(dir_path)) {
+        fprintf(stderr, "dir should not be file initially\n");
+        return 1;
+    }
+
+    rt_error err = rt_create_dir(&arena, dir_path);
+    if (err != NULL) {
+        fprintf(stderr, "rt_create_dir failed\n");
+        return 1;
+    }
+    if (!rt_exists(dir_path)) {
+        fprintf(stderr, "dir should exist after createDir\n");
+        return 1;
+    }
+    if (!rt_is_dir(dir_path)) {
+        fprintf(stderr, "dir should be dir\n");
+        return 1;
+    }
+    if (rt_is_file(dir_path)) {
+        fprintf(stderr, "dir should not be regular file\n");
+        return 1;
+    }
+
+    err = rt_create_dir(&arena, dir_path);
+    if (err == NULL) {
+        fprintf(stderr, "createDir on existing path should return error\n");
+        return 1;
+    }
+
+    err = rt_write_file(&arena, file_b_path, (rt_string){(const uint8_t*)"b", 1});
+    if (err != NULL) {
+        fprintf(stderr, "write file_b failed\n");
+        return 1;
+    }
+    err = rt_write_file(&arena, file_a_path, (rt_string){(const uint8_t*)"a", 1});
+    if (err != NULL) {
+        fprintf(stderr, "write file_a failed\n");
+        return 1;
+    }
+
+    if (!rt_is_file(file_a_path)) {
+        fprintf(stderr, "file_a should be file\n");
+        return 1;
+    }
+    if (rt_is_dir(file_a_path)) {
+        fprintf(stderr, "file_a should not be dir\n");
+        return 1;
+    }
+
+    trux_tuple_list_string_error dir_res = rt_read_dir(&arena, dir_path);
+    if (dir_res.f1 != NULL) {
+        fprintf(stderr, "rt_read_dir failed\n");
+        return 1;
+    }
+    rt_list_string* entries = dir_res.f0;
+    if (entries->len != 2) {
+        fprintf(stderr, "expected 2 entries, got %zu\n", entries->len);
+        return 1;
+    }
+    if (!rt_string_equal(entries->data[0], (rt_string){(const uint8_t*)"file_a.txt", 10})) {
+        fprintf(stderr, "first entry should be file_a.txt\n");
+        return 1;
+    }
+    if (!rt_string_equal(entries->data[1], (rt_string){(const uint8_t*)"file_b.txt", 10})) {
+        fprintf(stderr, "second entry should be file_b.txt\n");
+        return 1;
+    }
+
+    err = rt_remove(&arena, dir_path);
+    if (err == NULL) {
+        fprintf(stderr, "rt_remove on non-empty dir should fail\n");
+        return 1;
+    }
+
+    err = rt_remove(&arena, file_a_path);
+    if (err != NULL) {
+        fprintf(stderr, "remove file_a failed\n");
+        return 1;
+    }
+    err = rt_remove(&arena, file_b_path);
+    if (err != NULL) {
+        fprintf(stderr, "remove file_b failed\n");
+        return 1;
+    }
+
+    err = rt_remove(&arena, dir_path);
+    if (err != NULL) {
+        fprintf(stderr, "remove empty dir failed\n");
+        return 1;
+    }
+    if (rt_exists(dir_path)) {
+        fprintf(stderr, "dir should not exist after remove\n");
+        return 1;
+    }
+
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`
+	compileAndRunRuntimeC(t, source)
+}
+
 func TestCSVRuntimeRejectsWrongColumnCount(t *testing.T) {
 	dir := t.TempDir()
 	csvPath := filepath.Join(dir, "bad.csv")

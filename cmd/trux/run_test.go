@@ -902,6 +902,77 @@ func main() int {
 	}
 }
 
+func TestRunFileCompilesAndExecutesFilesystemOperations(t *testing.T) {
+	requireCC(t)
+
+	tempDir := t.TempDir()
+	subDir := filepath.Join(tempDir, "test_fs_dir")
+	fileA := filepath.Join(subDir, "file_a.txt")
+	fileB := filepath.Join(subDir, "file_b.txt")
+
+	path := writeTempSource(t, `package main
+import "io"
+
+func main() int {
+    let dir string = `+truxString(subDir)+`
+    let fileA string = `+truxString(fileA)+`
+    let fileB string = `+truxString(fileB)+`
+
+    assert(!io.exists(dir), "dir should not exist yet")
+    assert(!io.isDir(dir), "dir should not be isDir")
+    assert(!io.isFile(dir), "dir should not be isFile")
+
+    let err1 error = io.createDir(dir)
+    assert(err1 == nil, "createDir should succeed")
+    assert(io.exists(dir), "dir should exist")
+    assert(io.isDir(dir), "dir should be isDir")
+    assert(!io.isFile(dir), "dir should not be isFile")
+
+    let errDup error = io.createDir(dir)
+    assert(errDup != nil, "createDir duplicate should return error")
+
+    let errW1 error = io.writeFile(fileB, "content b")
+    assert(errW1 == nil, "write fileB")
+    let errW2 error = io.writeFile(fileA, "content a")
+    assert(errW2 == nil, "write fileA")
+
+    assert(io.exists(fileA), "fileA should exist")
+    assert(io.isFile(fileA), "fileA should be isFile")
+    assert(!io.isDir(fileA), "fileA should not be isDir")
+
+    let entries list[string], errRead error = io.readDir(dir)
+    assert(errRead == nil, "readDir should succeed")
+    assert(len(entries) == 2, "readDir should have 2 entries")
+    assert(entries[0] == "file_a.txt", "entries[0] should be file_a.txt")
+    assert(entries[1] == "file_b.txt", "entries[1] should be file_b.txt")
+
+    let errRemDir error = io.remove(dir)
+    assert(errRemDir != nil, "remove non-empty dir should fail")
+
+    let errRem1 error = io.remove(fileA)
+    assert(errRem1 == nil, "remove fileA")
+    let errRem2 error = io.remove(fileB)
+    assert(errRem2 == nil, "remove fileB")
+
+    let errRemEmpty error = io.remove(dir)
+    assert(errRemEmpty == nil, "remove empty dir")
+    assert(!io.exists(dir), "dir should not exist after remove")
+
+    print("filesystem ok")
+    return 0
+}`)
+
+	var out bytes.Buffer
+	err := runFile(&out, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if out.String() != "filesystem ok\n" {
+		t.Fatalf("output = %q, want filesystem ok", out.String())
+	}
+}
+
 func TestRunFileCompilesAndExecutesMultiReturnAndErrors(t *testing.T) {
 	requireCC(t)
 

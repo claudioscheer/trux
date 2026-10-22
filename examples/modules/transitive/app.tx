@@ -2,10 +2,19 @@ package app
 
 import "text.tx"
 
+pub type Status struct {
+  message string
+  score int
+}
+
 pub func message() string {
   return text.prefix() + " modules"
 }
 
 pub func score() int {
   return 40 + text.bonus()
+}
+
+pub func status() Status {
+  return Status{message: message(), score: score()}
 }

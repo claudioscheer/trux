@@ -93,9 +93,13 @@ The code generator only ever reads the IR, never the AST.
 | `float` | `double` |
 | `bool` | `bool` |
 | `string` | `rt_string` (`{ const uint8_t* data; size_t len; }`) |
+| `error` | `rt_error` (`rt_error_data*`) |
+| `type Point struct` | `struct trux_s_5_Point` |
+| `*Point` | `struct trux_s_5_Point*` |
 | `[N]int` | `rt_array_int` (`{ int64_t* data; size_t len; }`) |
 | `[]float` | `rt_slice_float` |
 | `list[string]` | `rt_list_string*` (`{ rt_string* data; size_t len; size_t cap; }`) |
+| `map[string]int` | `rt_map*` (type-erased open-addressing FNV-1a hash table with typed wrapper helpers) |
 | `list[list[int]]` | `rt_list_list_int*`, a nested family defined in the generated file |
 | `gpu.Buffer[int]` | `rt_gpu_buffer_int` on the host, `int64_t*` inside a kernel |
 

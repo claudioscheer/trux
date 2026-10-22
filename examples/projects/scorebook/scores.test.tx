@@ -4,14 +4,16 @@ import "scores.tx"
 
 func testTotalAndAverage() {
   let values list[int] = list[int]{80, 90, 100}
-  assert(total(values) == 270, "total should add all scores")
-  assert(average(values) == 90, "average should use integer division")
+  let summary Summary = summarize(values)
+  assert(summary.total == 270, "total should add all scores")
+  assert(summary.average == 90, "average should use integer division")
 }
 
 func testBestAndPassingCount() {
   let values list[int] = list[int]{59, 60, 72, 100}
-  assert(best(values) == 100, "best should find highest score")
-  assert(passingCount(values) == 3, "passing count should include scores at 60")
+  let summary Summary = summarize(values)
+  assert(summary.best == 100, "best should find highest score")
+  assert(summary.passing == 3, "passing count should include scores at 60")
 }
 
 func testLetterBoundaries() {
@@ -24,6 +26,11 @@ func testLetterBoundaries() {
   assert(letter(69) == "D", "69 should be D")
   assert(letter(60) == "D", "60 should be D")
   assert(letter(59) == "F", "59 should be F")
+
+  let counts map[string]int = gradeCounts(list[int]{95, 91, 82, 50})
+  assert(counts["A"] == 2, "expected two A grades")
+  assert(counts["B"] == 1, "expected one B grade")
+  assert(counts["F"] == 1, "expected one F grade")
 }
 
 func testCurveCapsScores() {

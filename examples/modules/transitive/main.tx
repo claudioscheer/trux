@@ -3,6 +3,7 @@ package main
 import "app.tx"
 
 func main() int {
-  print(app.message(), " ", app.score())
+  let s app.Status = app.status()
+  print(s.message, " ", s.score)
   return 0
 }

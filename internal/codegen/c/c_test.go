@@ -1632,3 +1632,200 @@ func main() int {
 		t.Fatalf("generated C missing rt_error:\n%s", cSource)
 	}
 }
+
+func TestGenerateCompilesAndRunsStructsPointersAndMaps(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+
+type Point struct {
+    x int
+    y int
+}
+
+type Node struct {
+    val int
+    next *Node
+}
+
+func move(p Point, dx int) Point {
+    let copy Point = p
+    copy.x = copy.x + dx
+    return copy
+}
+
+func scalePtr(p *Point, factor int) int {
+    p.x = p.x * factor
+    p.y = p.y * factor
+    return p.x + p.y
+}
+
+func makeHeapPoint(x int, y int) *Point {
+    let p *Point = new(Point)
+    p.x = x
+    p.y = y
+    return p
+}
+
+func putScore(mut scores map[string]int, name string, score int) int {
+    scores[name] = score
+    return len(scores)
+}
+
+func main() int {
+    let p1 Point = Point{x: 3}
+    let p2 Point = move(p1, 4)
+    print(p1.x, " ", p1.y, " ", p2.x)
+
+    let sum int = scalePtr(&p2, 2)
+    print(p2.x, " ", sum)
+
+    let hp *Point = makeHeapPoint(5, 6)
+    let hp2 *Point = &Point{x: 7, y: 8}
+    *hp = *hp2
+    print(hp.x, " ", hp.y)
+
+    let head *Node = &Node{val: 10, next: &Node{val: 20, next: nil}}
+    let total int = 0
+    for let cur *Node = head; cur != nil; cur = cur.next {
+        total = total + cur.val
+    }
+    print(total)
+
+    let scores map[string]int = map[string]int{"alice": 10, "bob": 20}
+    putScore(scores, "carol", 30)
+    scores["bob"] = 25
+    delete(scores, "alice")
+
+    let bobScore int, hasBob bool = scores["bob"]
+    let aliceScore int, hasAlice bool = scores["alice"]
+    print(len(scores), " ", bobScore, " ", hasBob, " ", aliceScore, " ", hasAlice)
+
+    let ks list[string] = keys(scores)
+    let vs list[int] = values(scores)
+    print(ks[0], ":", vs[0], ",", ks[1], ":", vs[1])
+
+    let cloned map[string]int = clone(scores)
+    cloned["bob"] = 99
+    print(scores["bob"], " ", cloned["bob"])
+
+    let byPtr map[*Point]string = make(map[*Point]string, 4)
+    byPtr[hp] = "found"
+    print(byPtr[hp])
+
+    return 0
+}`)
+
+	stdout, _ := compileAndRunGeneratedC(t, cSource)
+	want := strings.Join([]string{
+		"3 0 7",
+		"14 14",
+		"7 8",
+		"30",
+		"2 25 true 0 false",
+		"bob:25,carol:30",
+		"25 99",
+		"found",
+	}, "\n") + "\n"
+	if stdout != want {
+		t.Fatalf("stdout =\n%s\nwant:\n%s", stdout, want)
+	}
+}
+
+func TestGenerateNilPointerDereferenceFailsAtRuntime(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+
+type Box struct {
+    v int
+}
+
+func main() int {
+    let p *Box = nil
+    return p.v
+}`)
+
+	compiler := os.Getenv("CC")
+	if compiler == "" {
+		compiler = "cc"
+	}
+	if _, err := exec.LookPath(compiler); err != nil {
+		t.Skipf("C compiler %q not found", compiler)
+	}
+	dir := t.TempDir()
+	cPath := filepath.Join(dir, "main.c")
+	exePath := filepath.Join(dir, "main")
+	if err := os.WriteFile(filepath.Join(dir, runtimec.HeaderName), []byte(runtimec.Source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cPath, []byte(cSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile := exec.Command(compiler, "-std=c11", "-Wall", "-Wextra", "-pedantic", cPath, "-o", exePath)
+	if output, err := compile.CombinedOutput(); err != nil {
+		t.Fatalf("compile generated C: %v\n%s", err, output)
+	}
+	run := exec.Command(exePath)
+	output, err := run.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected nil pointer dereference to fail, got output: %s", output)
+	}
+	if !strings.Contains(string(output), "trux runtime error: nil pointer dereference") {
+		t.Fatalf("output = %q, want nil pointer dereference error", output)
+	}
+}
+
+func TestGenerateCrossModuleStructsAndNestedCollections(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	geomPath := filepath.Join(dir, "geom", "geom.tx")
+	sources := map[string]string{
+		mainPath: `package main
+import "./geom/geom.tx"
+
+func main() int {
+    let items list[geom.Vec2] = list[geom.Vec2]{geom.Vec2{x: 1, y: 2}}
+    append(items, geom.makeVec(3, 4))
+    items[0].x = 10
+
+    let registry map[int]geom.Vec2 = make(map[int]geom.Vec2)
+    registry[1] = items[0]
+    registry[2] = items[1]
+
+    let v geom.Vec2 = geom.Vec2{}
+    let ok bool = false
+    v, ok = registry[2]
+    if ok {
+        print(items[0].x, " ", v.x, " ", v.y)
+    }
+    return 0
+}`,
+		geomPath: `package geom
+
+pub type Vec2 struct {
+    x int
+    y int
+}
+
+pub func makeVec(x int, y int) Vec2 {
+    return Vec2{x: x, y: y}
+}`,
+	}
+	loaded, err := modules.LoadWithSources(mainPath, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := semtypes.Check(loaded.Program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	typedIR, err := ir.Build(loaded.Program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cSource, err := Generate(typedIR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, _ := compileAndRunGeneratedC(t, cSource)
+	if stdout != "10 3 4\n" {
+		t.Fatalf("stdout = %q, want \"10 3 4\\n\"", stdout)
+	}
+}

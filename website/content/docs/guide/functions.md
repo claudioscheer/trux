@@ -1,6 +1,6 @@
 ---
 title: "Functions"
-description: "Declaring and calling functions, returns, recursion, and mut parameters."
+description: "Declaring and calling functions, returns, recursion, pointer parameters, and mut parameters."
 icon: "functions"
 weight: 500
 ---
@@ -9,7 +9,8 @@ weight: 500
 
 **What it is.** `func name(param type, ...) returnType { ... }` declares a function. A call is `name(args)`.
 
-**Why.** Functions are the only top-level declarations in Trux; all code lives in them.
+**Why.** Functions and `type ... struct` definitions are the top-level declarations in Trux; all executable code lives in
+functions.
 
 **How to use it.**
 
@@ -69,12 +70,11 @@ The compiler does not work out whether a loop always returns. Add a final `retur
 
 **Related:** [Control flow](/docs/guide/control-flow/).
 
-## Returning collections
+## Returning structs and collections {#returning-collections}
 
-**What it is.** Functions can take and return arrays, slices, lists, and strings.
+**What it is.** Functions can take and return structs, pointers (`*T`), arrays, slices, lists, maps, and strings.
 
-**Why.** Building a result in a function and handing it back is the normal way to structure work in a language without
-structs.
+**Why.** Building a structured result or collection in a function and handing it back keeps callers simple.
 
 **How to use it.**
 
@@ -85,17 +85,19 @@ structs.
 The returned value always stays valid after the function returns. Whether it is a view or a copy is decided by the
 ownership rules in [Memory and ownership](/docs/guide/memory/#returned-values).
 
-**Common mistakes.** Changing a returned collection directly is rejected; see
-[unknown ownership](/docs/guide/memory/#clone).
+**Common mistakes.** Changing a returned collection directly without binding or cloning is rejected when its ownership is
+unknown; see [unknown ownership](/docs/guide/memory/#clone). Returning the address of a stack local (`&local`) is also
+rejected; use `new(T)` or `&StructLiteral{...}` instead.
 
-## `mut` parameters {#mut-parameters}
+## `mut` and pointer parameters {#mut-parameters}
 
-**What it is.** `mut` on an array, slice, or list parameter lets the function change the caller's collection.
+**What it is.** `mut` on an array, slice, list, or map parameter lets the function change the caller's collection.
+Passing a pointer `*T` lets a function mutate a caller's struct or scalar in place.
 
-**Why.** By default a function can only **read** the collections it is given. That makes every call that can change your
-data visible in the function's signature.
+**Why.** By default a function can only **read** the collections and structs it is given. `mut` and `*T` make every call
+that can mutate caller state explicit in the function's signature.
 
-**How to use it.** Mark the parameter, not the call:
+**How to use it.** Mark the collection parameter `mut` (not the call), or take a pointer `*T` and pass `&value`:
 
 ```trux
 func push(mut xs list[int], value int) int {
@@ -110,8 +112,9 @@ func main() int {
 }
 ```
 
-- The argument must be something the caller may change: its own local collection, or its own `mut` parameter.
+- For `mut`, the argument must be something the caller may change: its own local collection, or its own `mut` parameter.
 - Assigning a whole new collection to a `mut` parameter only rebinds the local name; the caller's variable is unchanged.
+- For structs or scalars, pass `*T` (for example `func enqueue(q *Queue, value int) int`) and call `enqueue(&queue, 10)`.
 
 The full walkthrough:
 
@@ -135,7 +138,7 @@ Using `mut` on a scalar:
 
 {{< include "website/outputs/errors/functions_mut_scalar.txt" "text" >}}
 
-Scalars are passed by value; return the new value instead.
+Scalars are passed by value; return the new value or take `*int` instead.
 
 **When you don't need it.** If the function only reads the collection, leave `mut` off. If it needs its own modified
 copy, [`clone`](/docs/guide/memory/#clone) the parameter into a local instead. Kernel parameters cannot be `mut`.

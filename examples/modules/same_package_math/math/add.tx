@@ -2,10 +2,15 @@ package math
 
 import "double.tx"
 
+pub type Pair struct {
+  a int
+  b int
+}
+
 pub func add(a int, b int) int {
   return a + b
 }
 
-pub func squareSum(a int, b int) int {
-  return math.square(a) + math.square(b)
+pub func squareSum(p Pair) int {
+  return math.square(p.a) + math.square(p.b)
 }

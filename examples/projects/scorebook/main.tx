@@ -4,12 +4,14 @@ import "scores.tx"
 
 func main() int {
   let values list[int] = list[int]{58, 72, 88, 104}
+  let summary scores.Summary = scores.summarize(values)
   let curved list[int] = scores.curve(values, 5)
+  let counts map[string]int = scores.gradeCounts(curved)
 
-  print("total ", scores.total(values))
-  print("average ", scores.average(values))
-  print("best ", scores.best(values))
-  print("passing ", scores.passingCount(values))
-  print("curved best ", scores.best(curved), " grade ", scores.letter(scores.best(curved)))
+  print("total ", summary.total)
+  print("average ", summary.average)
+  print("best ", summary.best)
+  print("passing ", summary.passing)
+  print("curved best ", scores.best(curved), " grade ", scores.letter(scores.best(curved)), " A count ", counts["A"])
   return 0
 }

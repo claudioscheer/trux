@@ -23,9 +23,17 @@ type FuncSig struct {
 	ReturnType ast.Type
 }
 
+type StructSig struct {
+	Name        string
+	DisplayName string
+	Fields      []ast.StructField
+	FieldMap    map[string]ast.Type
+}
+
 type Info struct {
 	Funcs         map[string]FuncSig
 	Kernels       map[string]FuncSig
+	Structs       map[string]StructSig
 	Locals        map[*ast.FuncDecl]map[string]ast.Type
 	ExprTypes     map[ast.Expression]ast.Type
 	ExprOrigins   map[ast.Expression]Origin
@@ -35,6 +43,10 @@ type Info struct {
 	LenCalls      map[*ast.CallExpr]ast.Type
 	AppendCalls   map[*ast.CallExpr]AppendSig
 	CloneCalls    map[*ast.CallExpr]CloneSig
+	DeleteCalls   map[*ast.CallExpr]*ast.MapType
+	KeysCalls     map[*ast.CallExpr]*ast.MapType
+	ValuesCalls   map[*ast.CallExpr]*ast.MapType
+	MapLookups    map[*ast.IndexExpr]*ast.MapType
 	IOCalls       map[*ast.CallExpr]IOCallSig
 	HTTPCalls     map[*ast.CallExpr]HTTPCallSig
 	GPUCalls      map[*ast.CallExpr]GPUCallSig
@@ -302,6 +314,7 @@ func Check(program *ast.Program) (*Info, error) {
 		info: &Info{
 			Funcs:         map[string]FuncSig{},
 			Kernels:       map[string]FuncSig{},
+			Structs:       map[string]StructSig{},
 			Locals:        map[*ast.FuncDecl]map[string]ast.Type{},
 			ExprTypes:     map[ast.Expression]ast.Type{},
 			ExprOrigins:   map[ast.Expression]Origin{},
@@ -311,6 +324,10 @@ func Check(program *ast.Program) (*Info, error) {
 			LenCalls:      map[*ast.CallExpr]ast.Type{},
 			AppendCalls:   map[*ast.CallExpr]AppendSig{},
 			CloneCalls:    map[*ast.CallExpr]CloneSig{},
+			DeleteCalls:   map[*ast.CallExpr]*ast.MapType{},
+			KeysCalls:     map[*ast.CallExpr]*ast.MapType{},
+			ValuesCalls:   map[*ast.CallExpr]*ast.MapType{},
+			MapLookups:    map[*ast.IndexExpr]*ast.MapType{},
 			IOCalls:       map[*ast.CallExpr]IOCallSig{},
 			HTTPCalls:     map[*ast.CallExpr]HTTPCallSig{},
 			GPUCalls:      map[*ast.CallExpr]GPUCallSig{},
@@ -318,6 +335,9 @@ func Check(program *ast.Program) (*Info, error) {
 		},
 	}
 
+	if err := c.collectStructs(program); err != nil {
+		return nil, err
+	}
 	if err := c.collectFunctions(program); err != nil {
 		return nil, err
 	}
@@ -339,6 +359,82 @@ func Check(program *ast.Program) (*Info, error) {
 	return c.info, nil
 }
 
+func (c *checker) collectStructs(program *ast.Program) error {
+	for _, st := range program.Structs {
+		targetName := st.TargetName()
+		if _, exists := c.info.Structs[targetName]; exists {
+			return typeError(st.Pos, "duplicate struct %q", st.Name)
+		}
+		fieldMap := make(map[string]ast.Type, len(st.Fields))
+		for _, field := range st.Fields {
+			if _, exists := fieldMap[field.Name]; exists {
+				return typeError(field.Pos, "duplicate field %q in struct %q", field.Name, st.Name)
+			}
+			fieldMap[field.Name] = field.Type
+		}
+		c.info.Structs[targetName] = StructSig{
+			Name:        targetName,
+			DisplayName: st.Name,
+			Fields:      st.Fields,
+			FieldMap:    fieldMap,
+		}
+	}
+
+	for _, st := range program.Structs {
+		targetName := st.TargetName()
+		sig := c.info.Structs[targetName]
+		for i, field := range st.Fields {
+			if err := c.validateType(field.Pos, field.Type); err != nil {
+				return err
+			}
+			sig.Fields[i].Type = field.Type
+			sig.FieldMap[field.Name] = field.Type
+		}
+		c.info.Structs[targetName] = sig
+	}
+
+	for _, st := range program.Structs {
+		visited := map[string]bool{}
+		if c.hasValueStructCycle(st.TargetName(), st.TargetName(), visited) {
+			return typeError(st.Pos, "invalid recursive struct %q", st.Name)
+		}
+	}
+
+	return nil
+}
+
+func (c *checker) hasValueStructCycle(start string, current string, visited map[string]bool) bool {
+	sig, ok := c.info.Structs[current]
+	if !ok {
+		return false
+	}
+	for _, field := range sig.Fields {
+		for _, embedded := range valueEmbeddedStructs(field.Type) {
+			if embedded == start {
+				return true
+			}
+			if !visited[embedded] {
+				visited[embedded] = true
+				if c.hasValueStructCycle(start, embedded, visited) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func valueEmbeddedStructs(typ ast.Type) []string {
+	switch typ := typ.(type) {
+	case *ast.StructType:
+		return []string{typ.TargetName()}
+	case *ast.ArrayType:
+		return valueEmbeddedStructs(typ.Elem)
+	default:
+		return nil
+	}
+}
+
 func (c *checker) collectFunctions(program *ast.Program) error {
 	for _, fn := range program.Functions {
 		target := c.info.Funcs
@@ -352,7 +448,7 @@ func (c *checker) collectFunctions(program *ast.Program) error {
 			if fn.ReturnType == nil {
 				return typeError(fn.Pos, "function %q must declare return type", fn.Name)
 			}
-			if err := validateReturnType(fn.Pos, fn.ReturnType); err != nil {
+			if err := c.validateReturnType(fn.Pos, fn.ReturnType); err != nil {
 				return err
 			}
 		}
@@ -363,7 +459,7 @@ func (c *checker) collectFunctions(program *ast.Program) error {
 			return typeError(fn.Pos, "duplicate function %q", fn.Name)
 		}
 		for _, param := range fn.Params {
-			if err := validateType(param.Pos, param.Type); err != nil {
+			if err := c.validateType(param.Pos, param.Type); err != nil {
 				return err
 			}
 			if err := validateMutableParam(fn, param); err != nil {
@@ -506,12 +602,67 @@ func (c *checker) noteLoopJump(continues bool) {
 	frame.breaks = append(frame.breaks, snap)
 }
 
+func (c *checker) checkMultiValueExpr(locals *scope, expr ast.Expression) (ast.Type, error) {
+	if idx, ok := expr.(*ast.IndexExpr); ok {
+		collectionType, err := c.checkExpr(locals, idx.Collection, false)
+		if err != nil {
+			return nil, err
+		}
+		if mapType, isMap := collectionType.(*ast.MapType); isMap {
+			keyType, err := c.checkExpr(locals, idx.Index, false)
+			if err != nil {
+				return nil, err
+			}
+			keyType = c.coerceNil(idx.Index, keyType, mapType.Key)
+			if !ast.TypeEqual(keyType, mapType.Key) {
+				return nil, typeError(idx.Index.Pos(), "map key has type %s, want %s", keyType, mapType.Key)
+			}
+			tupleType := &ast.TupleType{Types: []ast.Type{mapType.Value, ast.BoolType}}
+			c.info.MapLookups[idx] = mapType
+			c.setExpr(idx, tupleType, indexOrigin(mapType, c.exprOrigin(idx.Collection)))
+			return tupleType, nil
+		}
+	}
+	return c.checkExpr(locals, expr, false)
+}
+
+func (c *checker) coerceNil(expr ast.Expression, got ast.Type, want ast.Type) ast.Type {
+	if _, isNil := expr.(*ast.NilLiteral); isNil {
+		if _, isPtr := want.(*ast.PointerType); isPtr {
+			c.setExpr(expr, want, OriginOwned)
+			return want
+		}
+	}
+	return got
+}
+
+func (c *checker) isAddressable(expr ast.Expression) bool {
+	switch expr := expr.(type) {
+	case *ast.IdentExpr:
+		return true
+	case *ast.IndexExpr:
+		if _, isMap := c.info.ExprTypes[expr.Collection].(*ast.MapType); isMap {
+			return false
+		}
+		return !ast.TypeEqual(c.info.ExprTypes[expr.Collection], ast.StringType)
+	case *ast.FieldExpr:
+		if _, isPtr := c.info.ExprTypes[expr.Object].(*ast.PointerType); isPtr {
+			return true
+		}
+		return c.isAddressable(expr.Object)
+	case *ast.UnaryExpr:
+		return expr.Operator == "*"
+	default:
+		return false
+	}
+}
+
 func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement) error {
 	c.reachesEnd = true
 	switch stmt := stmt.(type) {
 	case *ast.LetStmt:
 		if len(stmt.Bindings) > 1 {
-			valType, err := c.checkExpr(locals, stmt.Value, false)
+			valType, err := c.checkMultiValueExpr(locals, stmt.Value)
 			if err != nil {
 				return err
 			}
@@ -525,8 +676,13 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 			for i, binding := range stmt.Bindings {
 				elemType := tuple.Types[i]
 				if binding.Name == "_" {
-					if binding.Type != nil && !ast.TypeEqual(binding.Type, elemType) {
-						return typeError(binding.Pos, "cannot discard %s with type %s", elemType, binding.Type)
+					if binding.Type != nil {
+						if err := c.validateType(binding.Pos, binding.Type); err != nil {
+							return err
+						}
+						if !ast.TypeEqual(binding.Type, elemType) {
+							return typeError(binding.Pos, "cannot discard %s with type %s", elemType, binding.Type)
+						}
 					}
 					continue
 				}
@@ -534,7 +690,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 					return typeError(binding.Pos, "duplicate local variable %q", binding.Name)
 				}
 				if binding.Type != nil {
-					if err := validateType(binding.Pos, binding.Type); err != nil {
+					if err := c.validateType(binding.Pos, binding.Type); err != nil {
 						return err
 					}
 					if !ast.TypeEqual(binding.Type, elemType) {
@@ -556,15 +712,21 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 			if err != nil {
 				return err
 			}
-			if stmt.Type != nil && !ast.TypeEqual(valType, stmt.Type) {
-				return typeError(stmt.Start, "cannot assign %s to _ of type %s", valType, stmt.Type)
+			if stmt.Type != nil {
+				if err := c.validateType(stmt.Start, stmt.Type); err != nil {
+					return err
+				}
+				valType = c.coerceNil(stmt.Value, valType, stmt.Type)
+				if !ast.TypeEqual(valType, stmt.Type) {
+					return typeError(stmt.Start, "cannot assign %s to _ of type %s", valType, stmt.Type)
+				}
 			}
 			return nil
 		}
 		if _, exists := locals.locals[stmt.Name]; exists {
 			return typeError(stmt.Start, "duplicate local variable %q", stmt.Name)
 		}
-		if err := validateType(stmt.Start, stmt.Type); err != nil {
+		if err := c.validateType(stmt.Start, stmt.Type); err != nil {
 			return err
 		}
 
@@ -572,6 +734,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		if err != nil {
 			return err
 		}
+		valueType = c.coerceNil(stmt.Value, valueType, stmt.Type)
 		if !ast.TypeEqual(valueType, stmt.Type) {
 			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, stmt.Type)
 		}
@@ -586,7 +749,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		return nil
 	case *ast.AssignStmt:
 		if len(stmt.Targets) > 1 {
-			valueType, err := c.checkExpr(locals, stmt.Value, false)
+			valueType, err := c.checkMultiValueExpr(locals, stmt.Value)
 			if err != nil {
 				return err
 			}
@@ -626,6 +789,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		if err != nil {
 			return err
 		}
+		valueType = c.coerceNil(stmt.Value, valueType, local.typ)
 		if !ast.TypeEqual(valueType, local.typ) {
 			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, local.typ)
 		}
@@ -640,6 +804,25 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		indexType, err := c.checkExpr(locals, stmt.Target.Index, false)
 		if err != nil {
 			return err
+		}
+		if mapType, isMap := collectionType.(*ast.MapType); isMap {
+			indexType = c.coerceNil(stmt.Target.Index, indexType, mapType.Key)
+			if !ast.TypeEqual(indexType, mapType.Key) {
+				return typeError(stmt.Target.Index.Pos(), "map key has type %s, want %s", indexType, mapType.Key)
+			}
+			if err := c.checkCanMutate(stmt.Target.Collection); err != nil {
+				return err
+			}
+			valueType, err := c.checkExpr(locals, stmt.Value, false)
+			if err != nil {
+				return err
+			}
+			valueType = c.coerceNil(stmt.Value, valueType, mapType.Value)
+			if !ast.TypeEqual(valueType, mapType.Value) {
+				return typeError(stmt.Value.Pos(), "cannot assign %s to %s map value", valueType, mapType.Value)
+			}
+			c.setExpr(stmt.Target, mapType.Value, indexOrigin(mapType, c.exprOrigin(stmt.Target.Collection)))
+			return nil
 		}
 		if !ast.TypeEqual(indexType, ast.IntType) {
 			return typeError(stmt.Target.Index.Pos(), "index must be int, got %s", indexType)
@@ -658,10 +841,47 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		if err != nil {
 			return err
 		}
+		valueType = c.coerceNil(stmt.Value, valueType, elemType)
 		if !ast.TypeEqual(valueType, elemType) {
 			return typeError(stmt.Value.Pos(), "cannot assign %s to %s element", valueType, elemType)
 		}
 		c.setExpr(stmt.Target, elemType, indexOrigin(collectionType, c.exprOrigin(stmt.Target.Collection)))
+		return nil
+	case *ast.FieldAssignStmt:
+		fieldType, err := c.checkExpr(locals, stmt.Target, false)
+		if err != nil {
+			return err
+		}
+		if _, isPtr := c.info.ExprTypes[stmt.Target.Object].(*ast.PointerType); !isPtr && !c.isAddressable(stmt.Target.Object) {
+			return typeError(stmt.Target.Pos(), "cannot assign to field %q of non-addressable struct value", stmt.Target.Field)
+		}
+		valueType, err := c.checkExpr(locals, stmt.Value, false)
+		if err != nil {
+			return err
+		}
+		valueType = c.coerceNil(stmt.Value, valueType, fieldType)
+		if !ast.TypeEqual(valueType, fieldType) {
+			return typeError(stmt.Value.Pos(), "cannot assign %s to field %q of type %s", valueType, stmt.Target.Field, fieldType)
+		}
+		return nil
+	case *ast.DerefAssignStmt:
+		ptrType, err := c.checkExpr(locals, stmt.Target.Operand, false)
+		if err != nil {
+			return err
+		}
+		ptr, ok := ptrType.(*ast.PointerType)
+		if !ok {
+			return typeError(stmt.Target.Pos(), "cannot dereference non-pointer type %s", ptrType)
+		}
+		c.setExpr(stmt.Target, ptr.Elem, OriginOwned)
+		valueType, err := c.checkExpr(locals, stmt.Value, false)
+		if err != nil {
+			return err
+		}
+		valueType = c.coerceNil(stmt.Value, valueType, ptr.Elem)
+		if !ast.TypeEqual(valueType, ptr.Elem) {
+			return typeError(stmt.Value.Pos(), "cannot assign %s to %s", valueType, ptr.Elem)
+		}
 		return nil
 	case *ast.ReturnStmt:
 		values := stmt.Values
@@ -693,6 +913,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 					if err != nil {
 						return err
 					}
+					valType = c.coerceNil(valExpr, valType, tuple.Types[i])
 					if !ast.TypeEqual(valType, tuple.Types[i]) {
 						return typeError(valExpr.Pos(), "cannot return %s from function returning %s", valType, tuple.Types[i])
 					}
@@ -706,6 +927,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 			if err != nil {
 				return err
 			}
+			valueType = c.coerceNil(values[0], valueType, fn.ReturnType)
 			if !ast.TypeEqual(valueType, fn.ReturnType) {
 				return typeError(values[0].Pos(), "cannot return %s from function returning %s", valueType, fn.ReturnType)
 			}
@@ -824,7 +1046,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 		if err != nil {
 			return err
 		}
-		if call, ok := stmt.Expr.(*ast.CallExpr); ok && call.Package == "" && (call.Callee == "print" || call.Callee == "assert") {
+		if call, ok := stmt.Expr.(*ast.CallExpr); ok && call.Package == "" && (call.Callee == "print" || call.Callee == "assert" || call.Callee == "delete") {
 			return nil
 		}
 		if _, isTuple := typ.(*ast.TupleType); isTuple {
@@ -1105,7 +1327,7 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		c.setExpr(expr, ast.ErrorType, OriginOwned)
 		return ast.ErrorType, nil
 	case *ast.ArrayLiteral:
-		if err := validateType(expr.Start, expr.Type); err != nil {
+		if err := c.validateType(expr.Start, expr.Type); err != nil {
 			return nil, err
 		}
 		arrayType, ok := expr.Type.(*ast.ArrayType)
@@ -1120,6 +1342,7 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 			if err != nil {
 				return nil, err
 			}
+			elemType = c.coerceNil(elem, elemType, arrayType.Elem)
 			if !ast.TypeEqual(elemType, arrayType.Elem) {
 				return nil, typeError(elem.Pos(), "array element %d has type %s, want %s", i+1, elemType, arrayType.Elem)
 			}
@@ -1127,7 +1350,7 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		c.setExpr(expr, expr.Type, OriginScratch)
 		return expr.Type, nil
 	case *ast.ListLiteral:
-		if err := validateType(expr.Start, expr.Type); err != nil {
+		if err := c.validateType(expr.Start, expr.Type); err != nil {
 			return nil, err
 		}
 		listType, ok := expr.Type.(*ast.ListType)
@@ -1139,25 +1362,102 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 			if err != nil {
 				return nil, err
 			}
+			elemType = c.coerceNil(elem, elemType, listType.Elem)
 			if !ast.TypeEqual(elemType, listType.Elem) {
 				return nil, typeError(elem.Pos(), "list element %d has type %s, want %s", i+1, elemType, listType.Elem)
 			}
 		}
 		c.setExpr(expr, expr.Type, OriginScratch)
 		return expr.Type, nil
+	case *ast.MapLiteral:
+		if err := c.validateType(expr.Start, expr.Type); err != nil {
+			return nil, err
+		}
+		for _, entry := range expr.Entries {
+			keyType, err := c.checkExpr(locals, entry.Key, false)
+			if err != nil {
+				return nil, err
+			}
+			keyType = c.coerceNil(entry.Key, keyType, expr.Type.Key)
+			if !ast.TypeEqual(keyType, expr.Type.Key) {
+				return nil, typeError(entry.Key.Pos(), "map key has type %s, want %s", keyType, expr.Type.Key)
+			}
+			valType, err := c.checkExpr(locals, entry.Value, false)
+			if err != nil {
+				return nil, err
+			}
+			valType = c.coerceNil(entry.Value, valType, expr.Type.Value)
+			if !ast.TypeEqual(valType, expr.Type.Value) {
+				return nil, typeError(entry.Value.Pos(), "map value has type %s, want %s", valType, expr.Type.Value)
+			}
+		}
+		c.setExpr(expr, expr.Type, OriginScratch)
+		return expr.Type, nil
+	case *ast.StructLiteral:
+		if err := c.validateType(expr.Start, expr.Type); err != nil {
+			return nil, err
+		}
+		sig := c.info.Structs[expr.Type.TargetName()]
+		seen := make(map[string]struct{}, len(expr.Fields))
+		for _, init := range expr.Fields {
+			fieldType, ok := sig.FieldMap[init.Name]
+			if !ok {
+				return nil, typeError(init.Pos, "struct %s has no field %q", sig.DisplayName, init.Name)
+			}
+			if _, dup := seen[init.Name]; dup {
+				return nil, typeError(init.Pos, "duplicate field %q in struct literal", init.Name)
+			}
+			seen[init.Name] = struct{}{}
+			valType, err := c.checkExpr(locals, init.Value, false)
+			if err != nil {
+				return nil, err
+			}
+			valType = c.coerceNil(init.Value, valType, fieldType)
+			if !ast.TypeEqual(valType, fieldType) {
+				return nil, typeError(init.Value.Pos(), "field %q in %s literal has type %s, want %s", init.Name, sig.DisplayName, valType, fieldType)
+			}
+		}
+		origin := OriginOwned
+		if c.isDynamicType(expr.Type) {
+			origin = OriginScratch
+		}
+		c.setExpr(expr, expr.Type, origin)
+		return expr.Type, nil
+	case *ast.NewExpr:
+		if err := c.validateType(expr.Start, expr.ElemType); err != nil {
+			return nil, err
+		}
+		resType := &ast.PointerType{Elem: expr.ElemType}
+		c.setExpr(expr, resType, OriginScratch)
+		return resType, nil
 	case *ast.MakeExpr:
-		if err := validateType(expr.Start, expr.Type); err != nil {
+		if err := c.validateType(expr.Start, expr.Type); err != nil {
 			return nil, err
 		}
-		if _, ok := expr.Type.(*ast.SliceType); !ok {
+		switch expr.Type.(type) {
+		case *ast.SliceType:
+			if expr.Len == nil {
+				return nil, typeError(expr.Start, "make slice requires length argument")
+			}
+			lenType, err := c.checkExpr(locals, expr.Len, false)
+			if err != nil {
+				return nil, err
+			}
+			if !ast.TypeEqual(lenType, ast.IntType) {
+				return nil, typeError(expr.Len.Pos(), "make length must be int, got %s", lenType)
+			}
+		case *ast.MapType:
+			if expr.Len != nil {
+				lenType, err := c.checkExpr(locals, expr.Len, false)
+				if err != nil {
+					return nil, err
+				}
+				if !ast.TypeEqual(lenType, ast.IntType) {
+					return nil, typeError(expr.Len.Pos(), "make map capacity must be int, got %s", lenType)
+				}
+			}
+		default:
 			return nil, typeError(expr.Start, "make expects slice type, got %s", expr.Type)
-		}
-		lenType, err := c.checkExpr(locals, expr.Len, false)
-		if err != nil {
-			return nil, err
-		}
-		if !ast.TypeEqual(lenType, ast.IntType) {
-			return nil, typeError(expr.Len.Pos(), "make length must be int, got %s", lenType)
 		}
 		c.setExpr(expr, expr.Type, OriginScratch)
 		return expr.Type, nil
@@ -1168,10 +1468,62 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		}
 		c.setExpr(expr, local.typ, local.origin)
 		return local.typ, nil
+	case *ast.FieldExpr:
+		objType, err := c.checkExpr(locals, expr.Object, false)
+		if err != nil {
+			return nil, err
+		}
+		var structType *ast.StructType
+		switch t := objType.(type) {
+		case *ast.StructType:
+			structType = t
+		case *ast.PointerType:
+			if st, ok := t.Elem.(*ast.StructType); ok {
+				structType = st
+			}
+		}
+		if structType == nil {
+			return nil, typeError(expr.Object.Pos(), "cannot access field %q on non-struct type %s", expr.Field, objType)
+		}
+		sig, ok := c.info.Structs[structType.TargetName()]
+		if !ok {
+			return nil, typeError(expr.Object.Pos(), "undefined struct %q", structType)
+		}
+		fieldType, ok := sig.FieldMap[expr.Field]
+		if !ok {
+			return nil, typeError(expr.Pos(), "struct %s has no field %q", sig.DisplayName, expr.Field)
+		}
+		origin := OriginOwned
+		if c.isDynamicType(fieldType) {
+			origin = c.exprOrigin(expr.Object)
+		}
+		c.setExpr(expr, fieldType, origin)
+		return fieldType, nil
 	case *ast.UnaryExpr:
 		operandType, err := c.checkExpr(locals, expr.Operand, false)
 		if err != nil {
 			return nil, err
+		}
+		switch expr.Operator {
+		case "*":
+			ptr, ok := operandType.(*ast.PointerType)
+			if !ok {
+				return nil, typeError(expr.Start, "cannot dereference non-pointer type %s", operandType)
+			}
+			c.setExpr(expr, ptr.Elem, OriginOwned)
+			return ptr.Elem, nil
+		case "&":
+			_, isStructLit := expr.Operand.(*ast.StructLiteral)
+			if !isStructLit && !c.isAddressable(expr.Operand) {
+				return nil, typeError(expr.Operand.Pos(), "cannot take address of non-addressable expression")
+			}
+			resType := &ast.PointerType{Elem: operandType}
+			origin := OriginOwned
+			if isStructLit {
+				origin = OriginScratch
+			}
+			c.setExpr(expr, resType, origin)
+			return resType, nil
 		}
 		typ, err := unaryType(expr.Start, expr.Operator, operandType)
 		if err != nil {
@@ -1187,6 +1539,10 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		rightType, err := c.checkExpr(locals, expr.Right, false)
 		if err != nil {
 			return nil, err
+		}
+		if expr.Operator == "==" || expr.Operator == "!=" {
+			leftType = c.coerceNil(expr.Left, leftType, rightType)
+			rightType = c.coerceNil(expr.Right, rightType, leftType)
 		}
 		typ, err := binaryType(expr.Start, expr.Operator, leftType, rightType)
 		if err != nil {
@@ -1204,6 +1560,14 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		indexType, err := c.checkExpr(locals, expr.Index, false)
 		if err != nil {
 			return nil, err
+		}
+		if mapType, isMap := collectionType.(*ast.MapType); isMap {
+			indexType = c.coerceNil(expr.Index, indexType, mapType.Key)
+			if !ast.TypeEqual(indexType, mapType.Key) {
+				return nil, typeError(expr.Index.Pos(), "map key has type %s, want %s", indexType, mapType.Key)
+			}
+			c.setExpr(expr, mapType.Value, indexOrigin(mapType, c.exprOrigin(expr.Collection)))
+			return mapType.Value, nil
 		}
 		if !ast.TypeEqual(indexType, ast.IntType) {
 			return nil, typeError(expr.Index.Pos(), "index must be int, got %s", indexType)
@@ -1369,6 +1733,7 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		if !ok {
 			return nil, typeError(expr.Args[0].Pos(), "append expects list as first argument, got %s", argTypes[0])
 		}
+		argTypes[1] = c.coerceNil(expr.Args[1], argTypes[1], listType.Elem)
 		if !ast.TypeEqual(argTypes[1], listType.Elem) {
 			return nil, typeError(expr.Args[1].Pos(), "append value has type %s, want %s", argTypes[1], listType.Elem)
 		}
@@ -1378,6 +1743,54 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 		c.info.AppendCalls[expr] = AppendSig{ListType: argTypes[0], ElemType: listType.Elem}
 		c.setExpr(expr, argTypes[0], c.exprOrigin(expr.Args[0]))
 		return argTypes[0], nil
+	}
+	if expr.Package == "" && expr.Callee == "delete" {
+		if !allowPrint {
+			return nil, typeError(expr.Start, "delete can only be used as a statement")
+		}
+		if len(argTypes) != 2 {
+			return nil, typeError(expr.Start, "delete expects 2 arguments, got %d", len(argTypes))
+		}
+		mapType, ok := argTypes[0].(*ast.MapType)
+		if !ok {
+			return nil, typeError(expr.Args[0].Pos(), "delete expects map as first argument, got %s", argTypes[0])
+		}
+		argTypes[1] = c.coerceNil(expr.Args[1], argTypes[1], mapType.Key)
+		if !ast.TypeEqual(argTypes[1], mapType.Key) {
+			return nil, typeError(expr.Args[1].Pos(), "delete key has type %s, want %s", argTypes[1], mapType.Key)
+		}
+		if err := c.checkCanMutate(expr.Args[0]); err != nil {
+			return nil, err
+		}
+		c.info.DeleteCalls[expr] = mapType
+		c.setExpr(expr, argTypes[0], c.exprOrigin(expr.Args[0]))
+		return argTypes[0], nil
+	}
+	if expr.Package == "" && expr.Callee == "keys" {
+		if len(argTypes) != 1 {
+			return nil, typeError(expr.Start, "keys expects 1 argument, got %d", len(argTypes))
+		}
+		mapType, ok := argTypes[0].(*ast.MapType)
+		if !ok {
+			return nil, typeError(expr.Args[0].Pos(), "keys expects map argument, got %s", argTypes[0])
+		}
+		resType := &ast.ListType{Elem: mapType.Key}
+		c.info.KeysCalls[expr] = mapType
+		c.setExpr(expr, resType, OriginFrameOwned)
+		return resType, nil
+	}
+	if expr.Package == "" && expr.Callee == "values" {
+		if len(argTypes) != 1 {
+			return nil, typeError(expr.Start, "values expects 1 argument, got %d", len(argTypes))
+		}
+		mapType, ok := argTypes[0].(*ast.MapType)
+		if !ok {
+			return nil, typeError(expr.Args[0].Pos(), "values expects map argument, got %s", argTypes[0])
+		}
+		resType := &ast.ListType{Elem: mapType.Value}
+		c.info.ValuesCalls[expr] = mapType
+		c.setExpr(expr, resType, OriginFrameOwned)
+		return resType, nil
 	}
 	targetName := expr.TargetName()
 	displayName := expr.SourceName()
@@ -1395,6 +1808,7 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 	}
 	for i, argType := range argTypes {
 		want := sig.Params[i].Type
+		argType = c.coerceNil(expr.Args[i], argType, want)
 		if !ast.TypeEqual(argType, want) {
 			return nil, typeError(expr.Args[i].Pos(), "argument %d to %s has type %s, want %s", i+1, displayName, argType, want)
 		}
@@ -1411,13 +1825,23 @@ func (c *checker) checkCall(locals *scope, expr *ast.CallExpr, allowPrint bool) 
 }
 
 func (c *checker) checkHTTPHandlerArg(arg ast.Expression, caller string) (FuncSig, error) {
-	handlerIdent, ok := arg.(*ast.IdentExpr)
-	if !ok {
+	handlerName := ""
+	switch h := arg.(type) {
+	case *ast.IdentExpr:
+		handlerName = h.Name
+	case *ast.FieldExpr:
+		if h.ResolvedIdent != "" {
+			handlerName = h.ResolvedIdent
+		} else if ident, ok := h.Object.(*ast.IdentExpr); ok && ident.Package == "" {
+			handlerName = ident.Name + "." + h.Field
+		}
+	}
+	if handlerName == "" {
 		return FuncSig{}, typeError(arg.Pos(), "%s argument must be a handler function name", caller)
 	}
-	handler, ok := c.info.Funcs[handlerIdent.Name]
+	handler, ok := c.info.Funcs[handlerName]
 	if !ok {
-		return FuncSig{}, typeError(arg.Pos(), "undefined handler %q", handlerIdent.Name)
+		return FuncSig{}, typeError(arg.Pos(), "undefined handler %q", handlerName)
 	}
 	if len(handler.Params) != 1 || !ast.TypeEqual(handler.Params[0].Type, ast.IntType) || !ast.TypeEqual(handler.ReturnType, ast.IntType) {
 		return FuncSig{}, typeError(arg.Pos(), "http handler %q must have signature func %s(request int) int", handler.Name, handler.Name)
@@ -2063,6 +2487,9 @@ func binaryType(pos token.Position, operator string, leftType ast.Type, rightTyp
 }
 
 func comparableType(typ ast.Type) bool {
+	if _, isPtr := typ.(*ast.PointerType); isPtr {
+		return true
+	}
 	return printableType(typ)
 }
 
@@ -2078,21 +2505,50 @@ func hasLength(typ ast.Type) bool {
 	if ast.TypeEqual(typ, ast.StringType) {
 		return true
 	}
+	if _, isMap := typ.(*ast.MapType); isMap {
+		return true
+	}
 	_, ok := ast.ElementType(typ)
 	return ok
 }
 
 func isMutableCollection(typ ast.Type) bool {
+	if _, isMap := typ.(*ast.MapType); isMap {
+		return true
+	}
 	_, ok := ast.ElementType(typ)
 	return ok
 }
 
 func cloneableType(typ ast.Type) bool {
+	switch typ.(type) {
+	case *ast.StructType, *ast.PointerType, *ast.MapType:
+		return true
+	}
 	return ast.TypeEqual(typ, ast.StringType) || isMutableCollection(typ)
+}
+
+func (c *checker) isDynamicType(typ ast.Type) bool {
+	if dynamicType(typ) {
+		return true
+	}
+	if st, ok := typ.(*ast.StructType); ok {
+		if sig, exists := c.info.Structs[st.TargetName()]; exists {
+			for _, field := range sig.Fields {
+				if c.isDynamicType(field.Type) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func dynamicType(typ ast.Type) bool {
 	if ast.TypeEqual(typ, ast.StringType) || ast.TypeEqual(typ, ast.ErrorType) || isMutableCollection(typ) {
+		return true
+	}
+	if _, isPtr := typ.(*ast.PointerType); isPtr {
 		return true
 	}
 	if tuple, ok := typ.(*ast.TupleType); ok {
@@ -2122,6 +2578,9 @@ func originForParam(param ast.Param) Origin {
 	if param.Mutable {
 		return OriginOwned
 	}
+	if _, isPtr := param.Type.(*ast.PointerType); isPtr {
+		return OriginOwned
+	}
 	if dynamicType(param.Type) {
 		return OriginBorrowed
 	}
@@ -2129,6 +2588,9 @@ func originForParam(param ast.Param) Origin {
 }
 
 func originForCallResult(typ ast.Type) Origin {
+	if _, isPtr := typ.(*ast.PointerType); isPtr {
+		return OriginOwned
+	}
 	if dynamicType(typ) {
 		return OriginUnknown
 	}
@@ -2145,6 +2607,12 @@ func binaryOrigin(operator string, typ ast.Type) Origin {
 func indexOrigin(collectionType ast.Type, collectionOrigin Origin) Origin {
 	if ast.TypeEqual(collectionType, ast.StringType) {
 		return collectionOrigin
+	}
+	if mapType, ok := collectionType.(*ast.MapType); ok {
+		if dynamicType(mapType.Value) {
+			return collectionOrigin
+		}
+		return OriginOwned
 	}
 	elemType, ok := ast.ElementType(collectionType)
 	if ok && dynamicType(elemType) {
@@ -2188,7 +2656,15 @@ func (c *checker) checkMutableArgument(param ast.Param, arg ast.Expression) erro
 	}
 }
 
-func validateType(pos token.Position, typ ast.Type) error {
+func validMapKeyType(typ ast.Type) bool {
+	if ast.TypeEqual(typ, ast.IntType) || ast.TypeEqual(typ, ast.StringType) || ast.TypeEqual(typ, ast.BoolType) {
+		return true
+	}
+	_, isPtr := typ.(*ast.PointerType)
+	return isPtr
+}
+
+func (c *checker) validateType(pos token.Position, typ ast.Type) error {
 	switch typ := typ.(type) {
 	case ast.ScalarType:
 		return nil
@@ -2196,11 +2672,28 @@ func validateType(pos token.Position, typ ast.Type) error {
 		if typ.Length <= 0 {
 			return typeError(pos, "array length must be positive")
 		}
-		return validateType(pos, typ.Elem)
+		return c.validateType(pos, typ.Elem)
 	case *ast.SliceType:
-		return validateType(pos, typ.Elem)
+		return c.validateType(pos, typ.Elem)
 	case *ast.ListType:
-		return validateType(pos, typ.Elem)
+		return c.validateType(pos, typ.Elem)
+	case *ast.StructType:
+		sig, ok := c.info.Structs[typ.TargetName()]
+		if !ok {
+			return typeError(pos, "undefined struct %q", typ.String())
+		}
+		typ.ResolvedName = sig.Name
+		return nil
+	case *ast.PointerType:
+		return c.validateType(pos, typ.Elem)
+	case *ast.MapType:
+		if err := c.validateType(pos, typ.Key); err != nil {
+			return err
+		}
+		if !validMapKeyType(typ.Key) {
+			return typeError(pos, "invalid map key type %s; map keys must be int, string, bool, or pointer", typ.Key)
+		}
+		return c.validateType(pos, typ.Value)
 	case *ast.GPUBufferType:
 		if !gpuScalarType(typ.Elem) {
 			return typeError(pos, "gpu.Buffer element type must be int or float, got %s", typ.Elem)
@@ -2213,7 +2706,7 @@ func validateType(pos token.Position, typ ast.Type) error {
 	}
 }
 
-func validateReturnType(pos token.Position, typ ast.Type) error {
+func (c *checker) validateReturnType(pos token.Position, typ ast.Type) error {
 	if typ == nil {
 		return nil
 	}
@@ -2225,13 +2718,13 @@ func validateReturnType(pos token.Position, typ ast.Type) error {
 			if _, isTuple := elem.(*ast.TupleType); isTuple {
 				return typeError(pos, "nested tuple types are not supported")
 			}
-			if err := validateType(pos, elem); err != nil {
+			if err := c.validateType(pos, elem); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	return validateType(pos, typ)
+	return c.validateType(pos, typ)
 }
 
 func gpuScalarType(typ ast.Type) bool {

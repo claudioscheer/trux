@@ -1130,3 +1130,66 @@ func compileRuntimeC(t *testing.T, source string) string {
 func cString(value string) string {
 	return "(rt_string){(const uint8_t*)" + strconv.Quote(value) + ", " + strconv.Itoa(len(value)) + "}"
 }
+
+func TestNilPointerDereferenceCheckFailsCleanly(t *testing.T) {
+	compileAndRunRuntimeCExpectFailure(t, Source+`
+int main(void) {
+    int64_t* p = NULL;
+    int64_t v = *((int64_t*)rt_check_not_null_at(p, "main.tx", 10, 5));
+    (void)v;
+    return 0;
+}
+`, "trux runtime error: nil pointer dereference")
+}
+
+func TestMapOperationsPreserveOrderAndFreeInArena(t *testing.T) {
+	compileAndRunRuntimeC(t, countingRuntimeSource()+`
+RT_DEFINE_MAP(string_int, string, rt_string, int, int64_t, rt_eq_string, rt_hash_string, 0)
+RT_DEFINE_MAP_LISTS(string_int, string, rt_string, int, int64_t)
+
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+
+    rt_map_string_int* m = rt_map_string_int_new(&arena, 2);
+    rt_string k1 = `+cString("first")+`;
+    rt_string k2 = `+cString("second")+`;
+    rt_string k3 = `+cString("third")+`;
+
+    rt_map_string_int_set(m, k1, 10);
+    rt_map_string_int_set(m, k2, 20);
+    rt_map_string_int_set(m, k3, 30);
+    rt_map_string_int_set(m, k2, 25);
+
+    if (rt_map_string_int_len(m) != 3) return 1;
+    if (rt_map_string_int_get(m, k2) != 25) return 2;
+    if (rt_map_string_int_get(m, `+cString("missing")+`) != 0) return 3;
+
+    bool ok = false;
+    int64_t found = rt_map_string_int_get_ok(m, k3, &ok);
+    if (!ok || found != 30) return 4;
+    int64_t missing = rt_map_string_int_get_ok(m, `+cString("missing")+`, &ok);
+    if (ok || missing != 0) return 5;
+
+    rt_map_string_int_delete(m, k1);
+    if (rt_map_string_int_len(m) != 2) return 6;
+
+    rt_list_string* ks = rt_map_string_int_keys(&arena, m);
+    rt_list_int* vs = rt_map_string_int_values(&arena, m);
+    if (ks->len != 2 || vs->len != 2) return 7;
+    if (!rt_string_equal(ks->data[0], k2) || !rt_string_equal(ks->data[1], k3)) return 8;
+    if (vs->data[0] != 25 || vs->data[1] != 30) return 9;
+
+    rt_map_string_int* copy = rt_map_string_int_clone(&arena, m);
+    rt_map_string_int_set(copy, k2, 99);
+    if (rt_map_string_int_get(m, k2) != 25 || rt_map_string_int_get(copy, k2) != 99) return 10;
+
+    rt_arena_deinit(&arena);
+    if (rt_test_free_calls != rt_test_malloc_calls) {
+        fprintf(stderr, "malloc=%zu free=%zu\n", rt_test_malloc_calls, rt_test_free_calls);
+        return 11;
+    }
+    return 0;
+}
+`)
+}

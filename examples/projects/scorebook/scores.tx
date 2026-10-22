@@ -1,5 +1,12 @@
 package scores
 
+pub type Summary struct {
+  total int
+  average int
+  best int
+  passing int
+}
+
 pub func total(values list[int]) int {
   let sum int = 0
   for let i int = 0; i < len(values); i = i + 1 {
@@ -34,6 +41,10 @@ pub func passingCount(values list[int]) int {
   return count
 }
 
+pub func summarize(values list[int]) Summary {
+  return Summary{total: total(values), average: average(values), best: best(values), passing: passingCount(values)}
+}
+
 pub func letter(score int) string {
   let capped int = capScore(score)
   if capped >= 90 {
@@ -46,6 +57,20 @@ pub func letter(score int) string {
     return "D"
   }
   return "F"
+}
+
+pub func gradeCounts(values list[int]) map[string]int {
+  let counts map[string]int = make(map[string]int)
+  for let i int = 0; i < len(values); i = i + 1 {
+    let grade string = letter(values[i])
+    let current int, ok bool = counts[grade]
+    if ok {
+      counts[grade] = current + 1
+    } else {
+      counts[grade] = 1
+    }
+  }
+  return counts
 }
 
 pub func curve(values list[int], points int) list[int] {

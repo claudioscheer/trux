@@ -1,5 +1,14 @@
 package main
 
+type CellPos struct {
+  row int
+  col int
+}
+
+func cellAt(rows [][]float, pos CellPos) float {
+  return rows[pos.row][pos.col]
+}
+
 func main() int {
   let rows [][]float = make([][]float, 3)
 
@@ -17,7 +26,8 @@ func main() int {
   let copied [][]float = clone(rows)
   copied[1][0] = 9.5
 
+  let target CellPos = CellPos{row: 1, col: 0}
   print(len(rows[0]), " ", len(rows[1]), " ", len(rows[2]))
-  print(rows[1][0], " ", copied[1][0])
+  print(cellAt(rows, target), " ", cellAt(copied, target))
   return 0
 }

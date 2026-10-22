@@ -18,11 +18,14 @@ every name is visible where it is declared.
 let total int = 0
 let label string = "score"
 let values list[int] = list[int]{1, 2, 3}
+let counts map[string]int = map[string]int{"a": 1}
+let hits int, found bool = counts["a"]
 let text string, err error = io.readFile("input.txt")
 let value int, _ = getPair()
 ```
 
-The value's type must match the declared type exactly. Functions returning multiple values can be unpacked with comma-separated `let` declarations or discarded with the blank identifier `_`.
+The value's type must match the declared type exactly. Functions returning multiple values, or a comma-ok map lookup
+(`m[key]`), can be unpacked with comma-separated `let` declarations or discarded with the blank identifier `_`.
 
 **Common mistakes.** Declaring the same name twice in one block:
 
@@ -34,10 +37,10 @@ The value's type must match the declared type exactly. Functions returning multi
 
 ## Assignment
 
-**What it is.** `name = value` replaces the value of an existing variable. `xs[i] = value` replaces one element of an
-array, slice, or list.
+**What it is.** `name = value` replaces the value of an existing variable. `xs[i] = value` updates an array, slice,
+list, or map entry; `s.field = value` updates a struct field; and `*ptr = value` writes through a pointer.
 
-**Why.** Loops and accumulators need to update state in place.
+**Why.** Loops, accumulators, and in-place data structures need to update state directly.
 
 **How to use it.**
 
@@ -48,13 +51,18 @@ x = x + 1
 let xs [3]int = [3]int{1, 2, 3}
 xs[0] = 42
 
+let counts map[string]int = make(map[string]int)
+counts["hits"] = 1
+
+let ptr *int = &x
+*ptr = 99
+
 let a int = 0
-let b int = 0
-a, b = getPair()
-a, _ = getPair()
+let ok bool = false
+a, ok = counts["hits"]
 ```
 
-The new value must have the variable's type.
+The new value must have the target's type.
 
 **Common mistakes.** There are no compound operators such as `+=` or `++`:
 
@@ -65,8 +73,8 @@ The new value must have the variable's type.
 Write `i = i + 1`. Strings cannot be changed by index; see
 [Strings as collections](/docs/guide/collections/#strings-as-collections).
 
-**When you don't need it.** A function's collection *parameters* cannot have their elements assigned unless the
-parameter is `mut`. See [`mut` parameters](/docs/guide/functions/#mut-parameters).
+**When you don't need it.** A function's collection or map *parameters* cannot be mutated unless the parameter is `mut`.
+See [`mut` parameters](/docs/guide/functions/#mut-parameters).
 
 ## Scope
 

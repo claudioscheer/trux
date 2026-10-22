@@ -14,3 +14,13 @@ pub func setFirst(mut xs []int, value int) int {
   xs[0] = value
   return xs[0]
 }
+
+pub func bump(mut counts map[string]int, key string) int {
+  let current int, ok bool = counts[key]
+  if ok {
+    counts[key] = current + 1
+  } else {
+    counts[key] = 1
+  }
+  return counts[key]
+}

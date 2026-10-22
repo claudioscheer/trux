@@ -1,5 +1,10 @@
 package main
 
+type Item struct {
+  name string
+  count int
+}
+
 func main() int {
   // Arrays have fixed length and store scalar elements.
   let xs [3]int = [3]int{1, 2, 3}
@@ -41,6 +46,22 @@ func main() int {
   let tail []int = items[1:]
   tail[0] = 8
   print(items[1], " ", len(tail))
+
+  // Structs group named fields and work with pointers and collections.
+  let item Item = Item{name: "bolts", count: 4}
+  let itemPtr *Item = &item
+  itemPtr.count = itemPtr.count + 2
+  print(item.name, " ", item.count)
+
+  // Maps store key-value pairs with O(1) lookup, comma-ok checks, and deletion.
+  let stock map[string]int = map[string]int{"bolts": item.count, "nuts": 10}
+  stock["washers"] = 5
+  delete(stock, "nuts")
+  let bolts int, hasBolts bool = stock["bolts"]
+  let nuts int, hasNuts bool = stock["nuts"]
+  let ks list[string] = keys(stock)
+  let vs list[int] = values(stock)
+  print(len(stock), " ", bolts, " ", hasBolts, " ", nuts, " ", hasNuts, " ", len(ks), " ", len(vs))
 
   return 0
 }

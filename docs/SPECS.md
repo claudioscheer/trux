@@ -66,15 +66,20 @@ Supported multiple return types:
 
 Functions can return multiple values using parenthesized return types, e.g. `(int, error)` or `(string, int, bool)`. The `error` type represents an explicit error value; `nil` represents the absence of an error.
 
-Supported collection types:
+Supported composite, pointer, and collection types:
 
 ```text
+type Name struct { ... }
+*T
 [N]T
 []T
 list[T]
+map[K]V
 ```
 
-Collection element types may be scalars or further collections. Nested lists, slices, and arrays are supported. `examples/jagged_lists.tx` and `examples/nested_slices.tx` cover that shape. `gpu.Buffer` elements stay `int` or `float`.
+Structs group named fields (`type Name struct { field T }`, or `pub type Name struct` when exported across packages). Recursive structs by value are rejected; recursive references must go through `*T` or a dynamic collection. Pointers `*T` support `&x`, `*p`, `new(T)`, `nil`, and single-level auto-dereferencing on field access (`p.field`). Maps `map[K]V` require a comparable key type `K` (`int`, `float`, `string`, `bool`, `error`, `*T`, or arrays/structs of comparable types) and support `make(map[K]V)`, `make(map[K]V, cap)`, map literals `map[K]V{k: v}`, single-value lookup `m[k]`, comma-ok lookup `let v V, ok bool = m[k]`, `delete(m, k)`, `len(m)`, `keys(m)`, `values(m)`, `mut` parameters, and `clone(m)`.
+
+Collection element types may be scalars, structs, pointers, or further collections. Nested lists, slices, and arrays are supported. `examples/jagged_lists.tx` and `examples/nested_slices.tx` cover that shape. `gpu.Buffer` elements stay `int` or `float`.
 
 Supported GPU device buffer types:
 

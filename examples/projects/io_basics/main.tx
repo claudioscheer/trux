@@ -3,24 +3,28 @@ package main
 import "io"
 import "csv"
 
+type UserSubmission struct {
+  name string
+  bonus int
+}
+
 func main() int {
-  let name string = io.readLine()
-  let bonus int = io.readInt()
+  let input UserSubmission = UserSubmission{name: io.readLine(), bonus: io.readInt()}
 
   let note string, readErr error = io.readFile("examples/projects/io_basics/input.txt")
   assert(readErr == nil, "read input.txt")
-  let writeErr error = io.writeFile("examples/projects/io_basics/copy.txt", note + "\n" + name)
+  let writeErr error = io.writeFile("examples/projects/io_basics/copy.txt", note + "\n" + input.name)
   assert(writeErr == nil, "write copy.txt")
 
   let cells list[string], csvReadErr error = csv.read("examples/projects/io_basics/input.csv", 2)
   assert(csvReadErr == nil, "read input.csv")
-  append(cells, name)
+  append(cells, input.name)
   append(cells, "interactive")
   let csvWriteErr error = csv.write("examples/projects/io_basics/output.csv", cells, 2)
   assert(csvWriteErr == nil, "write output.csv")
 
-  print("hello ", name)
-  print(bonus + 1)
+  print("hello ", input.name)
+  print(input.bonus + 1)
   print(len(cells), " ", cells[0], " ", cells[1])
 
   return 0

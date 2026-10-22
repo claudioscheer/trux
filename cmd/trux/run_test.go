@@ -327,15 +327,15 @@ func TestRunFileCompilesAndExecutesCollectionExamples(t *testing.T) {
 	}{
 		{
 			path: "../../examples/collections.tx",
-			want: "3\n1 3\n9 2\n8 8 2\n5 0 7\nr ru 4\n2 2\n3 2 3\n8 2\n",
+			want: "3\n1 3\n9 2\n8 8 2\n5 0 7\nr ru 4\n2 2\n3 2 3\n8 2\nbolts 6\n2 6 true 0 false 2 2\n",
 		},
 		{
 			path: "../../examples/ownership_clone.tx",
-			want: "99 2\n20 30\n1 42\n7 9\nab cd 2\n",
+			want: "99 2\n20 30\n1 42\n7 9\nab cd 2\nrun-1 50 10\n",
 		},
 		{
 			path: "../../examples/mut_parameters.tx",
-			want: "2 2 2\n1 hello trux\n8 8\n9 9\n1 2 2\n10 20 0\n",
+			want: "2 2 2\n1 hello trux\n8 8\n9 9\n1 2\n1 2 2\n10 20 0\n",
 		},
 		{
 			path: "../../examples/matrix_multiply_2x2.tx",
@@ -374,7 +374,7 @@ func TestRunFileCompilesAndExecutesModuleExamples(t *testing.T) {
 	}{
 		{
 			path: "../../examples/modules/basic/main.tx",
-			want: "7\n",
+			want: "7 7\n",
 		},
 		{
 			path: "../../examples/modules/transitive/main.tx",
@@ -390,7 +390,7 @@ func TestRunFileCompilesAndExecutesModuleExamples(t *testing.T) {
 		},
 		{
 			path: "../../examples/modules/mut_parameters/main.tx",
-			want: "2 20\n4 4\n7 7\n1 2 2\n10 20 0\n",
+			want: "2 20\n4 4\n7 7\n1 2\n1 2 2\n10 20 0\n",
 		},
 	}
 

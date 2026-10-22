@@ -192,7 +192,7 @@ $ trux run examples/assertions.tx
 
 ### collections
 
-Arrays, slices, `make`, string indexing, and list handles.
+Arrays, slices, `make`, string indexing, list handles, structs, pointers, and maps.
 
 {{< details summary="`examples/collections.tx`" >}}
 
@@ -208,7 +208,7 @@ $ trux run examples/collections.tx
 
 ### jagged_lists
 
-A `list[list[int]]` with rows of different lengths.
+A `list[list[int]]` with rows of different lengths, summarized with a `RowSummary` struct.
 
 {{< details summary="`examples/jagged_lists.tx`" >}}
 
@@ -224,7 +224,7 @@ $ trux run examples/jagged_lists.tx
 
 ### nested_slices
 
-`[][]float` built with `make`, and a deep `clone`.
+`[][]float` built with `make`, a deep `clone`, and a `CellPos` struct.
 
 {{< details summary="`examples/nested_slices.tx`" >}}
 
@@ -240,7 +240,7 @@ $ trux run examples/nested_slices.tx
 
 ### matrix_multiply_2x2
 
-Passing and returning `[2][2]int` arrays.
+Passing and returning `Matrix2x2` structs and `*Matrix2x2` pointers.
 
 {{< details summary="`examples/matrix_multiply_2x2.tx`" >}}
 
@@ -256,7 +256,7 @@ $ trux run examples/matrix_multiply_2x2.tx
 
 ### ownership_clone
 
-Borrowed versus owned returns, and `clone`.
+Borrowed versus owned returns, heap allocation with `new(T)`, and deep-cloning structs and maps with `clone`.
 
 {{< details summary="`examples/ownership_clone.tx`" >}}
 
@@ -272,7 +272,7 @@ $ trux run examples/ownership_clone.tx
 
 ### mut_parameters
 
-Mutating caller collections through `mut` parameters.
+Mutating caller collections and maps through `mut` parameters, and mutating a `Queue` struct through `*Queue`.
 
 {{< details summary="`examples/mut_parameters.tx`" >}}
 
@@ -290,7 +290,7 @@ $ trux run examples/mut_parameters.tx
 
 ### modules_basic
 
-One import and one `pub func`.
+One import, a `pub type Pair struct`, and `pub func`.
 
 {{< details summary="`examples/modules/basic/main.tx`" >}}
 
@@ -306,7 +306,7 @@ $ trux run examples/modules/basic/main.tx
 
 ### modules_transitive
 
-A chain of imports: `main` → `app` → `text`.
+A chain of imports (`main` → `app` → `text`) returning an exported `app.Status` struct.
 
 {{< details summary="`examples/modules/transitive/main.tx`" >}}
 
@@ -322,7 +322,7 @@ $ trux run examples/modules/transitive/main.tx
 
 ### modules_private_names
 
-Same-named private helpers in different packages.
+Same-named private structs and helpers in different packages.
 
 {{< details summary="`examples/modules/private_names/main.tx`" >}}
 
@@ -338,7 +338,7 @@ $ trux run examples/modules/private_names/main.tx
 
 ### modules_same_package_math
 
-One package spread over several files.
+One package spread over several files, sharing an exported `Pair` struct.
 
 {{< details summary="`examples/modules/same_package_math/main.tx`" >}}
 
@@ -354,7 +354,7 @@ $ trux run examples/modules/same_package_math/main.tx
 
 ### modules_mut_parameters
 
-A stack and a queue in separate packages, using `mut`.
+A stack and a `Queue` struct in separate packages, using `mut` parameters and `*queue.Queue` pointers.
 
 {{< details summary="`examples/modules/mut_parameters/main.tx`" >}}
 
@@ -372,7 +372,7 @@ $ trux run examples/modules/mut_parameters/main.tx
 
 ### scorebook
 
-A small package with unit tests (`scores.test.tx`).
+A small package exporting a `Summary` struct, a `map[string]int` grade counter, and unit tests (`scores.test.tx`).
 
 {{< details summary="`examples/projects/scorebook/main.tx`" >}}
 

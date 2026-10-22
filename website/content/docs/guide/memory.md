@@ -1,16 +1,18 @@
 ---
 title: "Memory and ownership"
-description: "Arenas instead of a garbage collector, borrowing, and clone."
+description: "Arenas instead of a garbage collector, borrowing, new(T), and clone."
 icon: "memory"
 weight: 800
 ---
 
 ## Arenas
 
-**What it is.** Strings and collections live in **arenas**: blocks of memory that are released all at once. The compiler
-decides which arena each value goes into. There is no garbage collector and no `free` for host values.
+**What it is.** Strings, collections, maps, and heap values (`new(T)`) live in **arenas**: blocks of memory that are
+released all at once. The compiler decides which arena each value goes into. There is no garbage collector and no manual
+`free` for host values.
 
-**Why.** Arenas make allocation cheap and freeing automatic, with no collector pauses and no manual freeing in your code. The price is a few ownership rules, below, that the compiler enforces.
+**Why.** Arenas make allocation cheap and freeing automatic, with no collector pauses and no manual freeing in your code.
+The price is a few ownership rules, below, that the compiler enforces.
 
 **How to use it.** Nothing to write. A function's temporary values are released when it returns, and a loop whose
 temporaries don't escape an iteration reuses the same memory on every pass, so building strings in a loop doesn't keep
@@ -24,16 +26,16 @@ growing memory.
 
 ## Borrowed parameters
 
-**What it is.** A function **borrows** the arrays, slices, lists, and strings passed to it. It can read them, slice them,
-and return views of them, but not change them.
+**What it is.** A function **borrows** the arrays, slices, lists, maps, and strings passed to it. It can read them,
+slice them, and return views of them, but not change them unless the parameter is marked `mut`.
 
 **Why.** The compiler has to know which arena owns each collection. Read-only parameters keep that simple, and `mut`
 makes every exception visible in the function's signature.
 
-**How to use it.** Read freely. To change the caller's collection, declare the parameter
+**How to use it.** Read freely. To change the caller's collection or map, declare the parameter
 [`mut`](/docs/guide/functions/#mut-parameters). To work on a changed copy, [`clone`](#clone) it.
 
-**Common mistakes.** `append` or element assignment on a parameter fails with
+**Common mistakes.** `append`, `delete`, or element assignment on an ordinary parameter fails with
 `cannot mutate parameter-owned collection`; the full example is under
 [`mut` parameters](/docs/guide/functions/#mut-parameters).
 
@@ -47,14 +49,16 @@ makes every exception visible in the function's signature.
 
 - A view of a **parameter** (`return xs[1:3]`) is returned as a borrowed view of the caller's data. It is free, and it
   sees later changes to that data.
-- Something built **locally** (a local array, a list literal, a joined string) is copied into the caller's memory during
-  `return`.
+- Something built **locally** (a local array, a list or map literal, a struct containing dynamic fields, a joined string)
+  is copied into the caller's memory during `return`.
+- A pointer allocated with **`new(T)`** or **`&StructLiteral{...}`** is allocated in the durable arena and can be safely
+  returned from a function (`return snap`), whereas returning `&localVar` is rejected at compile time.
 
-**Related:** [Returning collections](/docs/guide/functions/#returning-collections).
+**Related:** [Returning structs and collections](/docs/guide/functions/#returning-collections).
 
 ## `clone` {#clone}
 
-**What it is.** `clone(x)` makes an independent deep copy of a string, array, slice, or list.
+**What it is.** `clone(x)` makes an independent deep copy of a string, array, slice, list, map, or struct.
 
 **Why.** It gives you a value you own, which you can change without affecting, or being affected by, anyone else.
 
@@ -76,7 +80,7 @@ func cloneThenEdit(xs []int) []int {
 }
 ```
 
-The full walkthrough:
+The full walkthrough, including `new(T)` and cloning a struct with an owned `map[string]int`:
 
 {{< include "examples/ownership_clone.tx" "trux" >}}
 
@@ -92,14 +96,14 @@ changed directly:
 Clone it first: `let ys list[int] = clone(makeList())`.
 
 **When you don't need it.** Only reading a value never needs `clone`. If a function should change the caller's
-collection rather than a copy, use `mut`. Each `clone` copies the whole value, nested collections included, so avoid it
-in hot loops.
+collection rather than a copy, use `mut`. Each `clone` copies the whole value, nested collections and struct fields
+included, so avoid it in hot loops.
 
-**Related:** [`mut` parameters](/docs/guide/functions/#mut-parameters), [Lists](/docs/guide/collections/#lists).
+**Related:** [`mut` parameters](/docs/guide/functions/#mut-parameters), [Lists and maps](/docs/guide/collections/#lists).
 
 ## Under the hood
 
 The generated C uses a **durable arena** (`trux_ctx->arena`) for the whole program, a **frame arena** (`trux_frame`)
 per function that allocates, released on return, and a **result arena** (`trux_result_arena`) passed in by each caller,
-where returned values are copied. Lists are heap-backed handles freed when their owning arena is reset or released. See
-[Compiling to C and CUDA](/docs/internals/compilation/#memory-in-generated-code).
+where returned values are copied. Lists and maps are heap-backed handles freed when their owning arena is reset or
+released. See [Compiling to C and CUDA](/docs/internals/compilation/#memory-in-generated-code).

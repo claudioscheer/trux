@@ -10,12 +10,35 @@ import (
 type Program struct {
 	PackageName string
 	Imports     []*ImportDecl
+	Structs     []*StructDecl
 	Functions   []*FuncDecl
 }
 
 type ImportDecl struct {
 	Pos  token.Position
 	Path string
+}
+
+type StructField struct {
+	Pos  token.Position
+	Name string
+	Type Type
+}
+
+type StructDecl struct {
+	Pos          token.Position
+	NamePos      token.Position
+	Name         string
+	InternalName string
+	Public       bool
+	Fields       []StructField
+}
+
+func (s *StructDecl) TargetName() string {
+	if s.InternalName != "" {
+		return s.InternalName
+	}
+	return s.Name
 }
 
 type FuncDecl struct {
@@ -110,6 +133,52 @@ func (t *TupleType) String() string {
 
 func (*TupleType) typeNode() {}
 
+type StructType struct {
+	Package      string
+	Name         string
+	ResolvedName string
+}
+
+func (t *StructType) String() string {
+	if t.Package != "" {
+		return t.Package + "." + t.Name
+	}
+	return t.Name
+}
+
+func (t *StructType) TargetName() string {
+	if t.ResolvedName != "" {
+		return t.ResolvedName
+	}
+	if t.Package != "" {
+		return t.Package + "." + t.Name
+	}
+	return t.Name
+}
+
+func (*StructType) typeNode() {}
+
+type PointerType struct {
+	Elem Type
+}
+
+func (t *PointerType) String() string {
+	return "*" + t.Elem.String()
+}
+
+func (*PointerType) typeNode() {}
+
+type MapType struct {
+	Key   Type
+	Value Type
+}
+
+func (t *MapType) String() string {
+	return fmt.Sprintf("map[%s]%s", t.Key, t.Value)
+}
+
+func (*MapType) typeNode() {}
+
 func TypeEqual(left Type, right Type) bool {
 	switch left := left.(type) {
 	case ScalarType:
@@ -127,6 +196,15 @@ func TypeEqual(left Type, right Type) bool {
 	case *GPUBufferType:
 		right, ok := right.(*GPUBufferType)
 		return ok && TypeEqual(left.Elem, right.Elem)
+	case *StructType:
+		right, ok := right.(*StructType)
+		return ok && left.TargetName() == right.TargetName()
+	case *PointerType:
+		right, ok := right.(*PointerType)
+		return ok && TypeEqual(left.Elem, right.Elem)
+	case *MapType:
+		right, ok := right.(*MapType)
+		return ok && TypeEqual(left.Key, right.Key) && TypeEqual(left.Value, right.Value)
 	case *TupleType:
 		right, ok := right.(*TupleType)
 		if !ok || len(left.Types) != len(right.Types) {
@@ -237,6 +315,26 @@ type IndexAssignStmt struct {
 func (s *IndexAssignStmt) Pos() token.Position { return s.Start }
 
 func (*IndexAssignStmt) statementNode() {}
+
+type FieldAssignStmt struct {
+	Start  token.Position
+	Target *FieldExpr
+	Value  Expression
+}
+
+func (s *FieldAssignStmt) Pos() token.Position { return s.Start }
+
+func (*FieldAssignStmt) statementNode() {}
+
+type DerefAssignStmt struct {
+	Start  token.Position
+	Target *UnaryExpr
+	Value  Expression
+}
+
+func (s *DerefAssignStmt) Pos() token.Position { return s.Start }
+
+func (*DerefAssignStmt) statementNode() {}
 
 type IfStmt struct {
 	Start     token.Position
@@ -364,6 +462,58 @@ type MakeExpr struct {
 func (e *MakeExpr) Pos() token.Position { return e.Start }
 
 func (*MakeExpr) expressionNode() {}
+
+type NewExpr struct {
+	Start    token.Position
+	ElemType Type
+}
+
+func (e *NewExpr) Pos() token.Position { return e.Start }
+
+func (*NewExpr) expressionNode() {}
+
+type StructFieldInit struct {
+	Pos   token.Position
+	Name  string
+	Value Expression
+}
+
+type StructLiteral struct {
+	Start  token.Position
+	Type   *StructType
+	Fields []StructFieldInit
+}
+
+func (e *StructLiteral) Pos() token.Position { return e.Start }
+
+func (*StructLiteral) expressionNode() {}
+
+type MapEntry struct {
+	Pos   token.Position
+	Key   Expression
+	Value Expression
+}
+
+type MapLiteral struct {
+	Start   token.Position
+	Type    *MapType
+	Entries []MapEntry
+}
+
+func (e *MapLiteral) Pos() token.Position { return e.Start }
+
+func (*MapLiteral) expressionNode() {}
+
+type FieldExpr struct {
+	Start         token.Position
+	Object        Expression
+	Field         string
+	ResolvedIdent string
+}
+
+func (e *FieldExpr) Pos() token.Position { return e.Start }
+
+func (*FieldExpr) expressionNode() {}
 
 type CallExpr struct {
 	Start          token.Position

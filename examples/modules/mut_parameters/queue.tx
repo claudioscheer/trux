@@ -1,19 +1,23 @@
 package queue
 
-// Enqueue grows the caller-owned list.
-pub func enqueue(mut values list[int], value int) int {
-  append(values, value)
-  return len(values)
+pub type Queue struct {
+  values list[int]
+  head int
 }
 
-// Dequeue advances a caller-owned head index.
-// Consumed values stay in the list because Trux does not have list removal yet.
-pub func dequeue(values list[int], mut head [1]int) int {
-  let value int = values[head[0]]
-  head[0] = head[0] + 1
+// Enqueue grows the caller-owned Queue through a pointer.
+pub func enqueue(q *Queue, value int) int {
+  append(q.values, value)
+  return len(q.values)
+}
+
+// Dequeue advances the Queue's head index.
+pub func dequeue(q *Queue) int {
+  let value int = q.values[q.head]
+  q.head = q.head + 1
   return value
 }
 
-pub func queued(values list[int], head [1]int) int {
-  return len(values) - head[0]
+pub func queued(q *Queue) int {
+  return len(q.values) - q.head
 }

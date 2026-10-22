@@ -1,5 +1,10 @@
 package main
 
+type Snapshot struct {
+  label string
+  scores map[string]int
+}
+
 // Returning a parameter-backed slice is borrowed.
 // This is cheap and keeps the view tied to the caller's storage.
 func borrowedMiddle(xs []int) []int {
@@ -46,6 +51,15 @@ func builtWords() list[string] {
   return words
 }
 
+// `new(T)` allocates on the heap so the returned pointer outlives the call frame.
+func newSnapshot(label string, initial int) *Snapshot {
+  let snap *Snapshot = new(Snapshot)
+  snap.label = label
+  snap.scores = make(map[string]int)
+  snap.scores["base"] = initial
+  return snap
+}
+
 func main() int {
   let xs [4]int = [4]int{1, 2, 3, 4}
   let borrowed []int = borrowedMiddle(xs[:])
@@ -66,6 +80,12 @@ func main() int {
 
   let words list[string] = builtWords()
   print(words[0], " ", words[1], " ", len(words))
+
+  // Cloning a struct deep-copies its owned fields (including maps and lists).
+  let original *Snapshot = newSnapshot("run-1", 10)
+  let backup Snapshot = clone(*original)
+  original.scores["base"] = 50
+  print(original.label, " ", original.scores["base"], " ", backup.scores["base"])
 
   return 0
 }

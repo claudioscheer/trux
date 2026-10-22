@@ -28,19 +28,19 @@ Then follow [Your first program](/docs/getting-started/first-program/) and the [
 
 ## What you get
 
-- **Explicit types**: `int`, `float`, `string`, `bool`, arrays `[N]T`, slices `[]T`, and lists `list[T]`. Nothing
-  converts implicitly.
-- **Checked at run time**: integer overflow, division by zero, out-of-bounds indexes, and failed `assert`s stop the
-  program with a `trux runtime error`.
-- **Arena memory**: no garbage collector and no `free` for host values; `mut` parameters and `clone` make every change
-  to shared data visible.
-- **Multi-file programs** with relative imports and `pub func`.
+- **Explicit types**: `int`, `float`, `string`, `bool`, `error`, structs `type Name struct`, pointers `*T`, arrays `[N]T`,
+  slices `[]T`, lists `list[T]`, and maps `map[K]V`. Nothing converts implicitly.
+- **Checked at run time**: integer overflow, division by zero, out-of-bounds indexes, nil pointer dereferences, and
+  failed `assert`s stop the program with a `trux runtime error`.
+- **Arena memory**: no garbage collector and no manual `free` for host values; `mut` parameters, pointers, `new(T)`, and
+  `clone` make every change to shared data visible.
+- **Multi-file programs** with relative imports, `pub func`, and `pub type ... struct`.
 - **Built-in tests**: `.test.tx` files and `trux test`.
 - **GPU kernels** written in Trux and compiled to CUDA.
 - A small standard library: `io`, `csv`, `image`, `time`, `http`, `gpu`, and `errors`.
 
-**Not there yet:** structs, maps, generics, user-defined types, type inference, `int`/`float` conversions, closures,
-and concurrency outside the HTTP server. See the [FAQ](/docs/faq/#whats-missing).
+**Not there yet:** generics, interfaces, type inference, `int`/`float` conversions, closures, and concurrency outside the
+HTTP server. See the [FAQ](/docs/faq/#whats-missing).
 
 ## How it works
 

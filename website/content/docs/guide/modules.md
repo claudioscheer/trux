@@ -1,6 +1,6 @@
 ---
 title: "Modules and packages"
-description: "Splitting a program across files with relative imports and pub func."
+description: "Splitting a program across files with relative imports, pub func, and pub type."
 icon: "folder_open"
 weight: 900
 ---
@@ -10,7 +10,7 @@ weight: 900
 **What it is.** `import "file.tx"` loads another Trux file. The compiler follows imports from the entry file and
 compiles everything into one program.
 
-**Why.** Larger programs stay readable when related functions live in their own files.
+**Why.** Larger programs stay readable when related types and functions live in their own files.
 
 **How to use it.**
 
@@ -31,7 +31,8 @@ compiles everything into one program.
 
 - The path is relative to the **importing file's directory** and ends in `.tx`: `"math.tx"`, `"math/add.tx"`,
   `"../shared/text.tx"`.
-- Callers use the file's **package name** (`package math`), not its file name, as the qualifier.
+- Callers use the file's **package name** (`package math`), not its file name, as the qualifier for functions
+  (`math.add(...)`) and struct types (`math.Pair`).
 - Each file is loaded once, however many times it is imported. `.test.tx` files are skipped.
 
 **Common mistakes.** A bare name that isn't a standard package:
@@ -51,23 +52,24 @@ projects: there are no package artifacts or search paths.
 
 **Related:** [Program structure: imports](/docs/guide/program-structure/#imports).
 
-## `pub func` {#pub-func}
+## `pub func` and `pub type` {#pub-func}
 
-**What it is.** `pub func` makes a function callable from files that import its package, as `pkg.name(...)`. A plain
-`func` is private to its package.
+**What it is.** `pub func` makes a function callable from files that import its package, as `pkg.name(...)`.
+`pub type Name struct` exports a struct type and all of its fields so importers can write `pkg.Name` and construct
+`pkg.Name{...}`. Plain `func` and `type` declarations are private to their package.
 
-**Why.** Each package decides what it exposes. Helpers can change without breaking importers.
+**Why.** Each package decides what it exposes. Private helpers and internal structs can change without breaking importers.
 
 **How to use it.**
 
-| Declared as | Callable from |
+| Declared as | Visible from |
 | --- | --- |
-| `pub func f` | files that **directly** import its package, as `pkg.f(...)`; and, unqualified, from its own package |
-| `func f` | only its own package, unqualified |
+| `pub func f` / `pub type S struct` | files that **directly** import its package, as `pkg.f(...)` / `pkg.S`; and, unqualified, from its own package |
+| `func f` / `type S struct` | only its own package, unqualified |
 
-Different packages may each have a private function with the same name.
+Different packages may each have a private function or private struct with the same name (`examples/modules/private_names`).
 
-**Common mistakes.** Calling a private function from another package:
+**Common mistakes.** Calling a private function or referencing a private struct from another package:
 
 {{< tabs tabTotal="2" >}}
 {{% tab tabName="program.tx" %}}
@@ -86,9 +88,9 @@ Different packages may each have a private function with the same name.
 
 A qualified call to a private function is rejected even inside its own package; call it unqualified there.
 
-**When you don't need it.** Functions used only inside their own package should stay private.
+**When you don't need it.** Functions and structs used only inside their own package should stay private.
 
-**Related:** [Functions](/docs/guide/functions/).
+**Related:** [Functions](/docs/guide/functions/), [Structs](/docs/guide/types/#structs).
 
 ## Direct imports only
 
@@ -130,8 +132,9 @@ examples/modules/same_package_math/
 
 {{< include "website/outputs/modules_same_package_math.txt" "text" >}}
 
-Private functions are shared by all files of the package, and every function name in the package must be unique.
-Several imports may declare the same package name; the qualifier then covers the public functions of all of them.
+Private functions and structs are shared by all files of the package, and every function or struct name in the package
+must be unique. Several imports may declare the same package name; the qualifier then covers the public functions and
+types of all of them.
 
 **When you don't need it.** The entry file is special: it does **not** load its siblings, and only it may declare
 `main`.
@@ -140,11 +143,11 @@ Several imports may declare the same package name; the qualifier then covers the
 
 | Directory | Shows |
 | --- | --- |
-| `examples/modules/basic` | one import, one public function |
-| `examples/modules/transitive` | `main` → `app` → `text`, and the direct-import rule |
-| `examples/modules/private_names` | two packages with same-named private helpers, and a package split over two files |
-| `examples/modules/same_package_math` | one package across several files, imported through two paths |
-| `examples/modules/mut_parameters` | `mut` parameters across package boundaries |
+| `examples/modules/basic` | one import, `pub type Pair struct`, and `pub func` |
+| `examples/modules/transitive` | `main` → `app` → `text`, `pub type Status struct`, and the direct-import rule |
+| `examples/modules/private_names` | two packages with same-named private structs and helpers, and a package split over two files |
+| `examples/modules/same_package_math` | one package across several files sharing `Pair`, imported through two paths |
+| `examples/modules/mut_parameters` | `mut` collection/map parameters and `*Queue` struct pointers across package boundaries |
 
 ## Limits
 

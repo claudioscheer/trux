@@ -34,6 +34,9 @@ const (
 	False      Type = "FALSE"
 	In         Type = "IN"
 	List       Type = "LIST"
+	Map        Type = "MAP"
+	TypeKw     Type = "TYPE"
+	Struct     Type = "STRUCT"
 
 	Assign       Type = "="
 	Equal        Type = "=="
@@ -48,6 +51,7 @@ const (
 	Asterisk     Type = "*"
 	Slash        Type = "/"
 	Percent      Type = "%"
+	Ampersand    Type = "&"
 	And          Type = "&&"
 	Or           Type = "||"
 
@@ -101,6 +105,9 @@ var keywords = map[string]Type{
 	"false":    False,
 	"in":       In,
 	"list":     List,
+	"map":      Map,
+	"type":     TypeKw,
+	"struct":   Struct,
 }
 
 func LookupIdent(ident string) Type {

@@ -98,7 +98,7 @@ func (l *Lexer) NextToken() token.Token {
 		if l.match('&') {
 			return token.Token{Type: token.And, Lexeme: "&&", Pos: pos}
 		}
-		return token.Token{Type: token.Illegal, Lexeme: "&", Pos: pos}
+		return token.Token{Type: token.Ampersand, Lexeme: "&", Pos: pos}
 	case '|':
 		l.advance()
 		if l.match('|') {

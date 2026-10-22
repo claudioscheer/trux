@@ -11,9 +11,9 @@ Trux features a high-performance HTTP engine engineered specifically for Linux s
 
 - **Shared-Nothing Thread-per-Core**: Each hardware execution unit runs an independent worker thread. Every worker creates its own listening socket with `SO_REUSEPORT`, dedicated `io_uring` instance, and dedicated kernel buffer ring.
 - **Kernel Buffer Rings (`io_uring_register_buf_ring`)**: The Linux kernel dynamically selects pre-registered buffers upon incoming network packets (`IOSQE_BUFFER_SELECT`), eliminating user-space memory allocations and read system calls.
-- **Multishot Operations**: A single Submission Queue Entry (SQE) establishes continuous connection acceptance (`io_uring_prep_multishot_accept`) and streaming receive (`io_uring_prep_recv_multishot`) for the lifetime of connections.
-- **Vectorized Scatter-Gather Responses**: HTTP headers and payloads are emitted through vectorized I/O (`writev`), preventing memory copies.
-- **Predictable Memory Footprint**: Bounded buffer rings and request-scoped arenas keep memory consumption flat (< 100 MiB) regardless of concurrent connection counts.
+- **Multishot Operations & Async Response Queuing**: A single Submission Queue Entry (SQE) establishes continuous connection acceptance (`io_uring_prep_multishot_accept`) and streaming receive (`io_uring_prep_recv_multishot`), while outgoing HTTP responses are queued asynchronously via `io_uring_prep_send` and flushed in batched ring submissions.
+- **CPU Affinity Worker Sizing (`sched_getaffinity`)**: Worker threads automatically match the container or host CPU affinity mask (`CPU_COUNT`), maintaining a strict 1:1 thread-per-core mapping without over-spawning threads inside cgroup-constrained containers.
+- **Predictable Memory Footprint**: Bounded buffer rings and request-scoped arenas keep memory consumption between **9.4 MiB and 50.5 MiB** regardless of concurrent connection counts.
 
 ```mermaid
 flowchart TD
@@ -53,14 +53,14 @@ Simulates constrained edge environments, micro instances, or single-core serverl
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext Baseline** (`/plaintext`) | 100 | **173,596** | 17.05 MB/s | 0.99 ms | 476 µs | 1.15 ms | 10.40 ms | 91.7 MiB |
-| **Plaintext Baseline** (`/plaintext`) | 1,000 | **179,170** | 17.60 MB/s | 6.39 ms | 5.51 ms | 13.83 ms | 27.01 ms | 94.9 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **37,405** | 5.99 MB/s | 3.54 ms | 1.83 ms | 9.09 ms | 20.55 ms | 99.8 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **38,948** | 6.24 MB/s | 53.53 ms | 17.27 ms | 159.50 ms | 301.04 ms | 103.9 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **110,655** | 14.77 MB/s | 797 µs | 643 µs | 1.41 ms | 3.05 ms | 104.1 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **106,370** | 14.20 MB/s | 14.46 ms | 6.98 ms | 41.78 ms | 81.86 ms | 106.2 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **45,157** | 5.99 MB/s | 3.04 ms | 1.40 ms | 8.18 ms | 17.60 ms | 108.2 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **46,486** | 6.16 MB/s | 45.04 ms | 2.86 ms | 135.57 ms | 273.89 ms | 111.0 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 100 | **162,761** | 15.99 MB/s | 0.94 ms | 489 µs | 1.26 ms | 4.31 ms | 9.4 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 1,000 | **172,765** | 16.97 MB/s | 5.74 ms | 5.61 ms | 6.68 ms | 9.40 ms | 15.4 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **60,993** | 9.77 MB/s | 2.37 ms | 1.17 ms | 7.02 ms | 11.12 ms | 30.4 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **59,980** | 9.61 MB/s | 16.48 ms | 18.66 ms | 21.53 ms | 28.28 ms | 33.2 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **146,278** | 19.53 MB/s | 684 µs | 559 µs | 1.21 ms | 2.49 ms | 33.6 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **143,482** | 19.16 MB/s | 6.88 ms | 6.77 ms | 7.67 ms | 9.98 ms | 33.8 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **66,073** | 8.76 MB/s | 2.26 ms | 1.07 ms | 6.86 ms | 10.64 ms | 34.1 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **62,864** | 8.33 MB/s | 15.73 ms | 18.22 ms | 20.77 ms | 27.94 ms | 34.9 MiB |
 
 ---
 
@@ -70,14 +70,14 @@ Simulates standard dual-core virtual machines (`--cpuset-cpus="0,1" --cpus="2.0"
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext Baseline** (`/plaintext`) | 100 | **192,070** | 18.87 MB/s | 764 µs | 430 µs | 1.12 ms | 3.37 ms | 87.7 MiB |
-| **Plaintext Baseline** (`/plaintext`) | 1,000 | **322,706** | 31.70 MB/s | 3.79 ms | 2.86 ms | 8.40 ms | 19.24 ms | 95.3 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **38,515** | 6.17 MB/s | 2.81 ms | 1.83 ms | 7.20 ms | 11.37 ms | 101.1 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **37,797** | 6.06 MB/s | 23.48 ms | 23.55 ms | 30.91 ms | 41.36 ms | 105.5 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **146,633** | 19.58 MB/s | 625 µs | 499 µs | 1.18 ms | 2.45 ms | 104.8 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **188,478** | 25.16 MB/s | 5.82 ms | 4.40 ms | 12.99 ms | 26.70 ms | 108.7 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **40,513** | 5.37 MB/s | 2.63 ms | 1.59 ms | 7.02 ms | 11.01 ms | 109.2 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **41,417** | 5.49 MB/s | 21.12 ms | 21.31 ms | 29.84 ms | 40.09 ms | 111.6 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 100 | **189,399** | 18.60 MB/s | 0.90 ms | 422 µs | 1.22 ms | 5.93 ms | 13.9 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 1,000 | **321,646** | 31.59 MB/s | 3.20 ms | 2.88 ms | 4.14 ms | 8.11 ms | 20.9 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **53,790** | 8.62 MB/s | 2.45 ms | 1.45 ms | 6.76 ms | 11.18 ms | 21.9 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **71,345** | 11.43 MB/s | 13.88 ms | 14.76 ms | 21.07 ms | 26.73 ms | 28.0 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **140,253** | 18.73 MB/s | 715 µs | 598 µs | 1.27 ms | 2.58 ms | 28.4 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **212,590** | 28.38 MB/s | 4.63 ms | 4.44 ms | 6.14 ms | 8.40 ms | 30.4 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **55,743** | 7.39 MB/s | 2.43 ms | 1.38 ms | 6.86 ms | 11.42 ms | 31.5 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **74,955** | 9.94 MB/s | 13.17 ms | 13.91 ms | 20.03 ms | 25.87 ms | 32.0 MiB |
 
 ---
 
@@ -87,35 +87,35 @@ Simulates multi-core production server nodes (`--cpuset-cpus="0,1,2,3" --cpus="4
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext Baseline** (`/plaintext`) | 100 | **243,186** | 23.89 MB/s | 846 µs | 313 µs | 1.04 ms | 6.10 ms | 91.7 MiB |
-| **Plaintext Baseline** (`/plaintext`) | 1,000 | **431,069** | 42.34 MB/s | 2.69 ms | 1.88 ms | 5.92 ms | 13.35 ms | 95.2 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **21,909** | 3.51 MB/s | 2.81 ms | 2.11 ms | 5.67 ms | 12.31 ms | 98.1 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **21,381** | 3.43 MB/s | 27.95 ms | 27.94 ms | 37.25 ms | 46.80 ms | 102.1 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **115,832** | 15.47 MB/s | 540 µs | 409 µs | 1.06 ms | 2.39 ms | 102.0 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **298,624** | 39.87 MB/s | 2.03 ms | 1.29 ms | 4.74 ms | 9.37 ms | 103.4 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **23,219** | 3.08 MB/s | 2.83 ms | 2.10 ms | 5.94 ms | 11.60 ms | 103.0 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **22,651** | 3.00 MB/s | 26.38 ms | 26.29 ms | 35.47 ms | 44.20 ms | 106.4 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 100 | **222,763** | 21.88 MB/s | 0.87 ms | 342 µs | 1.17 ms | 7.54 ms | 21.9 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 1,000 | **452,747** | 44.47 MB/s | 2.49 ms | 1.75 ms | 4.97 ms | 11.97 ms | 29.7 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **38,497** | 6.17 MB/s | 3.03 ms | 2.13 ms | 6.96 ms | 12.92 ms | 32.3 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **55,219** | 8.85 MB/s | 17.99 ms | 17.85 ms | 28.38 ms | 36.15 ms | 40.8 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **154,332** | 20.61 MB/s | 661 µs | 540 µs | 1.20 ms | 2.50 ms | 41.0 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **280,389** | 37.44 MB/s | 3.57 ms | 3.29 ms | 6.09 ms | 9.67 ms | 45.5 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **39,346** | 5.22 MB/s | 2.97 ms | 2.05 ms | 6.92 ms | 12.82 ms | 46.9 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **56,003** | 7.42 MB/s | 17.75 ms | 17.61 ms | 28.12 ms | 35.89 ms | 50.5 MiB |
 
 ---
 
 ## Analysis & Key Takeaways
 
 ### Realistic On-Disk Database Workloads
-The benchmark operates against an actual persistent database file on disk (`/tmp/bench.db`) configured with SQLite's recommended Write-Ahead Logging mode (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`).
+The benchmark operates against an actual persistent database file on disk (`/tmp/bench.db`) configured with SQLite's recommended Write-Ahead Logging mode (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA mmap_size=67108864; PRAGMA cache_size=-16384;`).
 
-### Thread-Local Connection Architecture (`sqlite.openThreadLocal`)
-Handlers utilize thread-local connection caching. Each `io_uring` worker thread initializes a dedicated connection handle on its first request and reuses it for all subsequent operations:
-- **Zero File Descriptor Churn**: Eliminates file open/close syscalls and repeated schema parsing per request.
-- **Lock-Free Concurrency**: Each worker thread accesses its own handle exclusively, eliminating connection-level mutex contention.
-- **Safe Resource Lifecycle**: Closing a thread-local handle resets prepared statements while keeping the underlying connection active.
+### Thread-Local Connections & Persistent Prepared Statement Cache
+Handlers utilize thread-local connection caching (`sqlite.openThreadLocal`) paired with a transparent per-connection prepared statement cache (`sqlite3_prepare_v3` with `SQLITE_PREPARE_PERSISTENT`):
+- **Zero File Descriptor or Parser Churn**: Eliminates file open/close syscalls, SQL lexing, AST parsing, and VDBE compilation on repeated requests.
+- **Lock-Free Concurrency (`SQLITE_THREADSAFE=2`)**: Because each worker thread owns its connection handle exclusively, SQLite runs in multi-thread mode without per-call recursive connection mutexes (`db->mutex`) or global memory-tracking locks (`SQLITE_DEFAULT_MEMSTATUS=0`).
+- **Single-Roundtrip Write+Read (`INSERT ... RETURNING`)**: `/sqlite/insert-and-query` inserts and retrieves the new row in a single VDBE execution without a secondary B-tree lookup.
 
 ### Concurrent Readers vs. High-Throughput WAL Writes
-- **High-Throughput Reads (`/sqlite/query-by-id/1024`)**: Because WAL mode allows readers to run concurrently without taking exclusive locks, parameterized prepared queries scale up to **298,624 req/s** on disk with median latency at **1.29 ms** at 1,000 concurrency across 4 cores.
-- **High-Throughput WAL Writes (`/sqlite/insert-and-query`, `/api/authenticated-audit`)**: Every opened connection applies `PRAGMA synchronous=NORMAL` (checkpoint-synced WAL appends rather than per-commit `fdatasync`), uses a microsecond-granular `sqlite3_busy_handler` (`sched_yield` + `25 µs` backoff instead of SQLite's default 1–100 ms sleep table), and enforces bounded 1,000-frame (`~4 MB`) `SQLITE_CHECKPOINT_TRUNCATE` WAL checkpoints. Write endpoints sustain **21,381 to 46,486 req/s** with **1.40–2.11 ms** median latency at 100 concurrency and zero lock errors.
-- **Batched `io_uring` Completion Queue Draining**: Worker threads drain all ready completion queue entries (`io_uring_for_each_cqe`) per wake-up and batch SQE submissions, reducing `io_uring_enter` system calls under high concurrency.
+- **High-Throughput Reads (`/sqlite/query-by-id/1024`)**: Parameterized prepared queries scale up to **280,389 req/s** on disk with a **9.67 ms** p99 latency at 1,000 concurrency across 4 cores.
+- **High-Throughput WAL Writes (`/sqlite/insert-and-query`, `/api/authenticated-audit`)**: Combining `PRAGMA synchronous=NORMAL`, persistent statement caching, CPU-affinity worker sizing (`sched_getaffinity`), and bounded 2,000-frame `SQLITE_CHECKPOINT_TRUNCATE` checkpoints sustains **55,219 to 74,955 writes/sec** with **1.07–2.13 ms** median latency at 100 concurrency and zero lock errors.
+- **Async `io_uring_prep_send` & Batched CQE Draining**: Worker threads drain all ready completion queue entries (`io_uring_for_each_cqe`) and queue HTTP responses via `io_uring_prep_send`, coalescing network I/O into batched ring submissions.
 
-### Bounded Memory Stability Under Continuous I/O
-Across millions of concurrent database reads and writes, container memory (including OS page cache for `/tmp/bench.db-wal`) remains strictly bounded between **87.7 MiB and 111.6 MiB**. Truncating WAL checkpoints keep `/tmp/bench.db-wal` under 4 MB on disk and `/tmp/bench.db-shm` within a single 32 KB shared-memory index page.
+### Low Memory Footprint Under Continuous I/O
+Matching worker threads to container CPU affinity (`1`, `2`, and `4` workers) and bounding `/tmp/bench.db-wal` via truncating checkpoints keeps total container memory between **9.4 MiB and 50.5 MiB** across millions of database reads and writes.
 
 ---
 

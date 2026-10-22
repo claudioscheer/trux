@@ -10,64 +10,92 @@ import (
 type CallKind string
 
 const (
-	CallReadLine           CallKind = "readLine"
-	CallReadInt            CallKind = "readInt"
-	CallReadFloat          CallKind = "readFloat"
-	CallReadBool           CallKind = "readBool"
-	CallReadFile           CallKind = "readFile"
-	CallWriteFile          CallKind = "writeFile"
-	CallCreateDir          CallKind = "createDir"
-	CallRemove             CallKind = "remove"
-	CallReadDir            CallKind = "readDir"
-	CallExists             CallKind = "exists"
-	CallIsFile             CallKind = "isFile"
-	CallIsDir              CallKind = "isDir"
-	CallReadCSV            CallKind = "readCsv"
-	CallWriteCSV           CallKind = "writeCsv"
-	CallImageWidth         CallKind = "imageWidth"
-	CallImageHeight        CallKind = "imageHeight"
-	CallReadPPM            CallKind = "readPpm"
-	CallWritePPM           CallKind = "writePpm"
-	CallTimeNowUnixMillis  CallKind = "nowUnixMillis"
-	CallTimeMonotonicNanos CallKind = "monotonicNanos"
-	CallTimeSleepMillis    CallKind = "sleepMillis"
-	CallHTTPListen         CallKind = "listen"
-	CallHTTPServe          CallKind = "serve"
-	CallHTTPUse            CallKind = "use"
-	CallHTTPUseAt          CallKind = "useAt"
-	CallHTTPGet            CallKind = "get"
-	CallHTTPPost           CallKind = "post"
-	CallHTTPPut            CallKind = "put"
-	CallHTTPDelete         CallKind = "delete"
-	CallHTTPPatch          CallKind = "patch"
-	CallHTTPRoute          CallKind = "route"
-	CallHTTPNotFound       CallKind = "notFound"
-	CallHTTPParam          CallKind = "param"
-	CallHTTPSet            CallKind = "set"
-	CallHTTPContext        CallKind = "context"
-	CallHTTPSetHeader      CallKind = "setHeader"
-	CallHTTPText           CallKind = "text"
-	CallHTTPJSON           CallKind = "json"
-	CallHTTPStatus         CallKind = "status"
-	CallHTTPMethod         CallKind = "method"
-	CallHTTPPath           CallKind = "path"
-	CallHTTPQuery          CallKind = "query"
-	CallHTTPHeader         CallKind = "header"
-	CallHTTPBody           CallKind = "body"
-	CallHTTPRespond        CallKind = "respond"
-	CallGPUAlloc           CallKind = "gpuAlloc"
-	CallGPUCopyToDevice    CallKind = "copyToDevice"
-	CallGPUCopyToHost      CallKind = "copyToHost"
-	CallGPUFree            CallKind = "gpuFree"
-	CallGPUSync            CallKind = "gpuSync"
-	CallGPULaunch          CallKind = "gpuLaunch"
-	CallGPULaunch1D        CallKind = "gpuLaunch1d"
-	CallGPULaunch2D        CallKind = "gpuLaunch2d"
-	CallGPUFrom            CallKind = "gpuFrom"
-	CallGPUTo              CallKind = "gpuTo"
-	CallGPUCoord           CallKind = "gpuCoord"
-	CallErrorsNew          CallKind = "errorsNew"
-	CallErrorsMessage      CallKind = "errorsMessage"
+	CallReadLine              CallKind = "readLine"
+	CallReadInt               CallKind = "readInt"
+	CallReadFloat             CallKind = "readFloat"
+	CallReadBool              CallKind = "readBool"
+	CallReadFile              CallKind = "readFile"
+	CallWriteFile             CallKind = "writeFile"
+	CallCreateDir             CallKind = "createDir"
+	CallRemove                CallKind = "remove"
+	CallReadDir               CallKind = "readDir"
+	CallExists                CallKind = "exists"
+	CallIsFile                CallKind = "isFile"
+	CallIsDir                 CallKind = "isDir"
+	CallReadCSV               CallKind = "readCsv"
+	CallWriteCSV              CallKind = "writeCsv"
+	CallImageWidth            CallKind = "imageWidth"
+	CallImageHeight           CallKind = "imageHeight"
+	CallReadPPM               CallKind = "readPpm"
+	CallWritePPM              CallKind = "writePpm"
+	CallTimeNowUnixMillis     CallKind = "nowUnixMillis"
+	CallTimeMonotonicNanos    CallKind = "monotonicNanos"
+	CallTimeSleepMillis       CallKind = "sleepMillis"
+	CallHTTPListen            CallKind = "listen"
+	CallHTTPServe             CallKind = "serve"
+	CallHTTPUse               CallKind = "use"
+	CallHTTPUseAt             CallKind = "useAt"
+	CallHTTPGet               CallKind = "get"
+	CallHTTPPost              CallKind = "post"
+	CallHTTPPut               CallKind = "put"
+	CallHTTPDelete            CallKind = "delete"
+	CallHTTPPatch             CallKind = "patch"
+	CallHTTPRoute             CallKind = "route"
+	CallHTTPNotFound          CallKind = "notFound"
+	CallHTTPParam             CallKind = "param"
+	CallHTTPSet               CallKind = "set"
+	CallHTTPContext           CallKind = "context"
+	CallHTTPSetHeader         CallKind = "setHeader"
+	CallHTTPText              CallKind = "text"
+	CallHTTPJSON              CallKind = "json"
+	CallHTTPStatus            CallKind = "status"
+	CallHTTPMethod            CallKind = "method"
+	CallHTTPPath              CallKind = "path"
+	CallHTTPQuery             CallKind = "query"
+	CallHTTPHeader            CallKind = "header"
+	CallHTTPBody              CallKind = "body"
+	CallHTTPRespond           CallKind = "respond"
+	CallGPUAlloc              CallKind = "gpuAlloc"
+	CallGPUCopyToDevice       CallKind = "copyToDevice"
+	CallGPUCopyToHost         CallKind = "copyToHost"
+	CallGPUFree               CallKind = "gpuFree"
+	CallGPUSync               CallKind = "gpuSync"
+	CallGPULaunch             CallKind = "gpuLaunch"
+	CallGPULaunch1D           CallKind = "gpuLaunch1d"
+	CallGPULaunch2D           CallKind = "gpuLaunch2d"
+	CallGPUFrom               CallKind = "gpuFrom"
+	CallGPUTo                 CallKind = "gpuTo"
+	CallGPUCoord              CallKind = "gpuCoord"
+	CallErrorsNew             CallKind = "errorsNew"
+	CallErrorsMessage         CallKind = "errorsMessage"
+	CallSQLiteOpen            CallKind = "sqliteOpen"
+	CallSQLiteClose           CallKind = "sqliteClose"
+	CallSQLiteExec            CallKind = "sqliteExec"
+	CallSQLiteQuery           CallKind = "sqliteQuery"
+	CallSQLiteLastInsertRowID CallKind = "sqliteLastInsertRowId"
+	CallSQLiteChanges         CallKind = "sqliteChanges"
+	CallSQLiteTotalChanges    CallKind = "sqliteTotalChanges"
+	CallSQLiteBegin           CallKind = "sqliteBegin"
+	CallSQLiteCommit          CallKind = "sqliteCommit"
+	CallSQLiteRollback        CallKind = "sqliteRollback"
+	CallSQLitePrepare         CallKind = "sqlitePrepare"
+	CallSQLiteStep            CallKind = "sqliteStep"
+	CallSQLiteReset           CallKind = "sqliteReset"
+	CallSQLiteClearBindings   CallKind = "sqliteClearBindings"
+	CallSQLiteFinalize        CallKind = "sqliteFinalize"
+	CallSQLiteBindInt         CallKind = "sqliteBindInt"
+	CallSQLiteBindFloat       CallKind = "sqliteBindFloat"
+	CallSQLiteBindText        CallKind = "sqliteBindText"
+	CallSQLiteBindNull        CallKind = "sqliteBindNull"
+	CallSQLiteBindIndex       CallKind = "sqliteBindIndex"
+	CallSQLiteColumnCount     CallKind = "sqliteColumnCount"
+	CallSQLiteColumnName      CallKind = "sqliteColumnName"
+	CallSQLiteColumnIndex     CallKind = "sqliteColumnIndex"
+	CallSQLiteColumnType      CallKind = "sqliteColumnType"
+	CallSQLiteColumnInt       CallKind = "sqliteColumnInt"
+	CallSQLiteColumnFloat     CallKind = "sqliteColumnFloat"
+	CallSQLiteColumnText      CallKind = "sqliteColumnText"
+	CallSQLiteColumnIsNull    CallKind = "sqliteColumnIsNull"
 )
 
 type ResultOrigin string
@@ -118,6 +146,13 @@ type Package struct {
 	Name    string
 	Members []Member
 }
+
+var (
+	SQLiteDBType      = &ast.PointerType{Elem: &ast.StructType{Name: "DB", Package: "sqlite", ResolvedName: "trux_sqlite_db"}}
+	SQLiteStmtType    = &ast.PointerType{Elem: &ast.StructType{Name: "Stmt", Package: "sqlite", ResolvedName: "trux_sqlite_stmt"}}
+	SQLiteRowMapType  = &ast.MapType{Key: ast.StringType, Value: ast.StringType}
+	SQLiteRowListType = &ast.ListType{Elem: SQLiteRowMapType}
+)
 
 var packages = []Package{
 	{
@@ -420,6 +455,337 @@ var packages = []Package{
 			{Package: "gpu", Name: "blockDimX", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "block x dimension"},
 			{Package: "gpu", Name: "blockDimY", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "block y dimension"},
 			{Package: "gpu", Name: "blockDimZ", Kind: CallGPUCoord, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "block z dimension"},
+		},
+	},
+	{
+		Name: "sqlite",
+		Members: []Member{
+			{
+				Package: "sqlite",
+				Name:    "open",
+				Kind:    CallSQLiteOpen,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   &ast.TupleType{Types: []ast.Type{SQLiteDBType, ast.ErrorType}},
+				ResultOrigin: ResultOwned,
+				Detail:       "open a database connection",
+			},
+			{
+				Package: "sqlite",
+				Name:    "close",
+				Kind:    CallSQLiteClose,
+				Params: []Param{
+					{Name: "db", Type: SQLiteDBType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "close a database connection",
+			},
+			{
+				Package: "sqlite",
+				Name:    "exec",
+				Kind:    CallSQLiteExec,
+				Params: []Param{
+					{Name: "db", Type: SQLiteDBType},
+					{Name: "sql", Type: ast.StringType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "execute a DDL/DML statement",
+			},
+			{
+				Package: "sqlite",
+				Name:    "query",
+				Kind:    CallSQLiteQuery,
+				Params: []Param{
+					{Name: "db", Type: SQLiteDBType},
+					{Name: "sql", Type: ast.StringType},
+				},
+				ReturnType:   &ast.TupleType{Types: []ast.Type{SQLiteRowListType, ast.ErrorType}},
+				ResultOrigin: ResultOwned,
+				Detail:       "execute a query returning rows as string maps",
+			},
+			{
+				Package: "sqlite",
+				Name:    "lastInsertRowId",
+				Kind:    CallSQLiteLastInsertRowID,
+				Params: []Param{
+					{Name: "db", Type: SQLiteDBType},
+				},
+				ReturnType:   ast.IntType,
+				ResultOrigin: ResultOwned,
+				Detail:       "return rowid of most recent successful INSERT",
+			},
+			{
+				Package: "sqlite",
+				Name:    "changes",
+				Kind:    CallSQLiteChanges,
+				Params: []Param{
+					{Name: "db", Type: SQLiteDBType},
+				},
+				ReturnType:   ast.IntType,
+				ResultOrigin: ResultOwned,
+				Detail:       "return count of rows modified by most recent statement",
+			},
+			{
+				Package: "sqlite",
+				Name:    "totalChanges",
+				Kind:    CallSQLiteTotalChanges,
+				Params: []Param{
+					{Name: "db", Type: SQLiteDBType},
+				},
+				ReturnType:   ast.IntType,
+				ResultOrigin: ResultOwned,
+				Detail:       "return total count of rows modified since database opened",
+			},
+			{
+				Package: "sqlite",
+				Name:    "begin",
+				Kind:    CallSQLiteBegin,
+				Params: []Param{
+					{Name: "db", Type: SQLiteDBType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "begin a transaction",
+			},
+			{
+				Package: "sqlite",
+				Name:    "commit",
+				Kind:    CallSQLiteCommit,
+				Params: []Param{
+					{Name: "db", Type: SQLiteDBType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "commit the active transaction",
+			},
+			{
+				Package: "sqlite",
+				Name:    "rollback",
+				Kind:    CallSQLiteRollback,
+				Params: []Param{
+					{Name: "db", Type: SQLiteDBType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "rollback the active transaction",
+			},
+			{
+				Package: "sqlite",
+				Name:    "prepare",
+				Kind:    CallSQLitePrepare,
+				Params: []Param{
+					{Name: "db", Type: SQLiteDBType},
+					{Name: "sql", Type: ast.StringType},
+				},
+				ReturnType:   &ast.TupleType{Types: []ast.Type{SQLiteStmtType, ast.ErrorType}},
+				ResultOrigin: ResultOwned,
+				Detail:       "compile SQL into a prepared statement",
+			},
+			{
+				Package: "sqlite",
+				Name:    "step",
+				Kind:    CallSQLiteStep,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+				},
+				ReturnType:   &ast.TupleType{Types: []ast.Type{ast.BoolType, ast.ErrorType}},
+				ResultOrigin: ResultOwned,
+				Detail:       "step a prepared statement to the next row",
+			},
+			{
+				Package: "sqlite",
+				Name:    "reset",
+				Kind:    CallSQLiteReset,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "reset a prepared statement back to its initial state",
+			},
+			{
+				Package: "sqlite",
+				Name:    "clearBindings",
+				Kind:    CallSQLiteClearBindings,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "clear all bound parameters to NULL",
+			},
+			{
+				Package: "sqlite",
+				Name:    "finalize",
+				Kind:    CallSQLiteFinalize,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "destroy a prepared statement object",
+			},
+			{
+				Package: "sqlite",
+				Name:    "bindInt",
+				Kind:    CallSQLiteBindInt,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "index", Type: ast.IntType},
+					{Name: "val", Type: ast.IntType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "bind an integer to a 1-based parameter index",
+			},
+			{
+				Package: "sqlite",
+				Name:    "bindFloat",
+				Kind:    CallSQLiteBindFloat,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "index", Type: ast.IntType},
+					{Name: "val", Type: ast.FloatType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "bind a float to a 1-based parameter index",
+			},
+			{
+				Package: "sqlite",
+				Name:    "bindText",
+				Kind:    CallSQLiteBindText,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "index", Type: ast.IntType},
+					{Name: "val", Type: ast.StringType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "bind text to a 1-based parameter index",
+			},
+			{
+				Package: "sqlite",
+				Name:    "bindNull",
+				Kind:    CallSQLiteBindNull,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "index", Type: ast.IntType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultOwned,
+				Detail:       "bind NULL to a 1-based parameter index",
+			},
+			{
+				Package: "sqlite",
+				Name:    "bindIndex",
+				Kind:    CallSQLiteBindIndex,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "name", Type: ast.StringType},
+				},
+				ReturnType:   ast.IntType,
+				ResultOrigin: ResultOwned,
+				Detail:       "find parameter index by name placeholder",
+			},
+			{
+				Package: "sqlite",
+				Name:    "columnCount",
+				Kind:    CallSQLiteColumnCount,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+				},
+				ReturnType:   ast.IntType,
+				ResultOrigin: ResultOwned,
+				Detail:       "return number of columns in the result set",
+			},
+			{
+				Package: "sqlite",
+				Name:    "columnName",
+				Kind:    CallSQLiteColumnName,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "col", Type: ast.IntType},
+				},
+				ReturnType:   ast.StringType,
+				ResultOrigin: ResultOwned,
+				Detail:       "return column name by 0-based index",
+			},
+			{
+				Package: "sqlite",
+				Name:    "columnIndex",
+				Kind:    CallSQLiteColumnIndex,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "name", Type: ast.StringType},
+				},
+				ReturnType:   ast.IntType,
+				ResultOrigin: ResultOwned,
+				Detail:       "find 0-based column index by column name",
+			},
+			{
+				Package: "sqlite",
+				Name:    "columnType",
+				Kind:    CallSQLiteColumnType,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "col", Type: ast.IntType},
+				},
+				ReturnType:   ast.StringType,
+				ResultOrigin: ResultOwned,
+				Detail:       "return data type of column value",
+			},
+			{
+				Package: "sqlite",
+				Name:    "columnInt",
+				Kind:    CallSQLiteColumnInt,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "col", Type: ast.IntType},
+				},
+				ReturnType:   ast.IntType,
+				ResultOrigin: ResultOwned,
+				Detail:       "return integer value at 0-based column index",
+			},
+			{
+				Package: "sqlite",
+				Name:    "columnFloat",
+				Kind:    CallSQLiteColumnFloat,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "col", Type: ast.IntType},
+				},
+				ReturnType:   ast.FloatType,
+				ResultOrigin: ResultOwned,
+				Detail:       "return float value at 0-based column index",
+			},
+			{
+				Package: "sqlite",
+				Name:    "columnText",
+				Kind:    CallSQLiteColumnText,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "col", Type: ast.IntType},
+				},
+				ReturnType:   ast.StringType,
+				ResultOrigin: ResultOwned,
+				Detail:       "return text value at 0-based column index",
+			},
+			{
+				Package: "sqlite",
+				Name:    "columnIsNull",
+				Kind:    CallSQLiteColumnIsNull,
+				Params: []Param{
+					{Name: "stmt", Type: SQLiteStmtType},
+					{Name: "col", Type: ast.IntType},
+				},
+				ReturnType:   ast.BoolType,
+				ResultOrigin: ResultOwned,
+				Detail:       "check if column value is NULL at 0-based column index",
+			},
 		},
 	},
 }

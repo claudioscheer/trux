@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/claudioscheer/trux/internal/ast"
+	"github.com/claudioscheer/trux/internal/stdlib"
 	"github.com/claudioscheer/trux/internal/token"
 	"github.com/claudioscheer/trux/internal/types"
 )
@@ -15,6 +16,7 @@ type Program struct {
 	Kernels     []*Func
 	Structs     map[string]types.StructSig
 	UsesHTTP    bool
+	UsesSQLite  bool
 	UsedTypes   []ast.Type
 }
 
@@ -769,6 +771,19 @@ func (e *ImageDimensionExpr) Ownership() types.Origin { return e.Origin }
 
 func (*ImageDimensionExpr) exprNode() {}
 
+type SQLiteCallExpr struct {
+	Kind   types.SQLiteCallKind
+	Args   []Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *SQLiteCallExpr) Type() ast.Type { return e.Typ }
+
+func (e *SQLiteCallExpr) Ownership() types.Origin { return e.Origin }
+
+func (*SQLiteCallExpr) exprNode() {}
+
 type ReadPPMExpr struct {
 	Path   Expr
 	Typ    ast.Type
@@ -916,6 +931,15 @@ func Build(program *ast.Program, info *types.Info) (*Program, error) {
 	if err != nil {
 		return nil, err
 	}
+	if out.UsesSQLite {
+		builder.used.note(stdlib.SQLiteDBType)
+		builder.used.note(stdlib.SQLiteStmtType)
+		builder.used.note(stdlib.SQLiteRowListType)
+		builder.used.note(&ast.TupleType{Types: []ast.Type{stdlib.SQLiteDBType, ast.ErrorType}})
+		builder.used.note(&ast.TupleType{Types: []ast.Type{stdlib.SQLiteStmtType, ast.ErrorType}})
+		builder.used.note(&ast.TupleType{Types: []ast.Type{ast.BoolType, ast.ErrorType}})
+		builder.used.note(&ast.TupleType{Types: []ast.Type{stdlib.SQLiteRowListType, ast.ErrorType}})
+	}
 	out.UsedTypes = builder.used.list
 	return out, nil
 }
@@ -1004,7 +1028,7 @@ func (b builder) buildProgram(program *ast.Program) (*Program, error) {
 	for k, v := range b.info.Structs {
 		structs[k] = v
 	}
-	out := &Program{PackageName: program.PackageName, Structs: structs, UsesHTTP: len(b.info.HTTPCalls) > 0}
+	out := &Program{PackageName: program.PackageName, Structs: structs, UsesHTTP: len(b.info.HTTPCalls) > 0, UsesSQLite: b.info.UsesSQLite}
 	for _, fn := range program.Functions {
 		irFn, err := b.buildFunc(fn)
 		if err != nil {
@@ -1464,6 +1488,13 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		}
 		if ioSig, ok := b.info.IOCalls[expr]; ok {
 			return b.buildIOExpr(expr, ioSig, typ, origin)
+		}
+		if sqliteSig, ok := b.info.SQLiteCalls[expr]; ok {
+			args, err := b.buildExprs(expr.Args)
+			if err != nil {
+				return nil, err
+			}
+			return &SQLiteCallExpr{Kind: sqliteSig.Kind, Args: args, Typ: typ, Origin: origin}, nil
 		}
 		if httpSig, ok := b.info.HTTPCalls[expr]; ok {
 			return b.buildHTTPExpr(expr, httpSig, typ, origin)

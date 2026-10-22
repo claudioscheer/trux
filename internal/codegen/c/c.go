@@ -156,6 +156,16 @@ func exprNeedsFrame(expr ir.Expr) bool {
 			}
 		}
 		return false
+	case *ir.SQLiteCallExpr:
+		if isDynamicType(expr.Type()) {
+			return true
+		}
+		for _, arg := range expr.Args {
+			if exprNeedsFrame(arg) {
+				return true
+			}
+		}
+		return false
 	case *ir.BinaryExpr:
 		if expr.Operator == "+" && ast.TypeEqual(expr.Type(), ast.StringType) {
 			return true
@@ -405,6 +415,13 @@ func exprPublishesFrame(expr ir.Expr, declared map[string]bool, tainted map[stri
 			}
 		}
 		return false
+	case *ir.SQLiteCallExpr:
+		for _, arg := range expr.Args {
+			if valueReferencesFrame(arg, tainted) || exprPublishesFrame(arg, declared, tainted) {
+				return true
+			}
+		}
+		return false
 	case *ir.BinaryExpr:
 		return exprPublishesFrame(expr.Left, declared, tainted) || exprPublishesFrame(expr.Right, declared, tainted)
 	case *ir.UnaryExpr:
@@ -496,7 +513,7 @@ func valueReferencesFrame(expr ir.Expr, tainted map[string]bool) bool {
 		return valueReferencesFrame(expr.Object, tainted)
 	case *ir.MapLookupExpr:
 		return valueReferencesFrame(expr.Map, tainted)
-	case *ir.CallExpr:
+	case *ir.CallExpr, *ir.SQLiteCallExpr:
 		return isDynamicType(expr.Type())
 	case *ir.IndexExpr, *ir.SliceExpr:
 		return dynamicValueReferencesCollection(expr, tainted)
@@ -561,6 +578,9 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	if program.UsesHTTP {
 		fmt.Fprintf(&out, "#include %s\n", cStringLiteral(runtimec.HTTPHeaderName))
 	}
+	if program.UsesSQLite {
+		fmt.Fprintf(&out, "#include %s\n", cStringLiteral(runtimec.SQLiteHeaderName))
+	}
 	fmt.Fprintln(&out)
 
 	if err := emitProgramTypes(&out, program); err != nil {
@@ -590,6 +610,10 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 			}
 			fmt.Fprintf(&out, "} %s;\n\n", tName)
 		}
+	}
+
+	if program.UsesSQLite {
+		fmt.Fprintf(&out, "\n%s\n", runtimec.SQLiteImplSource)
 	}
 
 	for _, fn := range program.Functions {
@@ -626,6 +650,9 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	fmt.Fprintln(&out, "    rt_arena_init(&trux_arena);")
 	fmt.Fprintln(&out, "    rt_context trux_ctx = {&trux_arena, NULL};")
 	fmt.Fprintf(&out, "    int64_t trux_exit_code = %s(&trux_ctx, &trux_arena);\n", mangleFunc("main"))
+	if program.UsesSQLite {
+		fmt.Fprintln(&out, "    rt_sqlite_cleanup_all();")
+	}
 	fmt.Fprintln(&out, "    rt_context_free_chunks(&trux_ctx);")
 	fmt.Fprintln(&out, "    rt_arena_deinit(&trux_arena);")
 	fmt.Fprintln(&out, "    return (int)trux_exit_code;")
@@ -777,6 +804,17 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 				return err
 			}
 			e.writePrelude(out, indent, val.prelude)
+			hasNonBlank := false
+			for _, target := range stmt.Bindings {
+				if target.Name != "_" {
+					hasNonBlank = true
+					break
+				}
+			}
+			if !hasNonBlank {
+				fmt.Fprintf(out, "%s(void)(%s);\n", indent, val.value)
+				return nil
+			}
 			tupleType, err := emitType(stmt.Value.Type())
 			if err != nil {
 				return err
@@ -884,6 +922,17 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 				return err
 			}
 			e.writePrelude(out, indent, val.prelude)
+			hasNonBlank := false
+			for _, target := range stmt.Targets {
+				if target.Name != "_" {
+					hasNonBlank = true
+					break
+				}
+			}
+			if !hasNonBlank {
+				fmt.Fprintf(out, "%s(void)(%s);\n", indent, val.value)
+				return nil
+			}
 			tupleType, err := emitType(stmt.Value.Type())
 			if err != nil {
 				return err
@@ -2041,6 +2090,31 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 			values = append(values, arg.value)
 		}
 		return emittedExpr{prelude: prelude, value: fmt.Sprintf("%s(%s)", mangleFunc(expr.Callee), strings.Join(values, ", "))}, nil
+	case *ir.SQLiteCallExpr:
+		args := make([]emittedExpr, 0, len(expr.Args))
+		callResultArena := e.scratch
+		if isDynamicType(expr.Type()) {
+			callResultArena = targetArena
+		}
+		for _, arg := range expr.Args {
+			argArena := e.scratch
+			if isDynamicType(expr.Type()) && isDynamicType(arg.Type()) {
+				argArena = callResultArena
+			}
+			emitArg, err := e.emitOrderedOperand(arg, argArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			args = append(args, emitArg)
+		}
+		values := []string{callResultArena}
+		var prelude []string
+		for _, arg := range args {
+			prelude = append(prelude, arg.prelude...)
+			values = append(values, arg.value)
+		}
+		fnName := sqliteRuntimeFnName(expr.Kind)
+		return emittedExpr{prelude: prelude, value: fmt.Sprintf("%s(%s)", fnName, strings.Join(values, ", "))}, nil
 	case *ir.UnaryExpr:
 		if expr.Operator == "&" {
 			if _, ok := expr.Operand.(*ir.StructLiteral); ok {
@@ -2351,7 +2425,7 @@ func exprHasSideEffect(expr ir.Expr) bool {
 	switch expr := expr.(type) {
 	case *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr,
 		*ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ImageDimensionExpr, *ir.ReadPPMExpr,
-		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CallExpr,
+		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CallExpr, *ir.SQLiteCallExpr,
 		*ir.ErrorsNewExpr, *ir.WriteFileExpr, *ir.WriteCSVExpr, *ir.WritePPMExpr,
 		*ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.PathQueryExpr,
 		*ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.MapLookupExpr, *ir.KeysExpr, *ir.ValuesExpr:
@@ -2663,6 +2737,25 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 			args = append(args, emitArg)
 		}
 		return fmt.Sprintf("%s(%s)", mangleFunc(expr.Callee), strings.Join(args, ", ")), nil
+	case *ir.SQLiteCallExpr:
+		callResultArena := frameArena
+		if isDynamicType(expr.Type()) {
+			callResultArena = targetArena
+		}
+		args := []string{callResultArena}
+		for _, arg := range expr.Args {
+			argArena := frameArena
+			if isDynamicType(expr.Type()) && ast.TypeEqual(arg.Type(), ast.StringType) {
+				argArena = callResultArena
+			}
+			emitArg, err := emitExpr(arg, argArena)
+			if err != nil {
+				return "", err
+			}
+			args = append(args, emitArg)
+		}
+		fnName := sqliteRuntimeFnName(expr.Kind)
+		return fmt.Sprintf("%s(%s)", fnName, strings.Join(args, ", ")), nil
 	case *ir.UnaryExpr:
 		operand, err := emitExpr(expr.Operand, targetArena)
 		if err != nil {
@@ -2790,6 +2883,12 @@ func emitType(typ ast.Type) (string, error) {
 	case *ast.TupleType:
 		return tupleTypeName(typ)
 	case *ast.StructType:
+		if typ.TargetName() == "trux_sqlite_db" {
+			return "trux_sqlite_db", nil
+		}
+		if typ.TargetName() == "trux_sqlite_stmt" {
+			return "trux_sqlite_stmt", nil
+		}
 		return mangleStruct(typ.TargetName()), nil
 	case *ast.PointerType:
 		elem, err := emitType(typ.Elem)
@@ -3371,13 +3470,17 @@ func emitStaticZeroValue(program *ir.Program, typ ast.Type) (string, error) {
 }
 
 func emitCloneValueExpr(typ ast.Type, arenaExpr string, valueExpr string) (string, error) {
-	switch typ.(type) {
+	switch t := typ.(type) {
 	case ast.ScalarType:
 		if ast.TypeEqual(typ, ast.IntType) || ast.TypeEqual(typ, ast.FloatType) || ast.TypeEqual(typ, ast.BoolType) {
 			return valueExpr, nil
 		}
 	case *ast.GPUBufferType:
 		return valueExpr, nil
+	case *ast.StructType:
+		if t.TargetName() == "trux_sqlite_db" || t.TargetName() == "trux_sqlite_stmt" {
+			return valueExpr, nil
+		}
 	}
 	fn, err := cloneHelper(typ)
 	if err != nil {
@@ -3429,6 +3532,9 @@ func emitProgramTypes(out *bytes.Buffer, program *ir.Program) error {
 	}
 
 	visitStruct := func(name string) error {
+		if name == "trux_sqlite_db" || name == "trux_sqlite_stmt" {
+			return nil
+		}
 		if seenStructs[name] {
 			return nil
 		}
@@ -4027,4 +4133,67 @@ func collectTupleTypes(program *ir.Program) ([]*ast.TupleType, error) {
 		}
 	}
 	return tuples, nil
+}
+
+func sqliteRuntimeFnName(kind semtypes.SQLiteCallKind) string {
+	switch kind {
+	case semtypes.SQLiteCallOpen:
+		return "rt_sqlite_open"
+	case semtypes.SQLiteCallClose:
+		return "rt_sqlite_close"
+	case semtypes.SQLiteCallExec:
+		return "rt_sqlite_exec"
+	case semtypes.SQLiteCallQuery:
+		return "rt_sqlite_query"
+	case semtypes.SQLiteCallLastInsertRowID:
+		return "rt_sqlite_last_insert_rowid"
+	case semtypes.SQLiteCallChanges:
+		return "rt_sqlite_changes"
+	case semtypes.SQLiteCallTotalChanges:
+		return "rt_sqlite_total_changes"
+	case semtypes.SQLiteCallBegin:
+		return "rt_sqlite_begin"
+	case semtypes.SQLiteCallCommit:
+		return "rt_sqlite_commit"
+	case semtypes.SQLiteCallRollback:
+		return "rt_sqlite_rollback"
+	case semtypes.SQLiteCallPrepare:
+		return "rt_sqlite_prepare"
+	case semtypes.SQLiteCallStep:
+		return "rt_sqlite_step"
+	case semtypes.SQLiteCallReset:
+		return "rt_sqlite_reset"
+	case semtypes.SQLiteCallClearBindings:
+		return "rt_sqlite_clear_bindings"
+	case semtypes.SQLiteCallFinalize:
+		return "rt_sqlite_finalize"
+	case semtypes.SQLiteCallBindInt:
+		return "rt_sqlite_bind_int"
+	case semtypes.SQLiteCallBindFloat:
+		return "rt_sqlite_bind_float"
+	case semtypes.SQLiteCallBindText:
+		return "rt_sqlite_bind_text"
+	case semtypes.SQLiteCallBindNull:
+		return "rt_sqlite_bind_null"
+	case semtypes.SQLiteCallBindIndex:
+		return "rt_sqlite_bind_index"
+	case semtypes.SQLiteCallColumnCount:
+		return "rt_sqlite_column_count"
+	case semtypes.SQLiteCallColumnName:
+		return "rt_sqlite_column_name"
+	case semtypes.SQLiteCallColumnIndex:
+		return "rt_sqlite_column_index"
+	case semtypes.SQLiteCallColumnType:
+		return "rt_sqlite_column_type"
+	case semtypes.SQLiteCallColumnInt:
+		return "rt_sqlite_column_int"
+	case semtypes.SQLiteCallColumnFloat:
+		return "rt_sqlite_column_float"
+	case semtypes.SQLiteCallColumnText:
+		return "rt_sqlite_column_text"
+	case semtypes.SQLiteCallColumnIsNull:
+		return "rt_sqlite_column_is_null"
+	default:
+		panic("unknown sqlite call kind: " + string(kind))
+	}
 }

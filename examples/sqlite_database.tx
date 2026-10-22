@@ -1,0 +1,47 @@
+package main
+
+import "sqlite"
+
+func main() int {
+    let db *sqlite.DB, err error = sqlite.open(":memory:")
+    if err != nil {
+        print("Failed to open database")
+        return 1
+    }
+
+    let _ error = sqlite.exec(db, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT, score FLOAT);")
+
+    let stmt *sqlite.Stmt, perr error = sqlite.prepare(db, "INSERT INTO users (name, role, score) VALUES (?, ?, ?);")
+    if perr != nil {
+        print("Failed to prepare statement")
+        return 1
+    }
+
+    let _ error = sqlite.bindText(stmt, 1, "Alice")
+    let _ error = sqlite.bindText(stmt, 2, "Admin")
+    let _ error = sqlite.bindFloat(stmt, 3, 98.5)
+    let _, _ error = sqlite.step(stmt)
+
+    let _ error = sqlite.reset(stmt)
+    let _ error = sqlite.clearBindings(stmt)
+    let _ error = sqlite.bindText(stmt, 1, "Bob")
+    let _ error = sqlite.bindText(stmt, 2, "Engineer")
+    let _ error = sqlite.bindFloat(stmt, 3, 92.0)
+    let _, _ error = sqlite.step(stmt)
+
+    let _ error = sqlite.finalize(stmt)
+
+    let rows list[map[string]string], qerr error = sqlite.query(db, "SELECT id, name, role, score FROM users ORDER BY score DESC;")
+    if qerr != nil {
+        print("Query failed")
+        return 1
+    }
+
+    for let i int = 0; i < len(rows); i = i + 1 {
+        let row map[string]string = rows[i]
+        print(row["name"], " | ", row["role"], " | ", row["score"])
+    }
+
+    let _ error = sqlite.close(db)
+    return 0
+}

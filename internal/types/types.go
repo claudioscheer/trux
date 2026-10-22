@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/claudioscheer/trux/internal/ast"
 	"github.com/claudioscheer/trux/internal/stdlib"
@@ -50,7 +51,9 @@ type Info struct {
 	IOCalls       map[*ast.CallExpr]IOCallSig
 	HTTPCalls     map[*ast.CallExpr]HTTPCallSig
 	GPUCalls      map[*ast.CallExpr]GPUCallSig
+	SQLiteCalls   map[*ast.CallExpr]SQLiteCallSig
 	KernelAxes    map[string]int
+	UsesSQLite    bool
 }
 
 type AppendSig struct {
@@ -92,6 +95,43 @@ const (
 
 type IOCallSig struct {
 	Kind IOCallKind
+}
+
+type SQLiteCallKind string
+
+const (
+	SQLiteCallOpen            SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteOpen)
+	SQLiteCallClose           SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteClose)
+	SQLiteCallExec            SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteExec)
+	SQLiteCallQuery           SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteQuery)
+	SQLiteCallLastInsertRowID SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteLastInsertRowID)
+	SQLiteCallChanges         SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteChanges)
+	SQLiteCallTotalChanges    SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteTotalChanges)
+	SQLiteCallBegin           SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteBegin)
+	SQLiteCallCommit          SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteCommit)
+	SQLiteCallRollback        SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteRollback)
+	SQLiteCallPrepare         SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLitePrepare)
+	SQLiteCallStep            SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteStep)
+	SQLiteCallReset           SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteReset)
+	SQLiteCallClearBindings   SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteClearBindings)
+	SQLiteCallFinalize        SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteFinalize)
+	SQLiteCallBindInt         SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteBindInt)
+	SQLiteCallBindFloat       SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteBindFloat)
+	SQLiteCallBindText        SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteBindText)
+	SQLiteCallBindNull        SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteBindNull)
+	SQLiteCallBindIndex       SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteBindIndex)
+	SQLiteCallColumnCount     SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteColumnCount)
+	SQLiteCallColumnName      SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteColumnName)
+	SQLiteCallColumnIndex     SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteColumnIndex)
+	SQLiteCallColumnType      SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteColumnType)
+	SQLiteCallColumnInt       SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteColumnInt)
+	SQLiteCallColumnFloat     SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteColumnFloat)
+	SQLiteCallColumnText      SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteColumnText)
+	SQLiteCallColumnIsNull    SQLiteCallKind = SQLiteCallKind(stdlib.CallSQLiteColumnIsNull)
+)
+
+type SQLiteCallSig struct {
+	Kind SQLiteCallKind
 }
 
 type HTTPCallKind string
@@ -331,8 +371,16 @@ func Check(program *ast.Program) (*Info, error) {
 			IOCalls:       map[*ast.CallExpr]IOCallSig{},
 			HTTPCalls:     map[*ast.CallExpr]HTTPCallSig{},
 			GPUCalls:      map[*ast.CallExpr]GPUCallSig{},
+			SQLiteCalls:   map[*ast.CallExpr]SQLiteCallSig{},
 			KernelAxes:    map[string]int{},
 		},
+	}
+
+	for _, imp := range program.Imports {
+		if imp.Path == "sqlite" {
+			c.info.UsesSQLite = true
+			c.registerSQLiteStructs()
+		}
 	}
 
 	if err := c.collectStructs(program); err != nil {
@@ -357,6 +405,25 @@ func Check(program *ast.Program) (*Info, error) {
 	}
 
 	return c.info, nil
+}
+
+func (c *checker) registerSQLiteStructs() {
+	if _, ok := c.info.Structs["trux_sqlite_db"]; !ok {
+		c.info.Structs["trux_sqlite_db"] = StructSig{
+			Name:        "trux_sqlite_db",
+			DisplayName: "sqlite.DB",
+			Fields:      nil,
+			FieldMap:    map[string]ast.Type{},
+		}
+	}
+	if _, ok := c.info.Structs["trux_sqlite_stmt"]; !ok {
+		c.info.Structs["trux_sqlite_stmt"] = StructSig{
+			Name:        "trux_sqlite_stmt",
+			DisplayName: "sqlite.Stmt",
+			Fields:      nil,
+			FieldMap:    map[string]ast.Type{},
+		}
+	}
 }
 
 func (c *checker) collectStructs(program *ast.Program) error {
@@ -1394,6 +1461,9 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		c.setExpr(expr, expr.Type, OriginScratch)
 		return expr.Type, nil
 	case *ast.StructLiteral:
+		if expr.Type.Package == "sqlite" {
+			return nil, typeError(expr.Start, "cannot instantiate %s directly; use sqlite functions", expr.Type)
+		}
 		if err := c.validateType(expr.Start, expr.Type); err != nil {
 			return nil, err
 		}
@@ -2403,7 +2473,12 @@ func (c *checker) checkStdlibCall(expr *ast.CallExpr, member stdlib.Member, argT
 		}
 	}
 
-	c.info.IOCalls[expr] = IOCallSig{Kind: IOCallKind(member.Kind)}
+	if member.Package == "sqlite" {
+		c.info.UsesSQLite = true
+		c.info.SQLiteCalls[expr] = SQLiteCallSig{Kind: SQLiteCallKind(member.Kind)}
+	} else {
+		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallKind(member.Kind)}
+	}
 	return member.ReturnType, originForStdlibResult(member.ResultOrigin), nil
 }
 
@@ -2678,6 +2753,12 @@ func (c *checker) validateType(pos token.Position, typ ast.Type) error {
 	case *ast.ListType:
 		return c.validateType(pos, typ.Elem)
 	case *ast.StructType:
+		if typ.Package == "sqlite" && (typ.Name == "DB" || typ.Name == "Stmt") {
+			c.info.UsesSQLite = true
+			c.registerSQLiteStructs()
+			targetName := "trux_sqlite_" + strings.ToLower(typ.Name)
+			typ.ResolvedName = targetName
+		}
 		sig, ok := c.info.Structs[typ.TargetName()]
 		if !ok {
 			return typeError(pos, "undefined struct %q", typ.String())

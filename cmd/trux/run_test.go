@@ -2573,3 +2573,328 @@ exit 2
 func truxString(value string) string {
 	return strconv.Quote(value)
 }
+
+func TestSQLiteWithoutImportDoesNotCompileSQLite(t *testing.T) {
+	src := `package main
+func main() int {
+    print("no sqlite")
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.UsesSQLite {
+		t.Fatalf("expected UsesSQLite = false, got true")
+	}
+	if strings.Contains(result.CSource, "trux_sqlite_runtime.h") {
+		t.Fatalf("expected CSource to not include trux_sqlite_runtime.h")
+	}
+	for _, h := range result.RuntimeHeaders {
+		if h.Name == "trux_sqlite_runtime.h" || h.Name == "sqlite3.h" {
+			t.Fatalf("unexpected sqlite runtime header %s in non-sqlite program", h.Name)
+		}
+	}
+
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "cc.log")
+	fakeCC := writeFakeCompiler(t, filepath.Join(dir, "fake-cc"), logPath)
+	t.Setenv("CC", fakeCC)
+	cPath, err := writeGeneratedFiles(dir, "main", result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compileGenerated(cPath, outputPath, generatedCompileOptions{UsesSQLite: result.UsesSQLite}); err != nil {
+		t.Fatal(err)
+	}
+	log := readFile(t, logPath)
+	if strings.Contains(log, "sqlite") {
+		t.Fatalf("expected compiler args to have zero references to sqlite, got: %s", log)
+	}
+}
+
+func TestSQLiteMemoryDatabase(t *testing.T) {
+	src := `package main
+import "sqlite"
+
+func main() int {
+    let db *sqlite.DB, err error = sqlite.open(":memory:")
+    if err != nil {
+        print("open err")
+        return 1
+    }
+    let err2 error = sqlite.exec(db, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INT);")
+    if err2 != nil {
+        print("create err")
+        return 1
+    }
+    let err3 error = sqlite.exec(db, "INSERT INTO users (name, age) VALUES ('Alice', 30);")
+    if err3 != nil {
+        print("insert err")
+        return 1
+    }
+    print(sqlite.lastInsertRowId(db))
+    print(sqlite.changes(db))
+    print(sqlite.totalChanges(db))
+
+    let rows list[map[string]string], qerr error = sqlite.query(db, "SELECT id, name, age FROM users;")
+    if qerr != nil {
+        print("query err")
+        return 1
+    }
+    print(len(rows))
+    let first map[string]string = rows[0]
+    print(first["name"])
+    print(first["age"])
+
+    let errClose error = sqlite.close(db)
+    if errClose != nil {
+        print("close err")
+        return 1
+    }
+    print("closed ok")
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "1\n1\n1\n1\nAlice\n30\nclosed ok\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestSQLitePreparedStatement(t *testing.T) {
+	src := `package main
+import "sqlite"
+
+func main() int {
+    let db *sqlite.DB, err error = sqlite.open(":memory:")
+    if err != nil {
+        return 1
+    }
+    let _ error = sqlite.exec(db, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, price FLOAT);")
+    let stmt *sqlite.Stmt, perr error = sqlite.prepare(db, "INSERT INTO items (name, price) VALUES (?, ?);")
+    if perr != nil {
+        return 1
+    }
+    let _ error = sqlite.bindText(stmt, 1, "Gadget")
+    let _ error = sqlite.bindFloat(stmt, 2, 19.99)
+    let stepOk bool, serr error = sqlite.step(stmt)
+    if serr != nil || stepOk {
+        return 1
+    }
+    let _ error = sqlite.finalize(stmt)
+
+    let qstmt *sqlite.Stmt, qerr error = sqlite.prepare(db, "SELECT id, name, price FROM items WHERE id = ?;")
+    if qerr != nil {
+        return 1
+    }
+    let _ error = sqlite.bindInt(qstmt, 1, 1)
+    let hasRow bool, rerr error = sqlite.step(qstmt)
+    if rerr != nil || !hasRow {
+        return 1
+    }
+    print(sqlite.columnCount(qstmt))
+    print(sqlite.columnName(qstmt, 1))
+    print(sqlite.columnIndex(qstmt, "price"))
+    print(sqlite.columnType(qstmt, 1))
+    print(sqlite.columnInt(qstmt, 0))
+    print(sqlite.columnText(qstmt, 1))
+    print(sqlite.columnFloat(qstmt, 2))
+    print(sqlite.columnIsNull(qstmt, 1))
+
+    let _ error = sqlite.finalize(qstmt)
+    let _ error = sqlite.close(db)
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "3\nname\n2\nTEXT\n1\nGadget\n19.99\nfalse\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestSQLiteTransactions(t *testing.T) {
+	src := `package main
+import "sqlite"
+
+func main() int {
+    let db *sqlite.DB, err error = sqlite.open(":memory:")
+    if err != nil {
+        return 1
+    }
+    let _ error = sqlite.exec(db, "CREATE TABLE t (v INT);")
+
+    // Rollback test
+    let _ error = sqlite.begin(db)
+    let _ error = sqlite.exec(db, "INSERT INTO t VALUES (42);")
+    let _ error = sqlite.rollback(db)
+    let rows1 list[map[string]string], _ error = sqlite.query(db, "SELECT v FROM t;")
+    print(len(rows1))
+
+    // Commit test
+    let _ error = sqlite.begin(db)
+    let _ error = sqlite.exec(db, "INSERT INTO t VALUES (99);")
+    let _ error = sqlite.commit(db)
+    let rows2 list[map[string]string], _ error = sqlite.query(db, "SELECT v FROM t;")
+    print(len(rows2))
+    let r map[string]string = rows2[0]
+    print(r["v"])
+
+    let _ error = sqlite.close(db)
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "0\n1\n99\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestSQLiteFileDatabase(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	dbPathEscaped := strings.ReplaceAll(dbPath, `\`, `/`)
+
+	src := fmt.Sprintf(`package main
+import "sqlite"
+
+func main() int {
+    let db *sqlite.DB, err error = sqlite.open(%q)
+    if err != nil {
+        return 1
+    }
+    let _ error = sqlite.exec(db, "CREATE TABLE notes (id INTEGER PRIMARY KEY, content TEXT);")
+    let _ error = sqlite.exec(db, "INSERT INTO notes (content) VALUES ('hello file');")
+    let _ error = sqlite.close(db)
+
+    let db2 *sqlite.DB, err2 error = sqlite.open(%q)
+    if err2 != nil {
+        return 1
+    }
+    let rows list[map[string]string], _ error = sqlite.query(db2, "SELECT content FROM notes;")
+    let row map[string]string = rows[0]
+    print(row["content"])
+    let _ error = sqlite.close(db2)
+    return 0
+}
+`, dbPathEscaped, dbPathEscaped)
+
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "hello file\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestSQLiteAutomaticCleanupOnExit(t *testing.T) {
+	src := `package main
+import "sqlite"
+
+func main() int {
+    let db *sqlite.DB, err error = sqlite.open(":memory:")
+    if err != nil {
+        return 1
+    }
+    let _ error = sqlite.exec(db, "CREATE TABLE temp (v INT);")
+    // intentionally exit without closing db
+    print("exit without explicit close")
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "exit without explicit close\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestSQLiteErrorHandling(t *testing.T) {
+	src := `package main
+import "sqlite"
+import "errors"
+
+func main() int {
+    let db *sqlite.DB, _ error = sqlite.open(":memory:")
+    let err error = sqlite.exec(db, "SELECT * FROM nonexistent_table;")
+    if err != nil {
+        print("got expected error:", errors.message(err))
+    }
+    let _ error = sqlite.close(db)
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "no such table: nonexistent_table") {
+		t.Fatalf("unexpected error output: %q", out.String())
+	}
+}
+
+func TestSQLiteBindNamedAndNull(t *testing.T) {
+	src := `package main
+import "sqlite"
+
+func main() int {
+    let db *sqlite.DB, _ error = sqlite.open(":memory:")
+    let _ error = sqlite.exec(db, "CREATE TABLE t (id INTEGER, val TEXT);")
+
+    let stmt *sqlite.Stmt, _ error = sqlite.prepare(db, "INSERT INTO t VALUES (:id, :val);")
+    let idIdx int = sqlite.bindIndex(stmt, ":id")
+    let valIdx int = sqlite.bindIndex(stmt, ":val")
+    print(idIdx)
+    print(valIdx)
+
+    let _ error = sqlite.bindInt(stmt, idIdx, 100)
+    let _ error = sqlite.bindNull(stmt, valIdx)
+    let _, _ error = sqlite.step(stmt)
+    let _ error = sqlite.finalize(stmt)
+
+    let qstmt *sqlite.Stmt, _ error = sqlite.prepare(db, "SELECT id, val FROM t WHERE id = 100;")
+    let _, _ error = sqlite.step(qstmt)
+    print(sqlite.columnIsNull(qstmt, 1))
+    print(sqlite.columnType(qstmt, 1))
+
+    let _ error = sqlite.finalize(qstmt)
+    let _ error = sqlite.close(db)
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "1\n2\ntrue\nNULL\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}

@@ -131,6 +131,7 @@ func load(entryPath string, sources map[string]string, includeTestEntries bool) 
 
 	program := &ast.Program{PackageName: entry.program.PackageName}
 	for _, unit := range l.order {
+		program.Imports = append(program.Imports, unit.program.Imports...)
 		program.Structs = append(program.Structs, unit.program.Structs...)
 		program.Functions = append(program.Functions, unit.program.Functions...)
 	}
@@ -597,6 +598,10 @@ func (l *loader) rewriteType(unit *fileUnit, pos token.Position, typ ast.Type, c
 				return l.errorInUnit(unit, pos, "package %q is not imported by %s", typ.Package, unit.path)
 			}
 			if set.isStdlib() {
+				if typ.Package == "sqlite" && (typ.Name == "DB" || typ.Name == "Stmt") {
+					typ.ResolvedName = "trux_sqlite_" + strings.ToLower(typ.Name)
+					return nil
+				}
 				return l.errorInUnit(unit, pos, "package %q has no struct %q", typ.Package, typ.Name)
 			}
 			var private *structInfo
@@ -658,6 +663,9 @@ func (l *loader) directExportingStructPackage(unit *fileUnit, name string, ctx r
 	for _, packageName := range packages {
 		set := ctx.directImports[unit][packageName]
 		if set.isStdlib() {
+			if packageName == "sqlite" && (name == "DB" || name == "Stmt") {
+				return "sqlite", true
+			}
 			continue
 		}
 		seenPackages := map[packageKey]struct{}{}

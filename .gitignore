@@ -1,6 +1,7 @@
 # Binaries
 /bin/
 /trux
+/trux.exe
 *.test
 *.out
 benchmarks/**/server

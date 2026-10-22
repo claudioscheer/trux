@@ -2,6 +2,7 @@ package main
 
 import "http"
 import "sqlite"
+import "json"
 
 func initDB() int {
   let db *sqlite.DB, err error = sqlite.open("/tmp/bench.db")
@@ -43,6 +44,17 @@ func authMiddleware(request int) int {
 
 func plaintextBaseline(request int) int {
   http.text(request, 200, "Hello, World!\n")
+  return 0
+}
+
+func jsonDocumentSerialization(request int) int {
+  let doc *json.MutDoc = json.newDoc()
+  let obj *json.MutVal = json.newObject(doc)
+  json.setRoot(doc, obj)
+  json.addString(doc, obj, "message", "JSON benchmark response")
+  json.addInt(doc, obj, "status", 200)
+  json.addBool(doc, obj, "ok", true)
+  http.json(request, 200, json.write(doc))
   return 0
 }
 
@@ -123,6 +135,7 @@ func main() int {
   let _ int = initDB()
 
   http.get("/plaintext", plaintextBaseline)
+  http.get("/json/serialize", jsonDocumentSerialization)
   http.get("/sqlite/insert-and-query", sqliteInsertAndQuery)
   http.get("/sqlite/query-by-id/:id", sqliteQueryById)
 

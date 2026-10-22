@@ -20,6 +20,7 @@ import "csv"
 | [`image`](/docs/stdlib/image/) | reading and writing plain-text P3 PPM images as flat RGB values |
 | [`time`](/docs/stdlib/time/) | wall-clock timestamps, monotonic timers, and sleeping |
 | [`sqlite`](/docs/stdlib/sqlite/) | embedded relational database with transactions and prepared statements |
+| [`json`](/docs/stdlib/json/) | high-performance JSON parsing, inspection, and generation |
 | [`http`](/docs/stdlib/http/) | a plaintext HTTP/1.1 server with a worker pool (Linux/macOS) |
 | [`gpu`](/docs/stdlib/gpu/) | CUDA device buffers, kernel launches, and thread coordinates |
 | [`errors`](/docs/guide/errors/) | creating errors with `errors.new` and retrieving messages with `errors.message` |

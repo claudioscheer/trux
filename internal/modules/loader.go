@@ -602,6 +602,19 @@ func (l *loader) rewriteType(unit *fileUnit, pos token.Position, typ ast.Type, c
 					typ.ResolvedName = "trux_sqlite_" + strings.ToLower(typ.Name)
 					return nil
 				}
+				if typ.Package == "json" && (typ.Name == "Doc" || typ.Name == "Val" || typ.Name == "MutDoc" || typ.Name == "MutVal") {
+					switch typ.Name {
+					case "Doc":
+						typ.ResolvedName = "trux_json_doc"
+					case "Val":
+						typ.ResolvedName = "trux_json_val"
+					case "MutDoc":
+						typ.ResolvedName = "trux_json_mut_doc"
+					case "MutVal":
+						typ.ResolvedName = "trux_json_mut_val"
+					}
+					return nil
+				}
 				return l.errorInUnit(unit, pos, "package %q has no struct %q", typ.Package, typ.Name)
 			}
 			var private *structInfo

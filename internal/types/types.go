@@ -52,8 +52,10 @@ type Info struct {
 	HTTPCalls     map[*ast.CallExpr]HTTPCallSig
 	GPUCalls      map[*ast.CallExpr]GPUCallSig
 	SQLiteCalls   map[*ast.CallExpr]SQLiteCallSig
+	JSONCalls     map[*ast.CallExpr]JSONCallSig
 	KernelAxes    map[string]int
 	UsesSQLite    bool
+	UsesJSON      bool
 }
 
 type AppendSig struct {
@@ -133,6 +135,51 @@ const (
 
 type SQLiteCallSig struct {
 	Kind SQLiteCallKind
+}
+
+type JSONCallKind string
+
+const (
+	JSONCallParse       JSONCallKind = JSONCallKind(stdlib.CallJSONParse)
+	JSONCallRoot        JSONCallKind = JSONCallKind(stdlib.CallJSONRoot)
+	JSONCallGet         JSONCallKind = JSONCallKind(stdlib.CallJSONGet)
+	JSONCallAt          JSONCallKind = JSONCallKind(stdlib.CallJSONAt)
+	JSONCallLen         JSONCallKind = JSONCallKind(stdlib.CallJSONLen)
+	JSONCallIsObject    JSONCallKind = JSONCallKind(stdlib.CallJSONIsObject)
+	JSONCallIsArray     JSONCallKind = JSONCallKind(stdlib.CallJSONIsArray)
+	JSONCallIsString    JSONCallKind = JSONCallKind(stdlib.CallJSONIsString)
+	JSONCallIsInt       JSONCallKind = JSONCallKind(stdlib.CallJSONIsInt)
+	JSONCallIsFloat     JSONCallKind = JSONCallKind(stdlib.CallJSONIsFloat)
+	JSONCallIsBool      JSONCallKind = JSONCallKind(stdlib.CallJSONIsBool)
+	JSONCallIsNull      JSONCallKind = JSONCallKind(stdlib.CallJSONIsNull)
+	JSONCallGetString   JSONCallKind = JSONCallKind(stdlib.CallJSONGetString)
+	JSONCallGetInt      JSONCallKind = JSONCallKind(stdlib.CallJSONGetInt)
+	JSONCallGetFloat    JSONCallKind = JSONCallKind(stdlib.CallJSONGetFloat)
+	JSONCallGetBool     JSONCallKind = JSONCallKind(stdlib.CallJSONGetBool)
+	JSONCallFieldString JSONCallKind = JSONCallKind(stdlib.CallJSONFieldString)
+	JSONCallFieldInt    JSONCallKind = JSONCallKind(stdlib.CallJSONFieldInt)
+	JSONCallFieldFloat  JSONCallKind = JSONCallKind(stdlib.CallJSONFieldFloat)
+	JSONCallFieldBool   JSONCallKind = JSONCallKind(stdlib.CallJSONFieldBool)
+	JSONCallDecodeMap   JSONCallKind = JSONCallKind(stdlib.CallJSONDecodeMap)
+	JSONCallEncodeMap   JSONCallKind = JSONCallKind(stdlib.CallJSONEncodeMap)
+	JSONCallStringify   JSONCallKind = JSONCallKind(stdlib.CallJSONStringify)
+	JSONCallValid       JSONCallKind = JSONCallKind(stdlib.CallJSONValid)
+	JSONCallNewDoc      JSONCallKind = JSONCallKind(stdlib.CallJSONNewDoc)
+	JSONCallNewObject   JSONCallKind = JSONCallKind(stdlib.CallJSONNewObject)
+	JSONCallNewArray    JSONCallKind = JSONCallKind(stdlib.CallJSONNewArray)
+	JSONCallSetRoot     JSONCallKind = JSONCallKind(stdlib.CallJSONSetRoot)
+	JSONCallAddString   JSONCallKind = JSONCallKind(stdlib.CallJSONAddString)
+	JSONCallAddInt      JSONCallKind = JSONCallKind(stdlib.CallJSONAddInt)
+	JSONCallAddFloat    JSONCallKind = JSONCallKind(stdlib.CallJSONAddFloat)
+	JSONCallAddBool     JSONCallKind = JSONCallKind(stdlib.CallJSONAddBool)
+	JSONCallAddNull     JSONCallKind = JSONCallKind(stdlib.CallJSONAddNull)
+	JSONCallAddVal      JSONCallKind = JSONCallKind(stdlib.CallJSONAddVal)
+	JSONCallAppendVal   JSONCallKind = JSONCallKind(stdlib.CallJSONAppendVal)
+	JSONCallWrite       JSONCallKind = JSONCallKind(stdlib.CallJSONWrite)
+)
+
+type JSONCallSig struct {
+	Kind JSONCallKind
 }
 
 type HTTPCallKind string
@@ -373,6 +420,7 @@ func Check(program *ast.Program) (*Info, error) {
 			HTTPCalls:     map[*ast.CallExpr]HTTPCallSig{},
 			GPUCalls:      map[*ast.CallExpr]GPUCallSig{},
 			SQLiteCalls:   map[*ast.CallExpr]SQLiteCallSig{},
+			JSONCalls:     map[*ast.CallExpr]JSONCallSig{},
 			KernelAxes:    map[string]int{},
 		},
 	}
@@ -381,6 +429,10 @@ func Check(program *ast.Program) (*Info, error) {
 		if imp.Path == "sqlite" {
 			c.info.UsesSQLite = true
 			c.registerSQLiteStructs()
+		}
+		if imp.Path == "json" {
+			c.info.UsesJSON = true
+			c.registerJSONStructs()
 		}
 	}
 
@@ -421,6 +473,41 @@ func (c *checker) registerSQLiteStructs() {
 		c.info.Structs["trux_sqlite_stmt"] = StructSig{
 			Name:        "trux_sqlite_stmt",
 			DisplayName: "sqlite.Stmt",
+			Fields:      nil,
+			FieldMap:    map[string]ast.Type{},
+		}
+	}
+}
+
+func (c *checker) registerJSONStructs() {
+	if _, ok := c.info.Structs["trux_json_doc"]; !ok {
+		c.info.Structs["trux_json_doc"] = StructSig{
+			Name:        "trux_json_doc",
+			DisplayName: "json.Doc",
+			Fields:      nil,
+			FieldMap:    map[string]ast.Type{},
+		}
+	}
+	if _, ok := c.info.Structs["trux_json_val"]; !ok {
+		c.info.Structs["trux_json_val"] = StructSig{
+			Name:        "trux_json_val",
+			DisplayName: "json.Val",
+			Fields:      nil,
+			FieldMap:    map[string]ast.Type{},
+		}
+	}
+	if _, ok := c.info.Structs["trux_json_mut_doc"]; !ok {
+		c.info.Structs["trux_json_mut_doc"] = StructSig{
+			Name:        "trux_json_mut_doc",
+			DisplayName: "json.MutDoc",
+			Fields:      nil,
+			FieldMap:    map[string]ast.Type{},
+		}
+	}
+	if _, ok := c.info.Structs["trux_json_mut_val"]; !ok {
+		c.info.Structs["trux_json_mut_val"] = StructSig{
+			Name:        "trux_json_mut_val",
+			DisplayName: "json.MutVal",
 			Fields:      nil,
 			FieldMap:    map[string]ast.Type{},
 		}
@@ -1465,6 +1552,9 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		if expr.Type.Package == "sqlite" {
 			return nil, typeError(expr.Start, "cannot instantiate %s directly; use sqlite functions", expr.Type)
 		}
+		if expr.Type.Package == "json" {
+			return nil, typeError(expr.Start, "cannot instantiate %s directly; use json functions", expr.Type)
+		}
 		if err := c.validateType(expr.Start, expr.Type); err != nil {
 			return nil, err
 		}
@@ -2477,6 +2567,9 @@ func (c *checker) checkStdlibCall(expr *ast.CallExpr, member stdlib.Member, argT
 	if member.Package == "sqlite" {
 		c.info.UsesSQLite = true
 		c.info.SQLiteCalls[expr] = SQLiteCallSig{Kind: SQLiteCallKind(member.Kind)}
+	} else if member.Package == "json" {
+		c.info.UsesJSON = true
+		c.info.JSONCalls[expr] = JSONCallSig{Kind: JSONCallKind(member.Kind)}
 	} else {
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallKind(member.Kind)}
 	}
@@ -2758,6 +2851,22 @@ func (c *checker) validateType(pos token.Position, typ ast.Type) error {
 			c.info.UsesSQLite = true
 			c.registerSQLiteStructs()
 			targetName := "trux_sqlite_" + strings.ToLower(typ.Name)
+			typ.ResolvedName = targetName
+		}
+		if typ.Package == "json" && (typ.Name == "Doc" || typ.Name == "Val" || typ.Name == "MutDoc" || typ.Name == "MutVal") {
+			c.info.UsesJSON = true
+			c.registerJSONStructs()
+			var targetName string
+			switch typ.Name {
+			case "Doc":
+				targetName = "trux_json_doc"
+			case "Val":
+				targetName = "trux_json_val"
+			case "MutDoc":
+				targetName = "trux_json_mut_doc"
+			case "MutVal":
+				targetName = "trux_json_mut_val"
+			}
 			typ.ResolvedName = targetName
 		}
 		sig, ok := c.info.Structs[typ.TargetName()]

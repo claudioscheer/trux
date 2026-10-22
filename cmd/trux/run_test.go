@@ -2947,3 +2947,234 @@ func main() int {
 		t.Fatalf("got output %q, want %q", out.String(), want)
 	}
 }
+
+func TestJSONWithoutImportDoesNotCompileJSON(t *testing.T) {
+	src := `package main
+func main() int {
+    print("no json")
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.UsesJSON {
+		t.Fatalf("expected UsesJSON = false, got true")
+	}
+	if strings.Contains(result.CSource, "trux_json_runtime.h") {
+		t.Fatalf("expected CSource to not include trux_json_runtime.h")
+	}
+	for _, h := range result.RuntimeHeaders {
+		if h.Name == "trux_json_runtime.h" || h.Name == "yyjson.h" {
+			t.Fatalf("unexpected json runtime header %s in non-json program", h.Name)
+		}
+	}
+
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "cc.log")
+	fakeCC := writeFakeCompiler(t, filepath.Join(dir, "fake-cc"), logPath)
+	t.Setenv("CC", fakeCC)
+	cPath, err := writeGeneratedFiles(dir, "main", result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compileGenerated(cPath, outputPath, generatedCompileOptions{UsesJSON: result.UsesJSON}); err != nil {
+		t.Fatal(err)
+	}
+	log := readFile(t, logPath)
+	if strings.Contains(log, "yyjson") {
+		t.Fatalf("expected compiler args to have zero references to yyjson, got: %s", log)
+	}
+}
+
+func TestJSONParseAndInspect(t *testing.T) {
+	src := `package main
+import "json"
+
+func main() int {
+    let payload string = "{\"name\":\"Alice\",\"age\":30,\"score\":98.5,\"active\":true,\"roles\":[\"admin\",\"editor\"]}"
+    let doc *json.Doc, err error = json.parse(payload)
+    if err != nil {
+        print("parse err")
+        return 1
+    }
+    let root *json.Val = json.root(doc)
+    print(json.isObject(root))
+    print(json.len(root))
+
+    let nameVal *json.Val = json.get(root, "name")
+    print(json.isString(nameVal))
+    print(json.getString(nameVal))
+
+    let ageVal *json.Val = json.get(root, "age")
+    print(json.isInt(ageVal))
+    print(json.getInt(ageVal))
+
+    let scoreVal *json.Val = json.get(root, "score")
+    print(json.isFloat(scoreVal))
+    print(json.getFloat(scoreVal))
+
+    let activeVal *json.Val = json.get(root, "active")
+    print(json.isBool(activeVal))
+    print(json.getBool(activeVal))
+
+    let rolesVal *json.Val = json.get(root, "roles")
+    print(json.isArray(rolesVal))
+    print(json.len(rolesVal))
+    let role0 *json.Val = json.at(rolesVal, 0)
+    let role1 *json.Val = json.at(rolesVal, 1)
+    print(json.getString(role0))
+    print(json.getString(role1))
+
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "true\n5\ntrue\nAlice\ntrue\n30\ntrue\n98.5\ntrue\ntrue\ntrue\n2\nadmin\neditor\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestJSONFieldHelpers(t *testing.T) {
+	src := `package main
+import "json"
+
+func main() int {
+    let payload string = "{\"title\":\"Trux Compiler\",\"stars\":120,\"rating\":4.9,\"public\":true}"
+    let doc *json.Doc, _ error = json.parse(payload)
+    let root *json.Val = json.root(doc)
+
+    print(json.fieldString(root, "title"))
+    print(json.fieldInt(root, "stars"))
+    print(json.fieldFloat(root, "rating"))
+    print(json.fieldBool(root, "public"))
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "Trux Compiler\n120\n4.9\ntrue\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestJSONDecodeAndEncodeMap(t *testing.T) {
+	src := `package main
+import "json"
+
+func main() int {
+    let payload string = "{\"city\":\"San Francisco\",\"state\":\"CA\",\"country\":\"USA\"}"
+    let m map[string]string, err error = json.decodeMap(payload)
+    if err != nil {
+        print("decodeMap err")
+        return 1
+    }
+    print(m["city"])
+    print(m["state"])
+    print(m["country"])
+
+    let encoded string = json.encodeMap(m)
+    print(json.valid(encoded))
+
+    let m2 map[string]string, _ error = json.decodeMap(encoded)
+    print(m2["city"])
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "San Francisco\nCA\nUSA\ntrue\nSan Francisco\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestJSONMutableBuilder(t *testing.T) {
+	src := `package main
+import "json"
+
+func main() int {
+    let doc *json.MutDoc = json.newDoc()
+    let obj *json.MutVal = json.newObject(doc)
+    json.setRoot(doc, obj)
+
+    json.addString(doc, obj, "name", "Benchmark Task")
+    json.addInt(doc, obj, "iterations", 1000)
+    json.addFloat(doc, obj, "latency_ms", 1.25)
+    json.addBool(doc, obj, "passed", true)
+    json.addNull(doc, obj, "optional")
+
+    let arr *json.MutVal = json.newArray(doc)
+    let child1 *json.MutVal = json.newObject(doc)
+    json.addString(doc, child1, "tag", "v1")
+    json.appendVal(arr, child1)
+    json.addVal(doc, obj, "tags", arr)
+
+    let out string = json.write(doc)
+    print(json.valid(out))
+
+    let parsed *json.Doc, _ error = json.parse(out)
+    let root *json.Val = json.root(parsed)
+    print(json.fieldString(root, "name"))
+    print(json.fieldInt(root, "iterations"))
+    print(json.fieldFloat(root, "latency_ms"))
+    print(json.fieldBool(root, "passed"))
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "true\nBenchmark Task\n1000\n1.25\ntrue\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestJSONSyntaxErrorHandling(t *testing.T) {
+	src := `package main
+import "json"
+import "errors"
+
+func main() int {
+    let badJSON string = "{\"name\": \"Alice\", invalid}"
+    let doc *json.Doc, err error = json.parse(badJSON)
+    if err == nil {
+        print("expected error, got nil")
+        return 1
+    }
+    let msg string = errors.message(err)
+    print(msg)
+    print(json.valid(badJSON))
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "json syntax error") {
+		t.Fatalf("expected output to contain 'json syntax error', got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "false") {
+		t.Fatalf("expected output to contain 'false' for json.valid, got %q", out.String())
+	}
+}

@@ -1,0 +1,38 @@
+package main
+
+import "json"
+
+func main() int {
+    let payload string = "{\"service\":\"trux-api\",\"version\":1,\"features\":[\"iouring\",\"sqlite\",\"yyjson\"],\"status\":\"ready\"}"
+
+    let doc *json.Doc, err error = json.parse(payload)
+    if err != nil {
+        print("Failed to parse JSON")
+        return 1
+    }
+
+    let root *json.Val = json.root(doc)
+    let service string = json.fieldString(root, "service")
+    let version int = json.fieldInt(root, "version")
+    let status string = json.fieldString(root, "status")
+
+    print("Service: ", service)
+    print("Version: ", version)
+    print("Status:  ", status)
+
+    let featuresVal *json.Val = json.get(root, "features")
+    let count int = json.len(featuresVal)
+    for let i int = 0; i < count; i = i + 1 {
+        let f *json.Val = json.at(featuresVal, i)
+        print("Feature ", i + 1, ": ", json.getString(f))
+    }
+
+    let m map[string]string = map[string]string{
+        "status": "ok",
+        "processed_by": "yyjson",
+    }
+    let encoded string = json.encodeMap(m)
+    print("Encoded map: ", encoded)
+
+    return 0
+}

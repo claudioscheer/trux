@@ -39,9 +39,10 @@ Benchmarks were conducted using the standard HTTP benchmarking utility [`wrk`](h
 ### Workloads Evaluated
 
 1. **Plaintext Baseline (`/plaintext`)**: Raw HTTP/1.1 framing and minimal response body (`"Hello, World!"`), measuring peak kernel network I/O with zero database overhead.
-2. **SQLite File Insert & Query (`/sqlite/insert-and-query`)**: Real on-disk SQLite WAL database file (`/tmp/bench.db`) write transaction: appends an access log entry (`INSERT INTO logs`), queries the latest row (`SELECT`), and serializes JSON.
-3. **SQLite File Prepared Query (`/sqlite/query-by-id/1024`)**: Concurrent reads on disk: extracts route parameter (`:id`), compiles a prepared SQL statement (`SELECT name, role FROM users WHERE id = ?`), binds parameters (`bindText`), steps the cursor, and returns JSON.
-4. **Middleware & SQLite File Audit (`/api/authenticated-audit`)**: Prefix middleware (`useAt`), Bearer token validation, on-disk SQLite WAL audit log insertion, request-scoped context dictionary propagation, and privileged JSON response delivery.
+2. **JSON Serialization (`/json/serialize`)**: In-memory dynamic JSON document creation and serialization via native `yyjson` DOM builder, demonstrating arena allocation efficiency with nested keys and numbers.
+3. **SQLite File Insert & Query (`/sqlite/insert-and-query`)**: Real on-disk SQLite WAL database file (`/tmp/bench.db`) write transaction: appends an access log entry (`INSERT INTO logs`), queries the latest row (`SELECT`), and serializes JSON.
+4. **SQLite File Prepared Query (`/sqlite/query-by-id/1024`)**: Concurrent reads on disk: extracts route parameter (`:id`), compiles a prepared SQL statement (`SELECT name, role FROM users WHERE id = ?`), binds parameters (`bindText`), steps the cursor, and returns JSON.
+5. **Middleware & SQLite File Audit (`/api/authenticated-audit`)**: Prefix middleware (`useAt`), Bearer token validation, on-disk SQLite WAL audit log insertion, request-scoped context dictionary propagation, and privileged JSON response delivery.
 
 ---
 
@@ -55,6 +56,8 @@ Simulates constrained edge environments, micro instances, or single-core serverl
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Plaintext Baseline** (`/plaintext`) | 100 | **171,472** | 16.84 MB/s | 1.35 ms | 467 µs | 1.24 ms | 26.18 ms | 9.8 MiB |
 | **Plaintext Baseline** (`/plaintext`) | 1,000 | **181,616** | 17.84 MB/s | 5.55 ms | 5.34 ms | 6.29 ms | 8.94 ms | 17.1 MiB |
+| **JSON Serialization** (`/json/serialize`) | 100 | **161,407** | 23.86 MB/s | 662 µs | 494 µs | 1.25 ms | 2.90 ms | 16.5 MiB |
+| **JSON Serialization** (`/json/serialize`) | 1,000 | **171,448** | 25.34 MB/s | 5.75 ms | 5.62 ms | 6.82 ms | 9.19 ms | 15.6 MiB |
 | **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **62,174** | 9.96 MB/s | 2.28 ms | 1.16 ms | 6.71 ms | 10.52 ms | 30.9 MiB |
 | **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **61,224** | 9.81 MB/s | 16.18 ms | 18.83 ms | 21.02 ms | 28.85 ms | 34.2 MiB |
 | **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **148,280** | 19.80 MB/s | 683 µs | 558 µs | 1.20 ms | 2.50 ms | 34.3 MiB |
@@ -72,6 +75,8 @@ Simulates standard dual-core virtual machines (`--cpuset-cpus="0,1" --cpus="2.0"
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Plaintext Baseline** (`/plaintext`) | 100 | **187,385** | 18.41 MB/s | 890 µs | 422 µs | 1.20 ms | 4.83 ms | 13.9 MiB |
 | **Plaintext Baseline** (`/plaintext`) | 1,000 | **321,562** | 31.59 MB/s | 3.11 ms | 2.87 ms | 4.19 ms | 7.27 ms | 20.7 MiB |
+| **JSON Serialization** (`/json/serialize`) | 100 | **176,968** | 26.16 MB/s | 609 µs | 458 µs | 1.22 ms | 2.68 ms | 20.5 MiB |
+| **JSON Serialization** (`/json/serialize`) | 1,000 | **296,372** | 43.81 MB/s | 3.32 ms | 3.10 ms | 4.67 ms | 7.34 ms | 25.4 MiB |
 | **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **52,168** | 8.36 MB/s | 2.81 ms | 1.47 ms | 7.81 ms | 19.13 ms | 22.3 MiB |
 | **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **70,855** | 11.35 MB/s | 13.97 ms | 15.01 ms | 21.16 ms | 30.68 ms | 28.3 MiB |
 | **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **139,039** | 18.56 MB/s | 723 µs | 611 µs | 1.27 ms | 2.51 ms | 27.8 MiB |
@@ -89,6 +94,8 @@ Simulates multi-core production server nodes (`--cpuset-cpus="0,1,2,3" --cpus="4
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Plaintext Baseline** (`/plaintext`) | 100 | **242,837** | 23.85 MB/s | 832 µs | 317 µs | 1.06 ms | 5.02 ms | 22.1 MiB |
 | **Plaintext Baseline** (`/plaintext`) | 1,000 | **440,072** | 43.23 MB/s | 2.55 ms | 1.79 ms | 5.30 ms | 12.02 ms | 29.9 MiB |
+| **JSON Serialization** (`/json/serialize`) | 100 | **207,778** | 30.71 MB/s | 566 µs | 380 µs | 1.20 ms | 3.04 ms | 30.4 MiB |
+| **JSON Serialization** (`/json/serialize`) | 1,000 | **420,551** | 62.17 MB/s | 2.62 ms | 1.89 ms | 5.43 ms | 11.70 ms | 36.3 MiB |
 | **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **38,644** | 6.19 MB/s | 2.95 ms | 2.11 ms | 6.61 ms | 12.46 ms | 31.6 MiB |
 | **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **54,240** | 8.69 MB/s | 18.20 ms | 17.98 ms | 28.60 ms | 37.06 ms | 40.4 MiB |
 | **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **153,217** | 20.46 MB/s | 669 µs | 549 µs | 1.22 ms | 2.53 ms | 40.3 MiB |

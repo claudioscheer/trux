@@ -38,6 +38,12 @@ ENDPOINTS = [
         "description": "Raw HTTP/1.1 parsing, string constant response, zero dynamic routing overhead",
     },
     {
+        "name": "JSON Serialization (/json/serialize)",
+        "path": "/json/serialize",
+        "headers": [],
+        "description": "yyjson document creation, object mutation with typed fields, serialization to JSON string, and HTTP response",
+    },
+    {
         "name": "SQLite File Insert & Query (/sqlite/insert-and-query)",
         "path": "/sqlite/insert-and-query",
         "headers": [],

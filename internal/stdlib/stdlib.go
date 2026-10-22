@@ -97,6 +97,42 @@ const (
 	CallSQLiteColumnFloat     CallKind = "sqliteColumnFloat"
 	CallSQLiteColumnText      CallKind = "sqliteColumnText"
 	CallSQLiteColumnIsNull    CallKind = "sqliteColumnIsNull"
+	CallJSONParse             CallKind = "jsonParse"
+	CallJSONRoot              CallKind = "jsonRoot"
+	CallJSONGet               CallKind = "jsonGet"
+	CallJSONAt                CallKind = "jsonAt"
+	CallJSONLen               CallKind = "jsonLen"
+	CallJSONIsObject          CallKind = "jsonIsObject"
+	CallJSONIsArray           CallKind = "jsonIsArray"
+	CallJSONIsString          CallKind = "jsonIsString"
+	CallJSONIsInt             CallKind = "jsonIsInt"
+	CallJSONIsFloat           CallKind = "jsonIsFloat"
+	CallJSONIsBool            CallKind = "jsonIsBool"
+	CallJSONIsNull            CallKind = "jsonIsNull"
+	CallJSONGetString         CallKind = "jsonGetString"
+	CallJSONGetInt            CallKind = "jsonGetInt"
+	CallJSONGetFloat          CallKind = "jsonGetFloat"
+	CallJSONGetBool           CallKind = "jsonGetBool"
+	CallJSONFieldString       CallKind = "jsonFieldString"
+	CallJSONFieldInt          CallKind = "jsonFieldInt"
+	CallJSONFieldFloat        CallKind = "jsonFieldFloat"
+	CallJSONFieldBool         CallKind = "jsonFieldBool"
+	CallJSONDecodeMap         CallKind = "jsonDecodeMap"
+	CallJSONEncodeMap         CallKind = "jsonEncodeMap"
+	CallJSONStringify         CallKind = "jsonStringify"
+	CallJSONValid             CallKind = "jsonValid"
+	CallJSONNewDoc            CallKind = "jsonNewDoc"
+	CallJSONNewObject         CallKind = "jsonNewObject"
+	CallJSONNewArray          CallKind = "jsonNewArray"
+	CallJSONSetRoot           CallKind = "jsonSetRoot"
+	CallJSONAddString         CallKind = "jsonAddString"
+	CallJSONAddInt            CallKind = "jsonAddInt"
+	CallJSONAddFloat          CallKind = "jsonAddFloat"
+	CallJSONAddBool           CallKind = "jsonAddBool"
+	CallJSONAddNull           CallKind = "jsonAddNull"
+	CallJSONAddVal            CallKind = "jsonAddVal"
+	CallJSONAppendVal         CallKind = "jsonAppendVal"
+	CallJSONWrite             CallKind = "jsonWrite"
 )
 
 type ResultOrigin string
@@ -153,6 +189,12 @@ var (
 	SQLiteStmtType    = &ast.PointerType{Elem: &ast.StructType{Name: "Stmt", Package: "sqlite", ResolvedName: "trux_sqlite_stmt"}}
 	SQLiteRowMapType  = &ast.MapType{Key: ast.StringType, Value: ast.StringType}
 	SQLiteRowListType = &ast.ListType{Elem: SQLiteRowMapType}
+
+	JSONDocType    = &ast.PointerType{Elem: &ast.StructType{Name: "Doc", Package: "json", ResolvedName: "trux_json_doc"}}
+	JSONValType    = &ast.PointerType{Elem: &ast.StructType{Name: "Val", Package: "json", ResolvedName: "trux_json_val"}}
+	JSONMutDocType = &ast.PointerType{Elem: &ast.StructType{Name: "MutDoc", Package: "json", ResolvedName: "trux_json_mut_doc"}}
+	JSONMutValType = &ast.PointerType{Elem: &ast.StructType{Name: "MutVal", Package: "json", ResolvedName: "trux_json_mut_val"}}
+	JSONMapType    = &ast.MapType{Key: ast.StringType, Value: ast.StringType}
 )
 
 var packages = []Package{
@@ -809,6 +851,47 @@ var packages = []Package{
 				ResultOrigin: ResultOwned,
 				Detail:       "check if column value is NULL at 0-based column index",
 			},
+		},
+	},
+	{
+		Name: "json",
+		Members: []Member{
+			{Package: "json", Name: "parse", Kind: CallJSONParse, Params: []Param{{Name: "input", Type: ast.StringType}}, ReturnType: &ast.TupleType{Types: []ast.Type{JSONDocType, ast.ErrorType}}, ResultOrigin: ResultOwned, Detail: "parse a JSON string into a document"},
+			{Package: "json", Name: "root", Kind: CallJSONRoot, Params: []Param{{Name: "doc", Type: JSONDocType}}, ReturnType: JSONValType, ResultOrigin: ResultFrameOwned, Detail: "get the root value of a JSON document"},
+			{Package: "json", Name: "get", Kind: CallJSONGet, Params: []Param{{Name: "val", Type: JSONValType}, {Name: "key", Type: ast.StringType}}, ReturnType: JSONValType, ResultOrigin: ResultFrameOwned, Detail: "get an object member by key"},
+			{Package: "json", Name: "at", Kind: CallJSONAt, Params: []Param{{Name: "val", Type: JSONValType}, {Name: "index", Type: ast.IntType}}, ReturnType: JSONValType, ResultOrigin: ResultFrameOwned, Detail: "get an array element by index"},
+			{Package: "json", Name: "len", Kind: CallJSONLen, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "get the number of elements or key-value pairs"},
+			{Package: "json", Name: "isObject", Kind: CallJSONIsObject, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "check if value is a JSON object"},
+			{Package: "json", Name: "isArray", Kind: CallJSONIsArray, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "check if value is a JSON array"},
+			{Package: "json", Name: "isString", Kind: CallJSONIsString, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "check if value is a JSON string"},
+			{Package: "json", Name: "isInt", Kind: CallJSONIsInt, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "check if value is a JSON integer"},
+			{Package: "json", Name: "isFloat", Kind: CallJSONIsFloat, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "check if value is a JSON float/number"},
+			{Package: "json", Name: "isBool", Kind: CallJSONIsBool, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "check if value is a JSON boolean"},
+			{Package: "json", Name: "isNull", Kind: CallJSONIsNull, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "check if value is JSON null"},
+			{Package: "json", Name: "getString", Kind: CallJSONGetString, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "get value as string"},
+			{Package: "json", Name: "getInt", Kind: CallJSONGetInt, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "get value as int"},
+			{Package: "json", Name: "getFloat", Kind: CallJSONGetFloat, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.FloatType, ResultOrigin: ResultOwned, Detail: "get value as float"},
+			{Package: "json", Name: "getBool", Kind: CallJSONGetBool, Params: []Param{{Name: "val", Type: JSONValType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "get value as bool"},
+			{Package: "json", Name: "fieldString", Kind: CallJSONFieldString, Params: []Param{{Name: "val", Type: JSONValType}, {Name: "key", Type: ast.StringType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "get string field from object by key"},
+			{Package: "json", Name: "fieldInt", Kind: CallJSONFieldInt, Params: []Param{{Name: "val", Type: JSONValType}, {Name: "key", Type: ast.StringType}}, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "get int field from object by key"},
+			{Package: "json", Name: "fieldFloat", Kind: CallJSONFieldFloat, Params: []Param{{Name: "val", Type: JSONValType}, {Name: "key", Type: ast.StringType}}, ReturnType: ast.FloatType, ResultOrigin: ResultOwned, Detail: "get float field from object by key"},
+			{Package: "json", Name: "fieldBool", Kind: CallJSONFieldBool, Params: []Param{{Name: "val", Type: JSONValType}, {Name: "key", Type: ast.StringType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "get bool field from object by key"},
+			{Package: "json", Name: "decodeMap", Kind: CallJSONDecodeMap, Params: []Param{{Name: "input", Type: ast.StringType}}, ReturnType: &ast.TupleType{Types: []ast.Type{JSONMapType, ast.ErrorType}}, ResultOrigin: ResultOwned, Detail: "decode a JSON object string into a map[string]string"},
+			{Package: "json", Name: "encodeMap", Kind: CallJSONEncodeMap, Params: []Param{{Name: "m", Type: JSONMapType}}, ReturnType: ast.StringType, ResultOrigin: ResultOwned, Detail: "encode a map[string]string into a JSON string"},
+			{Package: "json", Name: "stringify", Kind: CallJSONStringify, Params: []Param{{Name: "doc", Type: JSONDocType}}, ReturnType: ast.StringType, ResultOrigin: ResultOwned, Detail: "serialize a JSON document to a string"},
+			{Package: "json", Name: "valid", Kind: CallJSONValid, Params: []Param{{Name: "input", Type: ast.StringType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "validate JSON syntax without creating a document"},
+			{Package: "json", Name: "newDoc", Kind: CallJSONNewDoc, Params: []Param{}, ReturnType: JSONMutDocType, ResultOrigin: ResultOwned, Detail: "create a new mutable JSON document"},
+			{Package: "json", Name: "newObject", Kind: CallJSONNewObject, Params: []Param{{Name: "doc", Type: JSONMutDocType}}, ReturnType: JSONMutValType, ResultOrigin: ResultFrameOwned, Detail: "create a new mutable JSON object"},
+			{Package: "json", Name: "newArray", Kind: CallJSONNewArray, Params: []Param{{Name: "doc", Type: JSONMutDocType}}, ReturnType: JSONMutValType, ResultOrigin: ResultFrameOwned, Detail: "create a new mutable JSON array"},
+			{Package: "json", Name: "setRoot", Kind: CallJSONSetRoot, Params: []Param{{Name: "doc", Type: JSONMutDocType}, {Name: "root", Type: JSONMutValType}}, StatementOnly: true, Detail: "set root value of mutable JSON document"},
+			{Package: "json", Name: "addString", Kind: CallJSONAddString, Params: []Param{{Name: "doc", Type: JSONMutDocType}, {Name: "obj", Type: JSONMutValType}, {Name: "key", Type: ast.StringType}, {Name: "val", Type: ast.StringType}}, StatementOnly: true, Detail: "add string key-value to mutable object"},
+			{Package: "json", Name: "addInt", Kind: CallJSONAddInt, Params: []Param{{Name: "doc", Type: JSONMutDocType}, {Name: "obj", Type: JSONMutValType}, {Name: "key", Type: ast.StringType}, {Name: "val", Type: ast.IntType}}, StatementOnly: true, Detail: "add int key-value to mutable object"},
+			{Package: "json", Name: "addFloat", Kind: CallJSONAddFloat, Params: []Param{{Name: "doc", Type: JSONMutDocType}, {Name: "obj", Type: JSONMutValType}, {Name: "key", Type: ast.StringType}, {Name: "val", Type: ast.FloatType}}, StatementOnly: true, Detail: "add float key-value to mutable object"},
+			{Package: "json", Name: "addBool", Kind: CallJSONAddBool, Params: []Param{{Name: "doc", Type: JSONMutDocType}, {Name: "obj", Type: JSONMutValType}, {Name: "key", Type: ast.StringType}, {Name: "val", Type: ast.BoolType}}, StatementOnly: true, Detail: "add bool key-value to mutable object"},
+			{Package: "json", Name: "addNull", Kind: CallJSONAddNull, Params: []Param{{Name: "doc", Type: JSONMutDocType}, {Name: "obj", Type: JSONMutValType}, {Name: "key", Type: ast.StringType}}, StatementOnly: true, Detail: "add null key-value to mutable object"},
+			{Package: "json", Name: "addVal", Kind: CallJSONAddVal, Params: []Param{{Name: "doc", Type: JSONMutDocType}, {Name: "obj", Type: JSONMutValType}, {Name: "key", Type: ast.StringType}, {Name: "val", Type: JSONMutValType}}, StatementOnly: true, Detail: "add value key-value to mutable object"},
+			{Package: "json", Name: "appendVal", Kind: CallJSONAppendVal, Params: []Param{{Name: "arr", Type: JSONMutValType}, {Name: "val", Type: JSONMutValType}}, StatementOnly: true, Detail: "append value to mutable array"},
+			{Package: "json", Name: "write", Kind: CallJSONWrite, Params: []Param{{Name: "doc", Type: JSONMutDocType}}, ReturnType: ast.StringType, ResultOrigin: ResultOwned, Detail: "serialize a mutable JSON document to a string"},
 		},
 	},
 }

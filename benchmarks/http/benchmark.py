@@ -38,22 +38,22 @@ ENDPOINTS = [
         "description": "Raw HTTP/1.1 parsing, string constant response, zero dynamic routing overhead",
     },
     {
-        "name": "SQLite Insert & Query (/json)",
+        "name": "SQLite File Insert & Query (/json)",
         "path": "/json",
         "headers": [],
-        "description": "In-memory SQLite table setup, log row insertion, SELECT query retrieval, and JSON serialization",
+        "description": "On-disk SQLite WAL database file (/tmp/bench.db) log row insertion, SELECT query retrieval, and JSON serialization",
     },
     {
-        "name": "SQLite Prepared Query (/users/1024)",
+        "name": "SQLite File Prepared Query (/users/1024)",
         "path": "/users/1024",
         "headers": [],
-        "description": "Path parameter extraction (:id), SQLite prepared statement, parameter binding, column extraction, and JSON response",
+        "description": "Path parameter extraction (:id), on-disk SQLite WAL prepared statement, parameter binding, column extraction, and JSON response",
     },
     {
-        "name": "Middleware & SQLite Audit (/api/data)",
+        "name": "Middleware & SQLite File Audit (/api/data)",
         "path": "/api/data",
         "headers": ["-H", "Authorization: Bearer secret-benchmark-token"],
-        "description": "Prefix middleware (useAt), Bearer auth validation, SQLite audit logging insert, context propagation, and privileged data return",
+        "description": "Prefix middleware (useAt), Bearer auth validation, on-disk SQLite WAL audit logging insert, context propagation, and privileged data return",
     },
 ]
 

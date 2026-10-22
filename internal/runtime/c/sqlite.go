@@ -58,6 +58,7 @@ static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt
         free(db);
         return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, NULL, err);
     }
+    sqlite3_busy_timeout(db->handle, 5000);
     db->is_open = 1;
     return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, db, NULL);
 }

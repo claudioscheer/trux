@@ -52,40 +52,25 @@ func sqliteInsertAndQuery(request int) int {
     http.json(request, 500, "{\"error\":\"db open failed\"}\n")
     return 1
   }
-  let ins *sqlite.Stmt, ierr error = sqlite.prepare(db, "INSERT INTO logs (path, status) VALUES (?, ?);")
+  let stmt *sqlite.Stmt, ierr error = sqlite.prepare(db, "INSERT INTO logs (path, status) VALUES (?, ?) RETURNING path, status;")
   if ierr != nil {
     let _ error = sqlite.close(db)
     http.json(request, 500, "{\"error\":\"insert prepare failed\"}\n")
     return 1
   }
-  let _ error = sqlite.bindText(ins, 1, "/sqlite/insert-and-query")
-  let _ error = sqlite.bindText(ins, 2, "200")
-  let _, serr error = sqlite.step(ins)
-  let _ error = sqlite.finalize(ins)
-  if serr != nil {
+  let _ error = sqlite.bindText(stmt, 1, "/sqlite/insert-and-query")
+  let _ error = sqlite.bindText(stmt, 2, "200")
+  let hasRow bool, serr error = sqlite.step(stmt)
+  if serr != nil || !hasRow {
+    let _ error = sqlite.finalize(stmt)
     let _ error = sqlite.close(db)
     http.json(request, 500, "{\"error\":\"insert step failed\"}\n")
     return 1
   }
-
-  let rowId int = sqlite.lastInsertRowId(db)
-  let qstmt *sqlite.Stmt, qerr error = sqlite.prepare(db, "SELECT path, status FROM logs WHERE id = ?;")
-  if qerr != nil {
-    let _ error = sqlite.close(db)
-    http.json(request, 500, "{\"error\":\"query prepare failed\"}\n")
-    return 1
-  }
-  let _ error = sqlite.bindInt(qstmt, 1, rowId)
-  let hasRow bool, sterr error = sqlite.step(qstmt)
-  if sterr != nil || !hasRow {
-    let _ error = sqlite.finalize(qstmt)
-    let _ error = sqlite.close(db)
-    http.json(request, 500, "{\"error\":\"query failed\"}\n")
-    return 1
-  }
-  let path string = sqlite.columnText(qstmt, 0)
-  let status string = sqlite.columnText(qstmt, 1)
-  let _ error = sqlite.finalize(qstmt)
+  let path string = sqlite.columnText(stmt, 0)
+  let status string = sqlite.columnText(stmt, 1)
+  let _, _ error = sqlite.step(stmt)
+  let _ error = sqlite.finalize(stmt)
   let _ error = sqlite.close(db)
 
   let resp string = "{\"status\":\"logged\",\"httpStatus\":\"" + status + "\",\"path\":\"" + path + "\"}\n"

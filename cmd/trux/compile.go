@@ -288,8 +288,28 @@ func ensureSQLiteObjectCached(compiler string) (string, error) {
 		return "", fmt.Errorf("create sqlite cache dir: %w", err)
 	}
 
+	compileFlags := []string{
+		"-c",
+		"-O3",
+		"-DNDEBUG",
+		"-DSQLITE_THREADSAFE=2",
+		"-DSQLITE_DEFAULT_MEMSTATUS=0",
+		"-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
+		"-DSQLITE_LIKE_DOESNT_MATCH_BLOBS",
+		"-DSQLITE_MAX_EXPR_DEPTH=0",
+		"-DSQLITE_OMIT_DECLTYPE",
+		"-DSQLITE_OMIT_DEPRECATED",
+		"-DSQLITE_OMIT_PROGRESS_CALLBACK",
+		"-DSQLITE_OMIT_SHARED_CACHE",
+		"-DSQLITE_USE_ALLOCA",
+		"-DSQLITE_ENABLE_FTS5",
+		"-DSQLITE_ENABLE_RTREE",
+		"-DSQLITE_OMIT_LOAD_EXTENSION",
+	}
+
 	h := sha256.New()
 	h.Write([]byte(compiler))
+	h.Write([]byte(strings.Join(compileFlags, " ")))
 	h.Write([]byte(runtimec.SQLite3CSource))
 	sum := hex.EncodeToString(h.Sum(nil))[:16]
 	objName := fmt.Sprintf("sqlite3-3.47.2-%s.o", sum)
@@ -309,17 +329,7 @@ func ensureSQLiteObjectCached(compiler string) (string, error) {
 	}
 
 	tmpObjPath := filepath.Join(cacheDir, fmt.Sprintf("sqlite3-%s.tmp-%d.o", sum, os.Getpid()))
-	args := []string{
-		"-c",
-		"-O2",
-		"-DSQLITE_THREADSAFE=1",
-		"-DSQLITE_ENABLE_FTS5",
-		"-DSQLITE_ENABLE_RTREE",
-		"-DSQLITE_OMIT_LOAD_EXTENSION",
-		cPath,
-		"-o",
-		tmpObjPath,
-	}
+	args := append(append([]string(nil), compileFlags...), cPath, "-o", tmpObjPath)
 
 	cmd := exec.Command(compiler, args...)
 	output, err := cmd.CombinedOutput()

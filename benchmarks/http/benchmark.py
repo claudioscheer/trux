@@ -121,6 +121,7 @@ def main():
     trux_bin = os.path.join(project_root, "bin", "trux")
     server_tx = os.path.join(base_dir, "server.tx")
     server_bin = os.path.join(base_dir, "server")
+    run_cmd(f"cd {project_root} && go build -o {trux_bin} ./cmd/trux")
     run_cmd(f"{trux_bin} build -o {server_bin} {server_tx}")
     print(f"Compiled binary: {server_bin}")
 

@@ -8,38 +8,38 @@
 
 | Endpoint | Concurrency | Throughput (req/s) | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Plaintext (/plaintext) | 100 | **163,983** | 1.06ms | 497.00us | 1.25ms | 12.90ms | 91.75MiB |
-| Plaintext (/plaintext) | 1000 | **184,936** | 6.04ms | 5.44ms | 12.94ms | 23.88ms | 95.42MiB |
-| SQLite File Insert & Query (/json) | 100 | **1,451** | 74.00ms | 2.81ms | 85.44ms | 1.40s | 99.75MiB |
-| SQLite File Insert & Query (/json) | 1000 | **1,443** | 82.11ms | 33.28ms | 45.37ms | 1.52s | 104.1MiB |
-| SQLite File Prepared Query (/users/1024) | 100 | **110,870** | 0.88ms | 731.00us | 1.58ms | 3.40ms | 104.7MiB |
-| SQLite File Prepared Query (/users/1024) | 1000 | **108,854** | 15.12ms | 8.38ms | 43.33ms | 82.83ms | 108.4MiB |
-| Middleware & SQLite File Audit (/api/data) | 100 | **1,555** | 13.04ms | 3.16ms | 3.95ms | 373.49ms | 109MiB |
-| Middleware & SQLite File Audit (/api/data) | 1000 | **1,547** | 46.95ms | 30.24ms | 33.83ms | 871.78ms | 113.3MiB |
+| Plaintext Baseline (/plaintext) | 100 | **168,601** | 1.02ms | 489.00us | 1.20ms | 7.82ms | 91.48MiB |
+| Plaintext Baseline (/plaintext) | 1000 | **182,692** | 6.07ms | 5.43ms | 12.83ms | 24.13ms | 94.73MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **1,393** | 26.33ms | 3.63ms | 5.84ms | 915.55ms | 98.89MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **1,457** | 47.98ms | 30.38ms | 37.12ms | 881.62ms | 105.4MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **113,213** | 1.54ms | 725.00us | 1.60ms | 4.16ms | 105.2MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **110,632** | 14.89ms | 8.28ms | 42.83ms | 81.60ms | 108.8MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **1,534** | 40.61ms | 4.01ms | 5.57ms | 1.25s | 109.8MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **1,576** | 49.38ms | 36.92ms | 40.91ms | 948.47ms | 113.3MiB |
 
 ### Cloud Standard (2 vCPUs, 1GB)
 
 | Endpoint | Concurrency | Throughput (req/s) | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Plaintext (/plaintext) | 100 | **184,787** | 0.97ms | 436.00us | 1.20ms | 5.19ms | 91.41MiB |
-| Plaintext (/plaintext) | 1000 | **325,641** | 3.75ms | 2.82ms | 8.32ms | 19.40ms | 95.45MiB |
-| SQLite File Insert & Query (/json) | 100 | **1,370** | 134.68ms | 4.49ms | 544.89ms | 1.31s | 101MiB |
-| SQLite File Insert & Query (/json) | 1000 | **1,433** | 266.85ms | 36.82ms | 1.04s | 1.92s | 105.9MiB |
-| SQLite File Prepared Query (/users/1024) | 100 | **127,252** | 588.99us | 451.00us | 1.14ms | 2.49ms | 105.7MiB |
-| SQLite File Prepared Query (/users/1024) | 1000 | **188,125** | 4.47ms | 3.38ms | 9.98ms | 19.61ms | 109.1MiB |
-| Middleware & SQLite File Audit (/api/data) | 100 | **1,504** | 51.11ms | 3.20ms | 42.26ms | 961.91ms | 109.4MiB |
-| Middleware & SQLite File Audit (/api/data) | 1000 | **1,579** | 84.38ms | 32.23ms | 45.35ms | 1.53s | 113.2MiB |
+| Plaintext Baseline (/plaintext) | 100 | **187,769** | 813.80us | 435.00us | 1.18ms | 4.95ms | 91.62MiB |
+| Plaintext Baseline (/plaintext) | 1000 | **318,316** | 3.72ms | 2.89ms | 8.27ms | 17.54ms | 94.71MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **1,315** | 131.62ms | 4.01ms | 546.36ms | 1.49s | 98.93MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **1,352** | 209.24ms | 36.87ms | 867.66ms | 1.81s | 103.6MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **121,268** | 600.45us | 454.00us | 1.18ms | 2.59ms | 103.8MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **189,167** | 3.60ms | 2.92ms | 7.72ms | 14.24ms | 106.2MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **1,517** | 103.06ms | 3.64ms | 347.50ms | 1.50s | 106.9MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **1,545** | 116.20ms | 31.64ms | 264.53ms | 1.46s | 109.1MiB |
 
 ### Compute Node (4 vCPUs, 2GB)
 
 | Endpoint | Concurrency | Throughput (req/s) | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Plaintext (/plaintext) | 100 | **244,235** | 0.99ms | 308.00us | 1.08ms | 15.81ms | 91.8MiB |
-| Plaintext (/plaintext) | 1000 | **428,091** | 2.62ms | 1.78ms | 5.75ms | 12.83ms | 95.86MiB |
-| SQLite File Insert & Query (/json) | 100 | **1,433** | 119.52ms | 3.46ms | 457.03ms | 1.63s | 98.21MiB |
-| SQLite File Insert & Query (/json) | 1000 | **1,395** | 149.20ms | 35.61ms | 417.99ms | 1.48s | 101.8MiB |
-| SQLite File Prepared Query (/users/1024) | 100 | **86,035** | 504.68us | 354.00us | 0.99ms | 2.61ms | 102.3MiB |
-| SQLite File Prepared Query (/users/1024) | 1000 | **292,992** | 1.81ms | 1.23ms | 4.02ms | 7.89ms | 104.5MiB |
-| Middleware & SQLite File Audit (/api/data) | 100 | **1,459** | 110.74ms | 3.74ms | 459.71ms | 1.43s | 105.3MiB |
-| Middleware & SQLite File Audit (/api/data) | 1000 | **1,517** | 84.35ms | 28.53ms | 39.52ms | 1.66s | 106.5MiB |
+| Plaintext Baseline (/plaintext) | 100 | **248,440** | 762.55us | 307.00us | 1.05ms | 5.57ms | 91.3MiB |
+| Plaintext Baseline (/plaintext) | 1000 | **436,352** | 2.60ms | 1.83ms | 5.65ms | 12.52ms | 95.54MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **1,318** | 170.80ms | 5.49ms | 661.51ms | 1.53s | 101MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **1,375** | 324.28ms | 52.86ms | 1.08s | 1.79s | 106.7MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **157,146** | 648.72us | 509.00us | 1.23ms | 2.63ms | 107.1MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **310,436** | 3.36ms | 2.35ms | 7.68ms | 15.26ms | 111MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **1,428** | 76.88ms | 4.24ms | 248.18ms | 1.09s | 111.9MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **1,452** | 108.44ms | 34.14ms | 212.10ms | 1.42s | 115.7MiB |
 

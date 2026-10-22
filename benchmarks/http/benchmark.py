@@ -32,26 +32,26 @@ PROFILES = [
 
 ENDPOINTS = [
     {
-        "name": "Plaintext (/plaintext)",
+        "name": "Plaintext Baseline (/plaintext)",
         "path": "/plaintext",
         "headers": [],
         "description": "Raw HTTP/1.1 parsing, string constant response, zero dynamic routing overhead",
     },
     {
-        "name": "SQLite File Insert & Query (/json)",
-        "path": "/json",
+        "name": "SQLite File Insert & Query (/sqlite/insert-and-query)",
+        "path": "/sqlite/insert-and-query",
         "headers": [],
         "description": "On-disk SQLite WAL database file (/tmp/bench.db) log row insertion, SELECT query retrieval, and JSON serialization",
     },
     {
-        "name": "SQLite File Prepared Query (/users/1024)",
-        "path": "/users/1024",
+        "name": "SQLite File Prepared Query (/sqlite/query-by-id/1024)",
+        "path": "/sqlite/query-by-id/1024",
         "headers": [],
         "description": "Path parameter extraction (:id), on-disk SQLite WAL prepared statement, parameter binding, column extraction, and JSON response",
     },
     {
-        "name": "Middleware & SQLite File Audit (/api/data)",
-        "path": "/api/data",
+        "name": "Middleware & SQLite File Audit (/api/authenticated-audit)",
+        "path": "/api/authenticated-audit",
         "headers": ["-H", "Authorization: Bearer secret-benchmark-token"],
         "description": "Prefix middleware (useAt), Bearer auth validation, on-disk SQLite WAL audit logging insert, context propagation, and privileged data return",
     },

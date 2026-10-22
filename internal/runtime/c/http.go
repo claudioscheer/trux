@@ -21,6 +21,7 @@ const HTTPSource = `
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -51,6 +52,8 @@ const HTTPSource = `
 #define RT_BUF_SIZE 4096
 #define RT_BUF_GROUP_ID 1
 #define RT_MAX_CONNS 65536
+#define RT_HTTP_UDATA_ACCEPT ((uint64_t)-1)
+#define RT_HTTP_UDATA_SEND (1ULL << 32)
 
 typedef int64_t (*rt_http_handler_fn)(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t request);
 
@@ -89,6 +92,22 @@ static rt_http_router g_trux_http_router = {0};
 
 typedef struct {
     int fd;
+    uint8_t* buffer;
+    size_t len;
+    size_t cap;
+    size_t header_scan_start;
+    uint8_t* tx_buf;
+    size_t tx_cap;
+    bool tx_in_flight;
+    bool close_after_tx;
+    bool in_use;
+} rt_http_conn;
+
+typedef struct {
+    int fd;
+    struct io_uring* ring;
+    bool* need_submit;
+    rt_http_conn* conn;
     const uint8_t* method;
     size_t method_len;
     const uint8_t* path;
@@ -112,15 +131,6 @@ typedef struct {
     bool responded;
     bool close_after_response;
 } rt_http_request;
-
-typedef struct {
-    int fd;
-    uint8_t* buffer;
-    size_t len;
-    size_t cap;
-    size_t header_scan_start;
-    bool in_use;
-} rt_http_conn;
 
 static RT_UNUSED const char* rt_http_reason(int64_t status) {
     switch (status) {
@@ -434,6 +444,50 @@ static RT_UNUSED void rt_http_respond(int64_t handle, int64_t status, rt_string 
         return;
     }
 
+    size_t body_len = (body.len > 0 && body.data != NULL) ? body.len : 0;
+    size_t total_len = (size_t)pos + body_len;
+
+    if (req->ring != NULL && req->conn != NULL && !req->conn->tx_in_flight && total_len <= 65536) {
+        if (req->conn->tx_buf == NULL) {
+            req->conn->tx_cap = 8192;
+            while (req->conn->tx_cap < total_len) req->conn->tx_cap *= 2;
+            req->conn->tx_buf = (uint8_t*)malloc(req->conn->tx_cap);
+        } else if (total_len > req->conn->tx_cap) {
+            size_t ncap = req->conn->tx_cap * 2;
+            while (ncap < total_len) ncap *= 2;
+            uint8_t* nbuf = (uint8_t*)realloc(req->conn->tx_buf, ncap);
+            if (nbuf) {
+                req->conn->tx_buf = nbuf;
+                req->conn->tx_cap = ncap;
+            }
+        }
+        if (req->conn->tx_buf != NULL && total_len <= req->conn->tx_cap) {
+            memcpy(req->conn->tx_buf, header, (size_t)pos);
+            if (body_len > 0) {
+                memcpy(req->conn->tx_buf + (size_t)pos, body.data, body_len);
+            }
+            struct io_uring_sqe* sqe = io_uring_get_sqe(req->ring);
+            if (!sqe) {
+                io_uring_submit(req->ring);
+                sqe = io_uring_get_sqe(req->ring);
+            }
+            if (sqe) {
+                io_uring_prep_send(sqe, req->fd, req->conn->tx_buf, total_len, MSG_NOSIGNAL);
+                sqe->user_data = RT_HTTP_UDATA_SEND | (uint64_t)(uint32_t)req->fd;
+                req->conn->tx_in_flight = true;
+                req->conn->close_after_tx = req->close_after_response;
+                if (req->need_submit) *req->need_submit = true;
+                req->responded = true;
+                return;
+            }
+        }
+    }
+
+    if (req->ring != NULL && req->conn != NULL && req->conn->tx_in_flight) {
+        io_uring_submit(req->ring);
+        if (req->need_submit) *req->need_submit = false;
+    }
+
     struct iovec iov[2] = {
         {(void*)header, (size_t)pos},
         {(void*)body.data, body.len},
@@ -651,128 +705,187 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
             break;
         }
 
-        uint64_t udata = cqe->user_data;
-        if (udata == (uint64_t)-1) {
-            int client_fd = cqe->res;
-            if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
-                int nodelay = 1;
-                (void)setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+        unsigned head;
+        bool need_submit = false;
 
-                rt_http_conn* c = &conns[client_fd];
-                c->fd = client_fd;
-                c->len = 0;
-                c->header_scan_start = 0;
-                c->in_use = true;
-                if (c->buffer == NULL) {
-                    c->cap = 8192;
-                    c->buffer = (uint8_t*)malloc(c->cap);
-                }
+        io_uring_for_each_cqe(&ring, head, cqe) {
+            uint64_t udata = cqe->user_data;
+            if (udata == RT_HTTP_UDATA_ACCEPT) {
+                int client_fd = cqe->res;
+                io_uring_cq_advance(&ring, 1);
+                if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
+                    int nodelay = 1;
+                    (void)setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
 
-                struct io_uring_sqe* rsqe = io_uring_get_sqe(&ring);
-                if (rsqe) {
-                    io_uring_prep_recv_multishot(rsqe, client_fd, NULL, 0, 0);
-                    rsqe->flags |= IOSQE_BUFFER_SELECT;
-                    rsqe->buf_group = RT_BUF_GROUP_ID;
-                    rsqe->user_data = (uint64_t)client_fd;
-                    io_uring_submit(&ring);
+                    rt_http_conn* c = &conns[client_fd];
+                    c->fd = client_fd;
+                    c->len = 0;
+                    c->header_scan_start = 0;
+                    c->tx_in_flight = false;
+                    c->close_after_tx = false;
+                    c->in_use = true;
+                    if (c->buffer == NULL) {
+                        c->cap = 8192;
+                        c->buffer = (uint8_t*)malloc(c->cap);
+                    }
+
+                    struct io_uring_sqe* rsqe = io_uring_get_sqe(&ring);
+                    if (!rsqe) {
+                        io_uring_submit(&ring);
+                        rsqe = io_uring_get_sqe(&ring);
+                    }
+                    if (rsqe) {
+                        io_uring_prep_recv_multishot(rsqe, client_fd, NULL, 0, 0);
+                        rsqe->flags |= IOSQE_BUFFER_SELECT;
+                        rsqe->buf_group = RT_BUF_GROUP_ID;
+                        rsqe->user_data = (uint64_t)client_fd;
+                        need_submit = true;
+                    }
                 }
-            }
-        } else {
-            int client_fd = (int)udata;
-            if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
-                rt_http_conn* c = &conns[client_fd];
-                if (cqe->res <= 0) {
-                    if (c->in_use) {
-                        close(client_fd);
-                        c->in_use = false;
-                        c->len = 0;
+            } else if ((udata & RT_HTTP_UDATA_SEND) != 0) {
+                int client_fd = (int)(udata & 0xFFFFFFFFULL);
+                int res = cqe->res;
+                io_uring_cq_advance(&ring, 1);
+                if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
+                    rt_http_conn* c = &conns[client_fd];
+                    c->tx_in_flight = false;
+                    if (res <= 0 || c->close_after_tx) {
+                        if (c->in_use) {
+                            if (c->close_after_tx) shutdown(client_fd, SHUT_RDWR);
+                            close(client_fd);
+                            c->in_use = false;
+                            c->len = 0;
+                            c->close_after_tx = false;
+                        }
+                    }
+                }
+            } else {
+                int client_fd = (int)udata;
+                int res = cqe->res;
+                unsigned flags = cqe->flags;
+                if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
+                    rt_http_conn* c = &conns[client_fd];
+                    if (res <= 0) {
+                        io_uring_cq_advance(&ring, 1);
+                        if (c->in_use) {
+                            close(client_fd);
+                            c->in_use = false;
+                            c->len = 0;
+                        }
+                    } else {
+                        int bid = flags >> IORING_CQE_BUFFER_SHIFT;
+                        uint8_t* in_data = buf_storage + bid * RT_BUF_SIZE;
+                        size_t bytes = (size_t)res;
+
+                        if (c->len + bytes > c->cap) {
+                            size_t ncap = c->cap * 2;
+                            while (ncap < c->len + bytes) ncap *= 2;
+                            uint8_t* nbuf = (uint8_t*)realloc(c->buffer, ncap);
+                            if (nbuf) {
+                                c->buffer = nbuf;
+                                c->cap = ncap;
+                            }
+                        }
+
+                        if (c->len + bytes <= c->cap) {
+                            memcpy(c->buffer + c->len, in_data, bytes);
+                            c->len += bytes;
+                        }
+
+                        io_uring_buf_ring_add(br, in_data, RT_BUF_SIZE, bid, io_uring_buf_ring_mask(RT_BUF_RING_SIZE), 0);
+                        io_uring_buf_ring_advance(br, 1);
+                        io_uring_cq_advance(&ring, 1);
+
+                        for (;;) {
+                            ssize_t hdr_end = rt_http_find_header_end(c->buffer, c->len, c->header_scan_start);
+                            if (hdr_end < 0) {
+                                if (c->len > 3) c->header_scan_start = c->len - 3;
+                                break;
+                            }
+
+                            rt_http_request req;
+                            memset(&req, 0, sizeof(req));
+                            req.fd = client_fd;
+                            req.ring = &ring;
+                            req.need_submit = &need_submit;
+                            req.conn = c;
+
+                            size_t content_length = 0;
+                            if (!rt_http_parse_request_headers(c->buffer, c->len, (size_t)hdr_end, &req, &content_length)) {
+                                rt_http_send_simple(client_fd, 400, "bad request\n", true);
+                                shutdown(client_fd, SHUT_RDWR);
+                                close(client_fd);
+                                c->in_use = false;
+                                c->len = 0;
+                                break;
+                            }
+
+                            if (content_length > RT_HTTP_MAX_BODY_BYTES) {
+                                rt_http_send_simple(client_fd, 413, "payload too large\n", true);
+                                shutdown(client_fd, SHUT_RDWR);
+                                close(client_fd);
+                                c->in_use = false;
+                                c->len = 0;
+                                break;
+                            }
+
+                            if (c->len < (size_t)hdr_end + content_length) {
+                                break;
+                            }
+
+                            req.body = c->buffer + hdr_end;
+                            req.body_len = content_length;
+
+                            rt_http_dispatch(&req);
+
+                            size_t consumed = (size_t)hdr_end + content_length;
+                            if (consumed < c->len) {
+                                memmove(c->buffer, c->buffer + consumed, c->len - consumed);
+                                c->len -= consumed;
+                                c->header_scan_start = 0;
+                            } else {
+                                c->len = 0;
+                                c->header_scan_start = 0;
+                            }
+
+                            if (req.close_after_response) {
+                                if (c->tx_in_flight) {
+                                    c->close_after_tx = true;
+                                    break;
+                                }
+                                shutdown(client_fd, SHUT_RDWR);
+                                close(client_fd);
+                                c->in_use = false;
+                                c->len = 0;
+                                break;
+                            }
+
+                            if (c->len == 0) break;
+                        }
+
+                        if (c->in_use && !(flags & IORING_CQE_F_MORE)) {
+                            struct io_uring_sqe* rsqe = io_uring_get_sqe(&ring);
+                            if (!rsqe) {
+                                io_uring_submit(&ring);
+                                rsqe = io_uring_get_sqe(&ring);
+                            }
+                            if (rsqe) {
+                                io_uring_prep_recv_multishot(rsqe, client_fd, NULL, 0, 0);
+                                rsqe->flags |= IOSQE_BUFFER_SELECT;
+                                rsqe->buf_group = RT_BUF_GROUP_ID;
+                                rsqe->user_data = (uint64_t)client_fd;
+                                need_submit = true;
+                            }
+                        }
                     }
                 } else {
-                    int bid = cqe->flags >> IORING_CQE_BUFFER_SHIFT;
-                    uint8_t* in_data = buf_storage + bid * RT_BUF_SIZE;
-                    size_t bytes = (size_t)cqe->res;
-
-                    if (c->len + bytes > c->cap) {
-                        size_t ncap = c->cap * 2;
-                        while (ncap < c->len + bytes) ncap *= 2;
-                        uint8_t* nbuf = (uint8_t*)realloc(c->buffer, ncap);
-                        if (nbuf) {
-                            c->buffer = nbuf;
-                            c->cap = ncap;
-                        }
-                    }
-
-                    if (c->len + bytes <= c->cap) {
-                        memcpy(c->buffer + c->len, in_data, bytes);
-                        c->len += bytes;
-                    }
-
-                    io_uring_buf_ring_add(br, in_data, RT_BUF_SIZE, bid, io_uring_buf_ring_mask(RT_BUF_RING_SIZE), 0);
-                    io_uring_buf_ring_advance(br, 1);
-
-                    for (;;) {
-                        ssize_t hdr_end = rt_http_find_header_end(c->buffer, c->len, c->header_scan_start);
-                        if (hdr_end < 0) {
-                            if (c->len > 3) c->header_scan_start = c->len - 3;
-                            break;
-                        }
-
-                        rt_http_request req;
-                        memset(&req, 0, sizeof(req));
-                        req.fd = client_fd;
-
-                        size_t content_length = 0;
-                        if (!rt_http_parse_request_headers(c->buffer, c->len, (size_t)hdr_end, &req, &content_length)) {
-                            rt_http_send_simple(client_fd, 400, "bad request\n", true);
-                            shutdown(client_fd, SHUT_RDWR);
-                            close(client_fd);
-                            c->in_use = false;
-                            c->len = 0;
-                            break;
-                        }
-
-                        if (content_length > RT_HTTP_MAX_BODY_BYTES) {
-                            rt_http_send_simple(client_fd, 413, "payload too large\n", true);
-                            shutdown(client_fd, SHUT_RDWR);
-                            close(client_fd);
-                            c->in_use = false;
-                            c->len = 0;
-                            break;
-                        }
-
-                        if (c->len < (size_t)hdr_end + content_length) {
-                            break;
-                        }
-
-                        req.body = c->buffer + hdr_end;
-                        req.body_len = content_length;
-
-                        rt_http_dispatch(&req);
-
-                        size_t consumed = (size_t)hdr_end + content_length;
-                        if (consumed < c->len) {
-                            memmove(c->buffer, c->buffer + consumed, c->len - consumed);
-                            c->len -= consumed;
-                            c->header_scan_start = 0;
-                        } else {
-                            c->len = 0;
-                            c->header_scan_start = 0;
-                        }
-
-                        if (req.close_after_response) {
-                            shutdown(client_fd, SHUT_RDWR);
-                            close(client_fd);
-                            c->in_use = false;
-                            c->len = 0;
-                            break;
-                        }
-
-                        if (c->len == 0) break;
-                    }
+                    io_uring_cq_advance(&ring, 1);
                 }
             }
         }
-        io_uring_cqe_seen(&ring, cqe);
+        if (need_submit) {
+            io_uring_submit(&ring);
+        }
     }
 
     free(conns);
@@ -786,7 +899,14 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
 static RT_UNUSED void rt_http_serve(rt_string host, int64_t port, int64_t workers) {
     if (port < 1 || port > 65535) rt_runtime_fail("http port must be between 1 and 65535");
     if (workers <= 0) {
-        workers = sysconf(_SC_NPROCESSORS_ONLN);
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        if (sched_getaffinity(0, sizeof(cpuset), &cpuset) == 0) {
+            workers = CPU_COUNT(&cpuset);
+        }
+        if (workers <= 0) {
+            workers = sysconf(_SC_NPROCESSORS_ONLN);
+        }
         if (workers < 1) workers = 1;
     }
     if (workers > 1024) workers = 1024;

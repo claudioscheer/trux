@@ -69,6 +69,7 @@ const (
 	CallErrorsNew             CallKind = "errorsNew"
 	CallErrorsMessage         CallKind = "errorsMessage"
 	CallSQLiteOpen            CallKind = "sqliteOpen"
+	CallSQLiteOpenThreadLocal CallKind = "sqliteOpenThreadLocal"
 	CallSQLiteClose           CallKind = "sqliteClose"
 	CallSQLiteExec            CallKind = "sqliteExec"
 	CallSQLiteQuery           CallKind = "sqliteQuery"
@@ -470,6 +471,28 @@ var packages = []Package{
 				ReturnType:   &ast.TupleType{Types: []ast.Type{SQLiteDBType, ast.ErrorType}},
 				ResultOrigin: ResultOwned,
 				Detail:       "open a database connection",
+			},
+			{
+				Package: "sqlite",
+				Name:    "openThreadLocal",
+				Kind:    CallSQLiteOpenThreadLocal,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   &ast.TupleType{Types: []ast.Type{SQLiteDBType, ast.ErrorType}},
+				ResultOrigin: ResultOwned,
+				Detail:       "open or retrieve a thread-local database connection",
+			},
+			{
+				Package: "sqlite",
+				Name:    "open_thread_local",
+				Kind:    CallSQLiteOpenThreadLocal,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   &ast.TupleType{Types: []ast.Type{SQLiteDBType, ast.ErrorType}},
+				ResultOrigin: ResultOwned,
+				Detail:       "open or retrieve a thread-local database connection",
 			},
 			{
 				Package: "sqlite",

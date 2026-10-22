@@ -2808,6 +2808,55 @@ func main() int {
 	}
 }
 
+func TestSQLiteThreadLocalDatabase(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "tls_test.db")
+	dbPathEscaped := strings.ReplaceAll(dbPath, `\`, `/`)
+
+	src := fmt.Sprintf(`package main
+import "sqlite"
+
+func insertRecord() int {
+    let db *sqlite.DB, err error = sqlite.openThreadLocal(%q)
+    if err != nil {
+        return 1
+    }
+    let _ error = sqlite.exec(db, "INSERT INTO items (val) VALUES ('tls-item');")
+    let _ error = sqlite.close(db)
+    return 0
+}
+
+func main() int {
+    let db *sqlite.DB, err error = sqlite.open_thread_local(%q)
+    if err != nil {
+        return 1
+    }
+    let _ error = sqlite.exec(db, "CREATE TABLE items (id INTEGER PRIMARY KEY, val TEXT);")
+
+    let _ int = insertRecord()
+
+    let db2 *sqlite.DB, err2 error = sqlite.openThreadLocal(%q)
+    if err2 != nil {
+        return 1
+    }
+    let rows list[map[string]string], _ error = sqlite.query(db2, "SELECT val FROM items;")
+    let row map[string]string = rows[0]
+    print(row["val"])
+    return 0
+}
+`, dbPathEscaped, dbPathEscaped, dbPathEscaped)
+
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "tls-item\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
 func TestSQLiteAutomaticCleanupOnExit(t *testing.T) {
 	src := `package main
 import "sqlite"

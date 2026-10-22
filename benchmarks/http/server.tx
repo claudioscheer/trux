@@ -1,36 +1,118 @@
 package main
 
 import "http"
+import "sqlite"
+
+func initDB() int {
+  let db *sqlite.DB, err error = sqlite.open("/tmp/bench.db")
+  if err != nil {
+    return 1
+  }
+  let _ error = sqlite.exec(db, "PRAGMA journal_mode=WAL;")
+  let _ error = sqlite.exec(db, "PRAGMA synchronous=NORMAL;")
+  let _ error = sqlite.exec(db, "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT, role TEXT);")
+  let _ error = sqlite.exec(db, "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, path TEXT, status TEXT);")
+  let _ error = sqlite.exec(db, "CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, path TEXT);")
+  let _ error = sqlite.exec(db, "INSERT OR IGNORE INTO users (id, name, role) VALUES ('1024', 'Alice', 'member');")
+  let _ error = sqlite.close(db)
+  return 0
+}
 
 func authMiddleware(request int) int {
   let token string = http.header(request, "Authorization")
-  if token == "Bearer secret-benchmark-token" {
-    http.set(request, "userId", "bench-user-1")
-    return 0
+  if token != "Bearer secret-benchmark-token" {
+    http.setHeader(request, "WWW-Authenticate", "Bearer")
+    http.json(request, 401, "{\"error\":\"unauthorized\"}\n")
+    return 1
   }
-  http.setHeader(request, "WWW-Authenticate", "Bearer")
-  http.json(request, 401, "{\"error\":\"unauthorized\"}\n")
-  return 1
+
+  let db *sqlite.DB, err error = sqlite.openThreadLocal("/tmp/bench.db")
+  if err == nil {
+    let stmt *sqlite.Stmt, perr error = sqlite.prepare(db, "INSERT INTO audit (path) VALUES (?);")
+    if perr == nil {
+      let _ error = sqlite.bindText(stmt, 1, "/api/authenticated-audit")
+      let _, _ error = sqlite.step(stmt)
+      let _ error = sqlite.finalize(stmt)
+    }
+    let _ error = sqlite.close(db)
+  }
+
+  http.set(request, "userId", "bench-user-1")
+  return 0
 }
 
-func plaintext(request int) int {
+func plaintextBaseline(request int) int {
   http.text(request, 200, "Hello, World!\n")
   return 0
 }
 
-func json(request int) int {
-  http.json(request, 200, "{\"message\":\"Hello, World!\"}\n")
-  return 0
-}
+func sqliteInsertAndQuery(request int) int {
+  let db *sqlite.DB, err error = sqlite.openThreadLocal("/tmp/bench.db")
+  if err != nil {
+    http.json(request, 500, "{\"error\":\"db open failed\"}\n")
+    return 1
+  }
+  let stmt *sqlite.Stmt, ierr error = sqlite.prepare(db, "INSERT INTO logs (path, status) VALUES (?, ?) RETURNING path, status;")
+  if ierr != nil {
+    let _ error = sqlite.close(db)
+    http.json(request, 500, "{\"error\":\"insert prepare failed\"}\n")
+    return 1
+  }
+  let _ error = sqlite.bindText(stmt, 1, "/sqlite/insert-and-query")
+  let _ error = sqlite.bindText(stmt, 2, "200")
+  let hasRow bool, serr error = sqlite.step(stmt)
+  if serr != nil || !hasRow {
+    let _ error = sqlite.finalize(stmt)
+    let _ error = sqlite.close(db)
+    http.json(request, 500, "{\"error\":\"insert step failed\"}\n")
+    return 1
+  }
+  let path string = sqlite.columnText(stmt, 0)
+  let status string = sqlite.columnText(stmt, 1)
+  let _, _ error = sqlite.step(stmt)
+  let _ error = sqlite.finalize(stmt)
+  let _ error = sqlite.close(db)
 
-func userById(request int) int {
-  let id string = http.param(request, "id")
-  let resp string = "{\"id\":\"" + id + "\",\"role\":\"member\"}\n"
+  let resp string = "{\"status\":\"logged\",\"httpStatus\":\"" + status + "\",\"path\":\"" + path + "\"}\n"
   http.json(request, 200, resp)
   return 0
 }
 
-func protectedData(request int) int {
+func sqliteQueryById(request int) int {
+  let id string = http.param(request, "id")
+  let db *sqlite.DB, err error = sqlite.openThreadLocal("/tmp/bench.db")
+  if err != nil {
+    http.json(request, 500, "{\"error\":\"db open failed\"}\n")
+    return 1
+  }
+
+  let stmt *sqlite.Stmt, perr error = sqlite.prepare(db, "SELECT name, role FROM users WHERE id = ?;")
+  if perr != nil {
+    let _ error = sqlite.close(db)
+    http.json(request, 500, "{\"error\":\"prepare failed\"}\n")
+    return 1
+  }
+
+  let _ error = sqlite.bindText(stmt, 1, id)
+  let hasRow bool, serr error = sqlite.step(stmt)
+  if serr != nil || !hasRow {
+    let _ error = sqlite.finalize(stmt)
+    let _ error = sqlite.close(db)
+    http.json(request, 404, "{\"error\":\"user not found\"}\n")
+    return 1
+  }
+
+  let name string = sqlite.columnText(stmt, 0)
+  let role string = sqlite.columnText(stmt, 1)
+  let _ error = sqlite.finalize(stmt)
+  let _ error = sqlite.close(db)
+
+  let resp string = "{\"id\":\"" + id + "\",\"name\":\"" + name + "\",\"role\":\"" + role + "\"}\n"
+  http.json(request, 200, resp)
+  return 0
+}
+
+func authenticatedAuditData(request int) int {
   let user string = http.context(request, "userId")
   let resp string = "{\"user\":\"" + user + "\",\"data\":\"privileged\"}\n"
   http.json(request, 200, resp)
@@ -38,12 +120,14 @@ func protectedData(request int) int {
 }
 
 func main() int {
-  http.get("/plaintext", plaintext)
-  http.get("/json", json)
-  http.get("/users/:id", userById)
+  let _ int = initDB()
+
+  http.get("/plaintext", plaintextBaseline)
+  http.get("/sqlite/insert-and-query", sqliteInsertAndQuery)
+  http.get("/sqlite/query-by-id/:id", sqliteQueryById)
 
   http.useAt("/api", authMiddleware)
-  http.get("/api/data", protectedData)
+  http.get("/api/authenticated-audit", authenticatedAuditData)
 
   http.listen(8080)
   return 0

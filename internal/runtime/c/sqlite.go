@@ -15,67 +15,100 @@ const SQLiteHeaderSource = `
 #define TRUX_SQLITE_RUNTIME_H
 
 #include "sqlite3.h"
+#ifndef _WIN32
+#include <sched.h>
+#include <unistd.h>
+#endif
+
+#define RT_SQLITE_STMT_CACHE_SIZE 32
 
 typedef struct trux_sqlite_db trux_sqlite_db;
-struct trux_sqlite_db {
-    sqlite3* handle;
-    trux_sqlite_db* next;
-    int is_open;
-};
-
 typedef struct trux_sqlite_stmt trux_sqlite_stmt;
+
 struct trux_sqlite_stmt {
     sqlite3_stmt* handle;
     trux_sqlite_db* db;
-    trux_sqlite_stmt* next;
+    char* sql_key;
+    size_t sql_len;
     int is_finalized;
+    int is_cached;
+    int in_use;
 };
 
-void rt_sqlite_cleanup_all(void);
+struct trux_sqlite_db {
+    sqlite3* handle;
+    int is_open;
+    int is_thread_local;
+    trux_sqlite_stmt* stmt_cache[RT_SQLITE_STMT_CACHE_SIZE];
+    size_t stmt_cache_count;
+};
+
+static inline void rt_sqlite_cleanup_all(void) {}
 
 #endif /* TRUX_SQLITE_RUNTIME_H */
 `
 
 const SQLiteImplSource = `
 /* --- SQLite Runtime Implementation --- */
-static trux_sqlite_db* g_trux_sqlite_dbs = NULL;
-static trux_sqlite_stmt* g_trux_sqlite_stmts = NULL;
+#define RT_SQLITE_TLS_CACHE_SIZE 16
 
-RT_UNUSED void rt_sqlite_cleanup_all(void) {
-    trux_sqlite_stmt* stmt = g_trux_sqlite_stmts;
-    while (stmt != NULL) {
-        if (!stmt->is_finalized && stmt->handle != NULL) {
-            sqlite3_finalize(stmt->handle);
-            stmt->handle = NULL;
-            stmt->is_finalized = 1;
-        }
-        stmt = stmt->next;
-    }
-    g_trux_sqlite_stmts = NULL;
+typedef struct {
+    char path[512];
+    trux_sqlite_db* db;
+} rt_sqlite_tls_entry;
 
-    trux_sqlite_db* db = g_trux_sqlite_dbs;
-    while (db != NULL) {
-        if (db->is_open && db->handle != NULL) {
-            sqlite3_close_v2(db->handle);
-            db->handle = NULL;
-            db->is_open = 0;
-        }
-        db = db->next;
+#if defined(_MSC_VER)
+static __declspec(thread) rt_sqlite_tls_entry g_trux_sqlite_tls_cache[RT_SQLITE_TLS_CACHE_SIZE];
+static __declspec(thread) size_t g_trux_sqlite_tls_count = 0;
+#else
+static __thread rt_sqlite_tls_entry g_trux_sqlite_tls_cache[RT_SQLITE_TLS_CACHE_SIZE];
+static __thread size_t g_trux_sqlite_tls_count = 0;
+#endif
+
+static int rt_sqlite_busy_handler(void* ptr, int count) {
+    (void)ptr;
+    if (count < 5) {
+#if defined(_WIN32)
+        Sleep(0);
+#else
+        sched_yield();
+#endif
+        return 1;
     }
-    g_trux_sqlite_dbs = NULL;
+    if (count < 500) {
+#if defined(_WIN32)
+        Sleep(1);
+#else
+        usleep(25);
+#endif
+        return 1;
+    }
+    if (count < 25000) {
+#if defined(_WIN32)
+        Sleep(1);
+#else
+        usleep(100);
+#endif
+        return 1;
+    }
+    return 0;
+}
+
+static int rt_sqlite_wal_hook(void* arg, sqlite3* db, const char* zDb, int nEntry) {
+    (void)arg;
+    if (nEntry >= 2000) {
+        sqlite3_wal_checkpoint_v2(db, zDb, SQLITE_CHECKPOINT_TRUNCATE, NULL, NULL);
+    }
+    return SQLITE_OK;
 }
 
 static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt_arena* arena, rt_string path) {
     char* c_path = rt_string_to_c_string(path, "sqlite open path");
-    trux_sqlite_db* db = (trux_sqlite_db*)malloc(sizeof(trux_sqlite_db));
+    trux_sqlite_db* db = (trux_sqlite_db*)calloc(1, sizeof(trux_sqlite_db));
     if (db == NULL) {
         free(c_path);
         return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, NULL, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to allocate sqlite db handle", 35)));
     }
-    db->handle = NULL;
-    db->is_open = 0;
-    db->next = g_trux_sqlite_dbs;
-    g_trux_sqlite_dbs = db;
 
     int rc = sqlite3_open(c_path, &db->handle);
     free(c_path);
@@ -86,9 +119,43 @@ static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt
             sqlite3_close(db->handle);
             db->handle = NULL;
         }
+        free(db);
         return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, NULL, err);
     }
+    sqlite3_busy_handler(db->handle, rt_sqlite_busy_handler, NULL);
+    (void)sqlite3_exec(db->handle, "PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA journal_size_limit=4194304; PRAGMA mmap_size=67108864; PRAGMA cache_size=-16384;", NULL, NULL, NULL);
+    sqlite3_wal_hook(db->handle, rt_sqlite_wal_hook, NULL);
     db->is_open = 1;
+    return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, db, NULL);
+}
+
+static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open_thread_local(rt_arena* arena, rt_string path) {
+    char* c_path = rt_string_to_c_string(path, "sqlite open path");
+    for (size_t i = 0; i < g_trux_sqlite_tls_count; i++) {
+        if (g_trux_sqlite_tls_cache[i].db != NULL &&
+            g_trux_sqlite_tls_cache[i].db->is_open &&
+            strcmp(g_trux_sqlite_tls_cache[i].path, c_path) == 0) {
+            free(c_path);
+            return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, g_trux_sqlite_tls_cache[i].db, NULL);
+        }
+    }
+
+    trux_tuple_ptr_struct_14_trux_sqlite_db_error res = rt_sqlite_open(arena, path);
+    if (res.f1 != NULL) {
+        free(c_path);
+        return res;
+    }
+
+    trux_sqlite_db* db = res.f0;
+    db->is_thread_local = 1;
+
+    if (g_trux_sqlite_tls_count < RT_SQLITE_TLS_CACHE_SIZE) {
+        strncpy(g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].path, c_path, sizeof(g_trux_sqlite_tls_cache[0].path) - 1);
+        g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].path[sizeof(g_trux_sqlite_tls_cache[0].path) - 1] = '\0';
+        g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].db = db;
+        g_trux_sqlite_tls_count++;
+    }
+    free(c_path);
     return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, db, NULL);
 }
 
@@ -96,9 +163,27 @@ static RT_UNUSED rt_error rt_sqlite_close(rt_arena* arena, trux_sqlite_db* db) {
     if (db == NULL || !db->is_open || db->handle == NULL) {
         return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"database connection is not open", 31));
     }
+    if (db->is_thread_local) {
+        return NULL;
+    }
+    for (size_t i = 0; i < db->stmt_cache_count; i++) {
+        trux_sqlite_stmt* s = db->stmt_cache[i];
+        if (s != NULL) {
+            if (s->handle != NULL) {
+                sqlite3_finalize(s->handle);
+                s->handle = NULL;
+            }
+            free(s->sql_key);
+            free(s);
+            db->stmt_cache[i] = NULL;
+        }
+    }
+    db->stmt_cache_count = 0;
     int rc = sqlite3_close_v2(db->handle);
     db->handle = NULL;
     db->is_open = 0;
+    free(db);
+
     if (rc != SQLITE_OK) {
         return rt_error_new(arena, rt_string_from_c(arena, sqlite3_errstr(rc)));
     }
@@ -217,23 +302,44 @@ static RT_UNUSED trux_tuple_ptr_struct_16_trux_sqlite_stmt_error rt_sqlite_prepa
     if (db == NULL || !db->is_open || db->handle == NULL) {
         return RT_LIT(trux_tuple_ptr_struct_16_trux_sqlite_stmt_error, NULL, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"database connection is not open", 31)));
     }
+    for (size_t i = 0; i < db->stmt_cache_count; i++) {
+        trux_sqlite_stmt* s = db->stmt_cache[i];
+        if (s != NULL && !s->in_use && s->handle != NULL && s->sql_len == sql.len &&
+            (sql.len == 0 || memcmp(s->sql_key, sql.data, sql.len) == 0)) {
+            s->is_finalized = 0;
+            s->in_use = 1;
+            return RT_LIT(trux_tuple_ptr_struct_16_trux_sqlite_stmt_error, s, NULL);
+        }
+    }
+
     char* c_sql = rt_string_to_c_string(sql, "sqlite prepare sql");
     sqlite3_stmt* handle = NULL;
-    int rc = sqlite3_prepare_v2(db->handle, c_sql, -1, &handle, NULL);
-    free(c_sql);
+    unsigned int prep_flags = (db->stmt_cache_count < RT_SQLITE_STMT_CACHE_SIZE) ? SQLITE_PREPARE_PERSISTENT : 0;
+    int rc = sqlite3_prepare_v3(db->handle, c_sql, (int)sql.len, prep_flags, &handle, NULL);
     if (rc != SQLITE_OK) {
+        free(c_sql);
         return RT_LIT(trux_tuple_ptr_struct_16_trux_sqlite_stmt_error, NULL, rt_error_new(arena, rt_string_from_c(arena, sqlite3_errmsg(db->handle))));
     }
-    trux_sqlite_stmt* stmt = (trux_sqlite_stmt*)malloc(sizeof(trux_sqlite_stmt));
+    trux_sqlite_stmt* stmt = (trux_sqlite_stmt*)calloc(1, sizeof(trux_sqlite_stmt));
     if (stmt == NULL) {
+        free(c_sql);
         sqlite3_finalize(handle);
         return RT_LIT(trux_tuple_ptr_struct_16_trux_sqlite_stmt_error, NULL, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to allocate sqlite stmt handle", 37)));
     }
     stmt->handle = handle;
     stmt->db = db;
     stmt->is_finalized = 0;
-    stmt->next = g_trux_sqlite_stmts;
-    g_trux_sqlite_stmts = stmt;
+    stmt->in_use = 1;
+
+    if (db->stmt_cache_count < RT_SQLITE_STMT_CACHE_SIZE) {
+        stmt->sql_key = c_sql;
+        stmt->sql_len = sql.len;
+        stmt->is_cached = 1;
+        db->stmt_cache[db->stmt_cache_count++] = stmt;
+    } else {
+        free(c_sql);
+        stmt->is_cached = 0;
+    }
     return RT_LIT(trux_tuple_ptr_struct_16_trux_sqlite_stmt_error, stmt, NULL);
 }
 
@@ -280,9 +386,23 @@ static RT_UNUSED rt_error rt_sqlite_finalize(rt_arena* arena, trux_sqlite_stmt* 
     if (stmt == NULL || stmt->is_finalized || stmt->handle == NULL) {
         return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"statement is already finalized", 30));
     }
+    if (stmt->is_cached && stmt->db != NULL && stmt->db->is_open) {
+        int rc = sqlite3_reset(stmt->handle);
+        (void)sqlite3_clear_bindings(stmt->handle);
+        stmt->is_finalized = 1;
+        stmt->in_use = 0;
+        if (rc != SQLITE_OK) {
+            return rt_error_new(arena, rt_string_from_c(arena, sqlite3_errstr(rc)));
+        }
+        return NULL;
+    }
     int rc = sqlite3_finalize(stmt->handle);
     stmt->handle = NULL;
     stmt->is_finalized = 1;
+    stmt->in_use = 0;
+    free(stmt->sql_key);
+    free(stmt);
+
     if (rc != SQLITE_OK) {
         return rt_error_new(arena, rt_string_from_c(arena, sqlite3_errstr(rc)));
     }

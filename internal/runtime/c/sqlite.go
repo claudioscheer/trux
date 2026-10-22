@@ -14,6 +14,7 @@ const SQLiteHeaderSource = `
 #ifndef TRUX_SQLITE_RUNTIME_H
 #define TRUX_SQLITE_RUNTIME_H
 
+#include <pthread.h>
 #include "sqlite3.h"
 
 typedef struct trux_sqlite_db trux_sqlite_db;
@@ -38,31 +39,38 @@ void rt_sqlite_cleanup_all(void);
 
 const SQLiteImplSource = `
 /* --- SQLite Runtime Implementation --- */
+static pthread_mutex_t g_trux_sqlite_tracker_mu = PTHREAD_MUTEX_INITIALIZER;
 static trux_sqlite_db* g_trux_sqlite_dbs = NULL;
 static trux_sqlite_stmt* g_trux_sqlite_stmts = NULL;
 
 RT_UNUSED void rt_sqlite_cleanup_all(void) {
+    pthread_mutex_lock(&g_trux_sqlite_tracker_mu);
     trux_sqlite_stmt* stmt = g_trux_sqlite_stmts;
     while (stmt != NULL) {
+        trux_sqlite_stmt* next = stmt->next;
         if (!stmt->is_finalized && stmt->handle != NULL) {
             sqlite3_finalize(stmt->handle);
             stmt->handle = NULL;
             stmt->is_finalized = 1;
         }
-        stmt = stmt->next;
+        free(stmt);
+        stmt = next;
     }
     g_trux_sqlite_stmts = NULL;
 
     trux_sqlite_db* db = g_trux_sqlite_dbs;
     while (db != NULL) {
+        trux_sqlite_db* next = db->next;
         if (db->is_open && db->handle != NULL) {
             sqlite3_close_v2(db->handle);
             db->handle = NULL;
             db->is_open = 0;
         }
-        db = db->next;
+        free(db);
+        db = next;
     }
     g_trux_sqlite_dbs = NULL;
+    pthread_mutex_unlock(&g_trux_sqlite_tracker_mu);
 }
 
 static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt_arena* arena, rt_string path) {
@@ -74,8 +82,6 @@ static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt
     }
     db->handle = NULL;
     db->is_open = 0;
-    db->next = g_trux_sqlite_dbs;
-    g_trux_sqlite_dbs = db;
 
     int rc = sqlite3_open(c_path, &db->handle);
     free(c_path);
@@ -86,9 +92,16 @@ static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt
             sqlite3_close(db->handle);
             db->handle = NULL;
         }
+        free(db);
         return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, NULL, err);
     }
     db->is_open = 1;
+
+    pthread_mutex_lock(&g_trux_sqlite_tracker_mu);
+    db->next = g_trux_sqlite_dbs;
+    g_trux_sqlite_dbs = db;
+    pthread_mutex_unlock(&g_trux_sqlite_tracker_mu);
+
     return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, db, NULL);
 }
 
@@ -99,6 +112,19 @@ static RT_UNUSED rt_error rt_sqlite_close(rt_arena* arena, trux_sqlite_db* db) {
     int rc = sqlite3_close_v2(db->handle);
     db->handle = NULL;
     db->is_open = 0;
+
+    pthread_mutex_lock(&g_trux_sqlite_tracker_mu);
+    trux_sqlite_db** curr = &g_trux_sqlite_dbs;
+    while (*curr != NULL) {
+        if (*curr == db) {
+            *curr = db->next;
+            break;
+        }
+        curr = &(*curr)->next;
+    }
+    pthread_mutex_unlock(&g_trux_sqlite_tracker_mu);
+    free(db);
+
     if (rc != SQLITE_OK) {
         return rt_error_new(arena, rt_string_from_c(arena, sqlite3_errstr(rc)));
     }
@@ -232,8 +258,12 @@ static RT_UNUSED trux_tuple_ptr_struct_16_trux_sqlite_stmt_error rt_sqlite_prepa
     stmt->handle = handle;
     stmt->db = db;
     stmt->is_finalized = 0;
+
+    pthread_mutex_lock(&g_trux_sqlite_tracker_mu);
     stmt->next = g_trux_sqlite_stmts;
     g_trux_sqlite_stmts = stmt;
+    pthread_mutex_unlock(&g_trux_sqlite_tracker_mu);
+
     return RT_LIT(trux_tuple_ptr_struct_16_trux_sqlite_stmt_error, stmt, NULL);
 }
 
@@ -283,6 +313,19 @@ static RT_UNUSED rt_error rt_sqlite_finalize(rt_arena* arena, trux_sqlite_stmt* 
     int rc = sqlite3_finalize(stmt->handle);
     stmt->handle = NULL;
     stmt->is_finalized = 1;
+
+    pthread_mutex_lock(&g_trux_sqlite_tracker_mu);
+    trux_sqlite_stmt** curr = &g_trux_sqlite_stmts;
+    while (*curr != NULL) {
+        if (*curr == stmt) {
+            *curr = stmt->next;
+            break;
+        }
+        curr = &(*curr)->next;
+    }
+    pthread_mutex_unlock(&g_trux_sqlite_tracker_mu);
+    free(stmt);
+
     if (rc != SQLITE_OK) {
         return rt_error_new(arena, rt_string_from_c(arena, sqlite3_errstr(rc)));
     }

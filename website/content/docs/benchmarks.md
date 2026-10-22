@@ -38,10 +38,10 @@ Benchmarks were conducted using the standard HTTP benchmarking utility [`wrk`](h
 
 ### Workloads Evaluated
 
-1. **Plaintext (`/plaintext`)**: Raw HTTP/1.1 framing and minimal response body (`"Hello, World!"`).
-2. **JSON Serialization (`/json`)**: Static JSON payload with `application/json` headers.
-3. **URL Parameter Extraction (`/users/1024`)**: Dynamic route parameter parsing (`:id`) and dynamic JSON construction.
-4. **Authenticated Middleware (`/api/data`)**: Route-prefix middleware (`useAt`), bearer token header validation, request-scoped context dictionary propagation, and custom headers.
+1. **Plaintext (`/plaintext`)**: Raw HTTP/1.1 framing and minimal response body (`"Hello, World!"`), serving as the zero-database network ceiling baseline.
+2. **SQLite Insert & Query (`/json`)**: Real database transaction per request: creates table, inserts an access log entry (`INSERT INTO logs`), reads it back with a `SELECT` query, and returns JSON.
+3. **SQLite Prepared Query (`/users/1024`)**: Dynamic route parameter parsing (`:id`), preparing a parameterized query statement (`SELECT name, role FROM users WHERE id = ?`), binding parameters (`bindText`), stepping the cursor (`step`), and extracting column values (`columnText`).
+4. **Middleware & SQLite Audit (`/api/data`)**: Prefix middleware (`useAt`), Bearer token validation, logging an audit record into SQLite (`INSERT INTO audit`), request-scoped context dictionary propagation, and privileged JSON response delivery.
 
 ---
 
@@ -53,14 +53,14 @@ Simulates constrained edge environments, micro instances, or single-core serverl
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext** (`/plaintext`) | 100 | **168,967** | 16.60 MB/s | 1.01 ms | 492 µs | 1.20 ms | 9.09 ms | 91.5 MiB |
-| **Plaintext** (`/plaintext`) | 1,000 | **182,076** | 17.89 MB/s | 6.22 ms | 5.53 ms | 13.35 ms | 25.43 ms | 94.8 MiB |
-| **JSON** (`/json`) | 100 | **162,049** | 18.08 MB/s | 590 µs | 459 µs | 1.13 ms | 2.53 ms | 95.6 MiB |
-| **JSON** (`/json`) | 1,000 | **176,102** | 19.65 MB/s | 5.73 ms | 4.95 ms | 12.42 ms | 23.22 ms | 98.6 MiB |
-| **URL Param** (`/users/1024`) | 100 | **155,291** | 17.33 MB/s | 600 µs | 469 µs | 1.14 ms | 2.50 ms | 98.4 MiB |
-| **URL Param** (`/users/1024`) | 1,000 | **173,273** | 19.33 MB/s | 5.79 ms | 5.20 ms | 12.46 ms | 21.69 ms | 101.8 MiB |
-| **Middleware & Auth** (`/api/data`) | 100 | **152,164** | 19.46 MB/s | 598 µs | 471 µs | 1.14 ms | 2.42 ms | 102.4 MiB |
-| **Middleware & Auth** (`/api/data`) | 1,000 | **170,151** | 21.75 MB/s | 5.88 ms | 5.16 ms | 12.93 ms | 22.93 ms | 106.4 MiB |
+| **Plaintext** (`/plaintext`) | 100 | **162,943** | 16.01 MB/s | 1.00 ms | 504 µs | 1.22 ms | 4.95 ms | 91.7 MiB |
+| **Plaintext** (`/plaintext`) | 1,000 | **179,249** | 17.61 MB/s | 6.23 ms | 5.54 ms | 13.36 ms | 25.14 ms | 95.0 MiB |
+| **SQLite Insert & Query** (`/json`) | 100 | **19,990** | 2.65 MB/s | 15.51 ms | 646 µs | 50.76 ms | 90.00 ms | 100.5 MiB |
+| **SQLite Insert & Query** (`/json`) | 1,000 | **20,340** | 2.70 MB/s | 48.17 ms | 53.99 ms | 106.93 ms | 178.15 ms | 109.6 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 100 | **17,509** | 2.34 MB/s | 17.57 ms | 483 µs | 56.78 ms | 101.91 ms | 119.0 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 1,000 | **16,721** | 2.23 MB/s | 55.29 ms | 62.31 ms | 114.56 ms | 171.40 ms | 131.5 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 100 | **23,316** | 3.09 MB/s | 12.06 ms | 1.38 ms | 40.23 ms | 82.92 ms | 135.8 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 1,000 | **22,728** | 3.01 MB/s | 43.66 ms | 46.16 ms | 98.64 ms | 162.56 ms | 144.0 MiB |
 
 ---
 
@@ -70,14 +70,14 @@ Simulates standard dual-core virtual machines (`--cpuset-cpus="0,1" --cpus="2.0"
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext** (`/plaintext`) | 100 | **177,334** | 17.42 MB/s | 835 µs | 453 µs | 1.26 ms | 4.04 ms | 91.6 MiB |
-| **Plaintext** (`/plaintext`) | 1,000 | **315,934** | 31.03 MB/s | 3.74 ms | 2.92 ms | 8.23 ms | 17.98 ms | 94.9 MiB |
-| **JSON** (`/json`) | 100 | **179,575** | 20.04 MB/s | 558 µs | 418 µs | 1.13 ms | 2.54 ms | 95.4 MiB |
-| **JSON** (`/json`) | 1,000 | **314,041** | 35.04 MB/s | 3.57 ms | 2.73 ms | 7.87 ms | 16.75 ms | 98.8 MiB |
-| **URL Param** (`/users/1024`) | 100 | **162,708** | 18.15 MB/s | 573 µs | 417 µs | 1.17 ms | 2.74 ms | 99.3 MiB |
-| **URL Param** (`/users/1024`) | 1,000 | **313,081** | 34.93 MB/s | 3.63 ms | 2.84 ms | 8.13 ms | 16.73 ms | 103.1 MiB |
-| **Middleware & Auth** (`/api/data`) | 100 | **171,384** | 21.91 MB/s | 599 µs | 441 µs | 1.20 ms | 2.79 ms | 103.6 MiB |
-| **Middleware & Auth** (`/api/data`) | 1,000 | **304,410** | 38.92 MB/s | 3.76 ms | 2.89 ms | 8.56 ms | 17.61 ms | 107.1 MiB |
+| **Plaintext** (`/plaintext`) | 100 | **188,426** | 18.51 MB/s | 1.13 ms | 431 µs | 1.18 ms | 16.12 ms | 91.4 MiB |
+| **Plaintext** (`/plaintext`) | 1,000 | **323,778** | 31.80 MB/s | 3.66 ms | 2.86 ms | 8.20 ms | 17.05 ms | 94.2 MiB |
+| **SQLite Insert & Query** (`/json`) | 100 | **20,293** | 2.69 MB/s | 4.58 ms | 3.73 ms | 7.71 ms | 13.90 ms | 101.3 MiB |
+| **SQLite Insert & Query** (`/json`) | 1,000 | **19,321** | 2.56 MB/s | 44.67 ms | 44.47 ms | 55.28 ms | 69.53 ms | 109.6 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 100 | **17,226** | 2.30 MB/s | 5.05 ms | 4.77 ms | 8.98 ms | 12.94 ms | 119.4 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 1,000 | **17,676** | 2.36 MB/s | 49.39 ms | 49.17 ms | 60.30 ms | 67.70 ms | 133.0 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 100 | **21,679** | 2.87 MB/s | 3.84 ms | 3.72 ms | 6.49 ms | 9.15 ms | 138.0 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 1,000 | **21,079** | 2.79 MB/s | 42.64 ms | 42.84 ms | 51.14 ms | 61.92 ms | 146.3 MiB |
 
 ---
 
@@ -87,27 +87,29 @@ Simulates multi-core production server nodes (`--cpuset-cpus="0,1,2,3" --cpus="4
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext** (`/plaintext`) | 100 | **239,323** | 23.50 MB/s | 671 µs | 314 µs | 1.10 ms | 4.43 ms | 91.5 MiB |
-| **Plaintext** (`/plaintext`) | 1,000 | **419,373** | 41.19 MB/s | 2.75 ms | 1.89 ms | 5.93 ms | 13.83 ms | 94.8 MiB |
-| **JSON** (`/json`) | 1,000 | **407,081** | 45.42 MB/s | 920 µs | **524 µs** | 2.05 ms | 5.89 ms | 95.9 MiB |
-| **URL Param** (`/users/1024`) | 1,000 | **397,040** | 44.30 MB/s | 940 µs | **530 µs** | 2.05 ms | 5.98 ms | 98.0 MiB |
-| **Middleware & Auth** (`/api/data`) | 1,000 | **399,442** | 51.07 MB/s | 960 µs | **544 µs** | 2.18 ms | 6.09 ms | 99.8 MiB |
+| **Plaintext** (`/plaintext`) | 100 | **237,913** | 23.37 MB/s | 842 µs | 313 µs | 1.09 ms | 6.00 ms | 91.5 MiB |
+| **Plaintext** (`/plaintext`) | 1,000 | **425,079** | 41.75 MB/s | 2.65 ms | 1.86 ms | 5.78 ms | 12.55 ms | 94.4 MiB |
+| **SQLite Insert & Query** (`/json`) | 100 | **14,958** | 1.98 MB/s | 2.92 ms | 2.79 ms | 4.79 ms | 6.26 ms | 98.9 MiB |
+| **SQLite Insert & Query** (`/json`) | 1,000 | **14,869** | 1.97 MB/s | 32.18 ms | 32.04 ms | 38.49 ms | 47.61 ms | 105.0 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 100 | **13,319** | 1.78 MB/s | 2.84 ms | 2.76 ms | 3.94 ms | 5.07 ms | 112.2 MiB |
+| **SQLite Prepared Query** (`/users/1024`) | 1,000 | **13,234** | 1.77 MB/s | 37.94 ms | 37.31 ms | 46.07 ms | 50.51 ms | 120.6 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 100 | **15,970** | 2.12 MB/s | 2.61 ms | 2.51 ms | 4.32 ms | 5.94 ms | 123.8 MiB |
+| **Middleware & SQLite Audit** (`/api/data`) | 1,000 | **15,824** | 2.10 MB/s | 31.79 ms | 32.27 ms | 37.87 ms | 44.15 ms | 129.4 MiB |
 
 ---
 
 ## Analysis & Key Takeaways
 
-### Near-Linear Multi-Core Scaling
-Because worker threads do not share rings, locks, or connection queues, scaling from 1 core to 2 cores yields a **1.74x throughput multiplier** (182k to 316k req/s), and 4 cores scales to **419k req/s**. The Linux kernel handles connection distribution through `SO_REUSEPORT` with zero cross-thread locking.
+### Reliable Real-World Workload Metrics
+Rather than testing empty responses, the benchmark exercises real computational workloads: executing SQLite table setup, row insertions, prepared statement compilation, 1-based parameter binding, cursor stepping, column extraction, and token authentication on every single HTTP request.
 
-### Low Middleware Overhead
-Full-pipeline middleware (header parsing, authorization verification, context injection, URL routing, and response header mutation) achieves **399,442 req/s** on 4 cores, retaining over **95%** of raw plaintext throughput (419,373 req/s).
+### Raw I/O vs. Database Workloads
+- **Network I/O Ceiling**: The raw plaintext handler scales from **179,249 req/s** on 1 core to **425,079 req/s** on 4 cores with sub-2ms median latency.
+- **SQLite Database Throughput**: Endpoints executing full SQLite database operations sustain **13,000 to 23,000 requests per second** under 1,000 concurrent persistent connections.
+- **Low Median Tail Latency**: At 100 concurrent connections across 4 cores, median latency for SQLite operations is strictly under **2.8 ms** (p99 < 6.3 ms).
 
-### Sub-Millisecond Median Latency
-At 1,000 concurrent connections across 4 cores, median (p50) latency is consistently **~524 µs to 544 µs**, with 99th percentile tail latency bounded strictly below **6.1 ms**.
-
-### Memory Stability
-Container resident set size remains flat between **91 MiB and 107 MiB** across all workloads and concurrency tiers. Preallocated kernel buffer rings prevent heap fragmentation and eliminate garbage collection pauses.
+### Memory Predictability Under Continuous Load
+Throughout hundreds of thousands of concurrent database transactions, container memory remains bounded between **91 MiB and 146 MiB**. Automatic statement and connection reclamation prevents heap bloat and guarantees long-running reliability without garbage collection pauses.
 
 ---
 

@@ -1,16 +1,25 @@
 package main
 
 import "http"
+import "sqlite"
 
 func authMiddleware(request int) int {
   let token string = http.header(request, "Authorization")
-  if token == "Bearer secret-benchmark-token" {
-    http.set(request, "userId", "bench-user-1")
-    return 0
+  if token != "Bearer secret-benchmark-token" {
+    http.setHeader(request, "WWW-Authenticate", "Bearer")
+    http.json(request, 401, "{\"error\":\"unauthorized\"}\n")
+    return 1
   }
-  http.setHeader(request, "WWW-Authenticate", "Bearer")
-  http.json(request, 401, "{\"error\":\"unauthorized\"}\n")
-  return 1
+
+  let db *sqlite.DB, err error = sqlite.open(":memory:")
+  if err == nil {
+    let _ error = sqlite.exec(db, "CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, path TEXT);")
+    let _ error = sqlite.exec(db, "INSERT INTO audit (path) VALUES ('/api/data');")
+    let _ error = sqlite.close(db)
+  }
+
+  http.set(request, "userId", "bench-user-1")
+  return 0
 }
 
 func plaintext(request int) int {
@@ -18,14 +27,60 @@ func plaintext(request int) int {
   return 0
 }
 
-func json(request int) int {
-  http.json(request, 200, "{\"message\":\"Hello, World!\"}\n")
+func jsonLogging(request int) int {
+  let db *sqlite.DB, err error = sqlite.open(":memory:")
+  if err != nil {
+    http.json(request, 500, "{\"error\":\"db open failed\"}\n")
+    return 1
+  }
+  let _ error = sqlite.exec(db, "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, path TEXT, status TEXT);")
+  let _ error = sqlite.exec(db, "INSERT INTO logs (path, status) VALUES ('/json', '200');")
+  let rows list[map[string]string], qerr error = sqlite.query(db, "SELECT id, path, status FROM logs WHERE id = 1;")
+  if qerr != nil || len(rows) == 0 {
+    let _ error = sqlite.close(db)
+    http.json(request, 500, "{\"error\":\"query failed\"}\n")
+    return 1
+  }
+  let row map[string]string = rows[0]
+  let resp string = "{\"status\":\"logged\",\"id\":\"" + row["id"] + "\",\"path\":\"" + row["path"] + "\"}\n"
+  let _ error = sqlite.close(db)
+  http.json(request, 200, resp)
   return 0
 }
 
 func userById(request int) int {
   let id string = http.param(request, "id")
-  let resp string = "{\"id\":\"" + id + "\",\"role\":\"member\"}\n"
+  let db *sqlite.DB, err error = sqlite.open(":memory:")
+  if err != nil {
+    http.json(request, 500, "{\"error\":\"db open failed\"}\n")
+    return 1
+  }
+
+  let _ error = sqlite.exec(db, "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT, role TEXT);")
+  let _ error = sqlite.exec(db, "INSERT INTO users (id, name, role) VALUES ('1024', 'Alice', 'member');")
+
+  let stmt *sqlite.Stmt, perr error = sqlite.prepare(db, "SELECT name, role FROM users WHERE id = ?;")
+  if perr != nil {
+    let _ error = sqlite.close(db)
+    http.json(request, 500, "{\"error\":\"prepare failed\"}\n")
+    return 1
+  }
+
+  let _ error = sqlite.bindText(stmt, 1, id)
+  let hasRow bool, serr error = sqlite.step(stmt)
+  if serr != nil || !hasRow {
+    let _ error = sqlite.finalize(stmt)
+    let _ error = sqlite.close(db)
+    http.json(request, 404, "{\"error\":\"user not found\"}\n")
+    return 1
+  }
+
+  let name string = sqlite.columnText(stmt, 0)
+  let role string = sqlite.columnText(stmt, 1)
+  let _ error = sqlite.finalize(stmt)
+  let _ error = sqlite.close(db)
+
+  let resp string = "{\"id\":\"" + id + "\",\"name\":\"" + name + "\",\"role\":\"" + role + "\"}\n"
   http.json(request, 200, resp)
   return 0
 }
@@ -39,7 +94,7 @@ func protectedData(request int) int {
 
 func main() int {
   http.get("/plaintext", plaintext)
-  http.get("/json", json)
+  http.get("/json", jsonLogging)
   http.get("/users/:id", userById)
 
   http.useAt("/api", authMiddleware)

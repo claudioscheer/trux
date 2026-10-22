@@ -13,6 +13,7 @@ type Program struct {
 	PackageName string
 	Functions   []*Func
 	Kernels     []*Func
+	Structs     map[string]types.StructSig
 	UsesHTTP    bool
 	UsedTypes   []ast.Type
 }
@@ -82,6 +83,32 @@ type IndexAssignStmt struct {
 }
 
 func (*IndexAssignStmt) stmtNode() {}
+
+type FieldAssignStmt struct {
+	Target *FieldExpr
+	Pos    token.Position
+	Value  Expr
+}
+
+func (*FieldAssignStmt) stmtNode() {}
+
+type DerefAssignStmt struct {
+	Target Expr
+	Pos    token.Position
+	Value  Expr
+}
+
+func (*DerefAssignStmt) stmtNode() {}
+
+type DeleteStmt struct {
+	Map     Expr
+	Key     Expr
+	Pos     token.Position
+	MapType ast.Type
+	KeyType ast.Type
+}
+
+func (*DeleteStmt) stmtNode() {}
 
 type IfStmt struct {
 	Pos       token.Position
@@ -408,6 +435,106 @@ func (e *ListLiteral) Ownership() types.Origin { return e.Origin }
 
 func (*ListLiteral) exprNode() {}
 
+type StructFieldInit struct {
+	Name  string
+	Value Expr
+}
+
+type StructLiteral struct {
+	Fields []StructFieldInit
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *StructLiteral) Type() ast.Type { return e.Typ }
+
+func (e *StructLiteral) Ownership() types.Origin { return e.Origin }
+
+func (*StructLiteral) exprNode() {}
+
+type MapEntry struct {
+	Key   Expr
+	Value Expr
+}
+
+type MapLiteral struct {
+	Entries []MapEntry
+	Typ     ast.Type
+	Origin  types.Origin
+}
+
+func (e *MapLiteral) Type() ast.Type { return e.Typ }
+
+func (e *MapLiteral) Ownership() types.Origin { return e.Origin }
+
+func (*MapLiteral) exprNode() {}
+
+type NewExpr struct {
+	ElemType ast.Type
+	Typ      ast.Type
+	Origin   types.Origin
+}
+
+func (e *NewExpr) Type() ast.Type { return e.Typ }
+
+func (e *NewExpr) Ownership() types.Origin { return e.Origin }
+
+func (*NewExpr) exprNode() {}
+
+type FieldExpr struct {
+	Object Expr
+	Field  string
+	Pos    token.Position
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *FieldExpr) Type() ast.Type { return e.Typ }
+
+func (e *FieldExpr) Ownership() types.Origin { return e.Origin }
+
+func (*FieldExpr) exprNode() {}
+
+type MapLookupExpr struct {
+	Map     Expr
+	Key     Expr
+	MapType *ast.MapType
+	Typ     ast.Type
+	Origin  types.Origin
+}
+
+func (e *MapLookupExpr) Type() ast.Type { return e.Typ }
+
+func (e *MapLookupExpr) Ownership() types.Origin { return e.Origin }
+
+func (*MapLookupExpr) exprNode() {}
+
+type KeysExpr struct {
+	Map     Expr
+	MapType *ast.MapType
+	Typ     ast.Type
+	Origin  types.Origin
+}
+
+func (e *KeysExpr) Type() ast.Type { return e.Typ }
+
+func (e *KeysExpr) Ownership() types.Origin { return e.Origin }
+
+func (*KeysExpr) exprNode() {}
+
+type ValuesExpr struct {
+	Map     Expr
+	MapType *ast.MapType
+	Typ     ast.Type
+	Origin  types.Origin
+}
+
+func (e *ValuesExpr) Type() ast.Type { return e.Typ }
+
+func (e *ValuesExpr) Ownership() types.Origin { return e.Origin }
+
+func (*ValuesExpr) exprNode() {}
+
 type MakeExpr struct {
 	Len    Expr
 	Typ    ast.Type
@@ -719,6 +846,7 @@ func (*HTTPRequestStringExpr) exprNode() {}
 type UnaryExpr struct {
 	Operator string
 	Operand  Expr
+	Pos      token.Position
 	Typ      ast.Type
 	Origin   types.Origin
 }
@@ -783,7 +911,7 @@ func (e *SliceExpr) Ownership() types.Origin { return e.Origin }
 func (*SliceExpr) exprNode() {}
 
 func Build(program *ast.Program, info *types.Info) (*Program, error) {
-	builder := builder{info: info, used: &usedTypes{seen: map[string]bool{}}}
+	builder := builder{info: info, used: &usedTypes{info: info, seen: map[string]bool{}}}
 	out, err := builder.buildProgram(program)
 	if err != nil {
 		return nil, err
@@ -793,19 +921,76 @@ func Build(program *ast.Program, info *types.Info) (*Program, error) {
 }
 
 type usedTypes struct {
+	info *types.Info
 	list []ast.Type
 	seen map[string]bool
+}
+
+func canonicalTypeKey(typ ast.Type) string {
+	switch t := typ.(type) {
+	case ast.ScalarType:
+		return string(t)
+	case *ast.StructType:
+		return "struct:" + t.TargetName()
+	case *ast.PointerType:
+		return "*" + canonicalTypeKey(t.Elem)
+	case *ast.ArrayType:
+		return fmt.Sprintf("[%d]%s", t.Length, canonicalTypeKey(t.Elem))
+	case *ast.SliceType:
+		return "[]" + canonicalTypeKey(t.Elem)
+	case *ast.ListType:
+		return "list[" + canonicalTypeKey(t.Elem) + "]"
+	case *ast.MapType:
+		return "map[" + canonicalTypeKey(t.Key) + "]" + canonicalTypeKey(t.Value)
+	case *ast.GPUBufferType:
+		return "gpu.Buffer[" + canonicalTypeKey(t.Elem) + "]"
+	case *ast.TupleType:
+		var parts []string
+		for _, elem := range t.Types {
+			parts = append(parts, canonicalTypeKey(elem))
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
+	default:
+		return typ.String()
+	}
 }
 
 func (u *usedTypes) note(typ ast.Type) {
 	if u == nil || typ == nil {
 		return
 	}
-	key := typ.String()
+	key := canonicalTypeKey(typ)
 	if u.seen[key] {
 		return
 	}
 	u.seen[key] = true
+	switch t := typ.(type) {
+	case *ast.ArrayType:
+		u.note(t.Elem)
+	case *ast.SliceType:
+		u.note(t.Elem)
+	case *ast.ListType:
+		u.note(t.Elem)
+	case *ast.MapType:
+		u.note(t.Key)
+		u.note(t.Value)
+	case *ast.PointerType:
+		u.note(t.Elem)
+	case *ast.GPUBufferType:
+		u.note(t.Elem)
+	case *ast.TupleType:
+		for _, elem := range t.Types {
+			u.note(elem)
+		}
+	case *ast.StructType:
+		if u.info != nil {
+			if sig, ok := u.info.Structs[t.TargetName()]; ok {
+				for _, field := range sig.Fields {
+					u.note(field.Type)
+				}
+			}
+		}
+	}
 	u.list = append(u.list, typ)
 }
 
@@ -815,7 +1000,11 @@ type builder struct {
 }
 
 func (b builder) buildProgram(program *ast.Program) (*Program, error) {
-	out := &Program{PackageName: program.PackageName, UsesHTTP: len(b.info.HTTPCalls) > 0}
+	structs := make(map[string]types.StructSig, len(b.info.Structs))
+	for k, v := range b.info.Structs {
+		structs[k] = v
+	}
+	out := &Program{PackageName: program.PackageName, Structs: structs, UsesHTTP: len(b.info.HTTPCalls) > 0}
 	for _, fn := range program.Functions {
 		irFn, err := b.buildFunc(fn)
 		if err != nil {
@@ -927,6 +1116,26 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 			return nil, err
 		}
 		return &IndexAssignStmt{Target: target.(*IndexExpr), Pos: stmt.Pos(), Value: value}, nil
+	case *ast.FieldAssignStmt:
+		target, err := b.buildExpr(stmt.Target)
+		if err != nil {
+			return nil, err
+		}
+		value, err := b.buildExpr(stmt.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &FieldAssignStmt{Target: target.(*FieldExpr), Pos: stmt.Pos(), Value: value}, nil
+	case *ast.DerefAssignStmt:
+		target, err := b.buildExpr(stmt.Target.Operand)
+		if err != nil {
+			return nil, err
+		}
+		value, err := b.buildExpr(stmt.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &DerefAssignStmt{Target: target, Pos: stmt.Pos(), Value: value}, nil
 	case *ast.IfStmt:
 		condition, err := b.buildExpr(stmt.Condition)
 		if err != nil {
@@ -999,6 +1208,13 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 					return nil, err
 				}
 				return &AppendStmt{List: args[0], Pos: stmt.Pos(), Value: args[1], ListType: appendSig.ListType, ElemType: appendSig.ElemType}, nil
+			}
+			if deleteSig, ok := b.info.DeleteCalls[call]; ok {
+				args, err := b.buildExprs(call.Args)
+				if err != nil {
+					return nil, err
+				}
+				return &DeleteStmt{Map: args[0], Key: args[1], Pos: stmt.Pos(), MapType: deleteSig, KeyType: deleteSig.Key}, nil
 			}
 			if ioSig, ok := b.info.IOCalls[call]; ok {
 				switch ioSig.Kind {
@@ -1188,10 +1404,41 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 			return nil, err
 		}
 		return &ListLiteral{Elements: elements, Typ: typ, Origin: origin}, nil
+	case *ast.StructLiteral:
+		var fields []StructFieldInit
+		for _, field := range expr.Fields {
+			val, err := b.buildExpr(field.Value)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, StructFieldInit{Name: field.Name, Value: val})
+		}
+		return &StructLiteral{Fields: fields, Typ: typ, Origin: origin}, nil
+	case *ast.MapLiteral:
+		var entries []MapEntry
+		for _, entry := range expr.Entries {
+			k, err := b.buildExpr(entry.Key)
+			if err != nil {
+				return nil, err
+			}
+			v, err := b.buildExpr(entry.Value)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, MapEntry{Key: k, Value: v})
+		}
+		return &MapLiteral{Entries: entries, Typ: typ, Origin: origin}, nil
+	case *ast.NewExpr:
+		b.used.note(expr.ElemType)
+		return &NewExpr{ElemType: expr.ElemType, Typ: typ, Origin: origin}, nil
 	case *ast.MakeExpr:
-		length, err := b.buildExpr(expr.Len)
-		if err != nil {
-			return nil, err
+		var length Expr
+		if expr.Len != nil {
+			var err error
+			length, err = b.buildExpr(expr.Len)
+			if err != nil {
+				return nil, err
+			}
 		}
 		return &MakeExpr{Len: length, Typ: typ, Origin: origin}, nil
 	case *ast.IdentExpr:
@@ -1235,6 +1482,20 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 			}
 			return &LenExpr{Value: arg, Typ: typ, Origin: origin}, nil
 		}
+		if mt, ok := b.info.KeysCalls[expr]; ok {
+			arg, err := b.buildExpr(expr.Args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &KeysExpr{Map: arg, MapType: mt, Typ: typ, Origin: origin}, nil
+		}
+		if mt, ok := b.info.ValuesCalls[expr]; ok {
+			arg, err := b.buildExpr(expr.Args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &ValuesExpr{Map: arg, MapType: mt, Typ: typ, Origin: origin}, nil
+		}
 		sig, ok := b.info.ResolvedCalls[expr]
 		if !ok {
 			return nil, fmt.Errorf("missing resolved call for %q", expr.SourceName())
@@ -1249,7 +1510,13 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &UnaryExpr{Operator: expr.Operator, Operand: operand, Typ: typ, Origin: origin}, nil
+		return &UnaryExpr{Operator: expr.Operator, Operand: operand, Pos: expr.Start, Typ: typ, Origin: origin}, nil
+	case *ast.FieldExpr:
+		object, err := b.buildExpr(expr.Object)
+		if err != nil {
+			return nil, err
+		}
+		return &FieldExpr{Object: object, Field: expr.Field, Pos: expr.Start, Typ: typ, Origin: origin}, nil
 	case *ast.BinaryExpr:
 		left, err := b.buildExpr(expr.Left)
 		if err != nil {
@@ -1268,6 +1535,9 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 		index, err := b.buildExpr(expr.Index)
 		if err != nil {
 			return nil, err
+		}
+		if mt, ok := b.info.MapLookups[expr]; ok {
+			return &MapLookupExpr{Map: collection, Key: index, MapType: mt, Typ: typ, Origin: origin}, nil
 		}
 		return &IndexExpr{Collection: collection, Index: index, Typ: typ, Origin: origin}, nil
 	case *ast.SliceExpr:

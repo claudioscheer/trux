@@ -739,3 +739,64 @@ func main() int {
 		t.Errorf("binding 0 name want _, got %q", let2.Bindings[0].Name)
 	}
 }
+
+func TestParseStructsPointersAndMaps(t *testing.T) {
+	src := `package main
+
+pub type Point struct {
+    x int
+    y int
+}
+
+type Node struct {
+    val int, next *Node
+}
+
+func main() int {
+    let p Point = Point{x: 1, y: 2}
+    let ptr *Point = &p
+    let heap *Point = new(Point)
+    let heapLit *Point = &Point{x: 3}
+    *heap = Point{}
+    ptr.x = 10
+    let m map[string]int = map[string]int{"a": ptr.x, "b": (*heap).y}
+    let m2 map[*Point]bool = make(map[*Point]bool)
+    let m3 map[int]string = make(map[int]string, 8)
+    let v int, ok bool = m["a"]
+    return v
+}
+`
+	program := mustParse(t, src)
+	if len(program.Structs) != 2 {
+		t.Fatalf("struct count = %d, want 2", len(program.Structs))
+	}
+	if !program.Structs[0].Public || program.Structs[0].Name != "Point" || len(program.Structs[0].Fields) != 2 {
+		t.Fatalf("struct 0 = %#v", program.Structs[0])
+	}
+	if program.Structs[1].Public || program.Structs[1].Name != "Node" || len(program.Structs[1].Fields) != 2 {
+		t.Fatalf("struct 1 = %#v", program.Structs[1])
+	}
+	if !ast.TypeEqual(program.Structs[1].Fields[1].Type, &ast.PointerType{Elem: &ast.StructType{Name: "Node"}}) {
+		t.Fatalf("next field type = %#v", program.Structs[1].Fields[1].Type)
+	}
+
+	stmts := program.Functions[0].Body.Statements
+	if _, ok := stmts[0].(*ast.LetStmt).Value.(*ast.StructLiteral); !ok {
+		t.Fatalf("stmt 0 value = %T, want *ast.StructLiteral", stmts[0].(*ast.LetStmt).Value)
+	}
+	if u, ok := stmts[1].(*ast.LetStmt).Value.(*ast.UnaryExpr); !ok || u.Operator != "&" {
+		t.Fatalf("stmt 1 value = %#v, want &p", stmts[1].(*ast.LetStmt).Value)
+	}
+	if _, ok := stmts[2].(*ast.LetStmt).Value.(*ast.NewExpr); !ok {
+		t.Fatalf("stmt 2 value = %T, want *ast.NewExpr", stmts[2].(*ast.LetStmt).Value)
+	}
+	if _, ok := stmts[4].(*ast.DerefAssignStmt); !ok {
+		t.Fatalf("stmt 4 = %T, want *ast.DerefAssignStmt", stmts[4])
+	}
+	if _, ok := stmts[5].(*ast.FieldAssignStmt); !ok {
+		t.Fatalf("stmt 5 = %T, want *ast.FieldAssignStmt", stmts[5])
+	}
+	if _, ok := stmts[6].(*ast.LetStmt).Value.(*ast.MapLiteral); !ok {
+		t.Fatalf("stmt 6 value = %T, want *ast.MapLiteral", stmts[6].(*ast.LetStmt).Value)
+	}
+}

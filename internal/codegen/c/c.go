@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/claudioscheer/trux/internal/ast"
@@ -26,6 +27,8 @@ var runtimeTuples = map[string]bool{
 }
 
 type funcEmitter struct {
+	program *ir.Program
+	opts    Options
 	fn      *ir.Func
 	temp    int
 	loops   []string
@@ -68,6 +71,12 @@ func stmtNeedsFrame(stmt ir.Stmt) bool {
 		return exprNeedsFrame(stmt.Value)
 	case *ir.IndexAssignStmt, *ir.AppendStmt:
 		return true
+	case *ir.FieldAssignStmt:
+		return exprNeedsFrame(stmt.Target) || exprNeedsFrame(stmt.Value)
+	case *ir.DerefAssignStmt:
+		return exprNeedsFrame(stmt.Target) || exprNeedsFrame(stmt.Value)
+	case *ir.DeleteStmt:
+		return exprNeedsFrame(stmt.Map) || exprNeedsFrame(stmt.Key)
 	case *ir.IfStmt:
 		return exprNeedsFrame(stmt.Condition) || stmtsNeedFrame(stmt.Then) || stmtsNeedFrame(stmt.Else)
 	case *ir.ForStmt:
@@ -123,7 +132,7 @@ func exprNeedsFrame(expr ir.Expr) bool {
 		return false
 	}
 	switch expr := expr.(type) {
-	case *ir.IdentExpr, *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.GPUCoordExpr, *ir.TimeNowExpr:
+	case *ir.IdentExpr, *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.NilLiteral, *ir.GPUCoordExpr, *ir.TimeNowExpr:
 		return false
 	case *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr:
 		return true
@@ -131,8 +140,12 @@ func exprNeedsFrame(expr ir.Expr) bool {
 		return exprNeedsFrame(expr.Path)
 	case *ir.PathQueryExpr:
 		return exprNeedsFrame(expr.Path)
-	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr:
+	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.KeysExpr, *ir.ValuesExpr, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr:
 		return true
+	case *ir.FieldExpr:
+		return exprNeedsFrame(expr.Object)
+	case *ir.MapLookupExpr:
+		return exprNeedsFrame(expr.Map) || exprNeedsFrame(expr.Key)
 	case *ir.CallExpr:
 		if isDynamicType(expr.Type()) {
 			return true
@@ -149,6 +162,9 @@ func exprNeedsFrame(expr ir.Expr) bool {
 		}
 		return exprNeedsFrame(expr.Left) || exprNeedsFrame(expr.Right)
 	case *ir.UnaryExpr:
+		if expr.Operator == "&" {
+			return true
+		}
 		return exprNeedsFrame(expr.Operand)
 	case *ir.LenExpr:
 		return exprNeedsFrame(expr.Value)
@@ -268,7 +284,14 @@ func stmtPublishesFrame(stmt ir.Stmt, declared map[string]bool, tainted map[stri
 		if exprPublishesFrame(stmt.Target.Collection, declared, tainted) || exprPublishesFrame(stmt.Target.Index, declared, tainted) || exprPublishesFrame(stmt.Value, declared, tainted) {
 			return true
 		}
+		if _, isMap := stmt.Target.Collection.Type().(*ast.MapType); isMap && valueReferencesFrame(stmt.Target.Index, tainted) {
+			return true
+		}
 		return valueReferencesFrame(stmt.Value, tainted)
+	case *ir.FieldAssignStmt, *ir.DerefAssignStmt:
+		return true
+	case *ir.DeleteStmt:
+		return exprPublishesFrame(stmt.Map, declared, tainted) || exprPublishesFrame(stmt.Key, declared, tainted)
 	case *ir.IfStmt:
 		if exprPublishesFrame(stmt.Condition, declared, tainted) {
 			return true
@@ -351,7 +374,29 @@ func exprPublishesFrame(expr ir.Expr, declared map[string]bool, tainted map[stri
 		return false
 	}
 	switch expr := expr.(type) {
-	case *ir.IdentExpr, *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.GPUCoordExpr, *ir.TimeNowExpr, *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr:
+	case *ir.IdentExpr, *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.NilLiteral, *ir.NewExpr, *ir.GPUCoordExpr, *ir.TimeNowExpr, *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr:
+		return false
+	case *ir.FieldExpr:
+		return exprPublishesFrame(expr.Object, declared, tainted)
+	case *ir.MapLookupExpr:
+		return exprPublishesFrame(expr.Map, declared, tainted) || exprPublishesFrame(expr.Key, declared, tainted)
+	case *ir.KeysExpr:
+		return exprPublishesFrame(expr.Map, declared, tainted)
+	case *ir.ValuesExpr:
+		return exprPublishesFrame(expr.Map, declared, tainted)
+	case *ir.StructLiteral:
+		for _, f := range expr.Fields {
+			if exprPublishesFrame(f.Value, declared, tainted) {
+				return true
+			}
+		}
+		return false
+	case *ir.MapLiteral:
+		for _, entry := range expr.Entries {
+			if exprPublishesFrame(entry.Key, declared, tainted) || exprPublishesFrame(entry.Value, declared, tainted) {
+				return true
+			}
+		}
 		return false
 	case *ir.CallExpr:
 		for _, arg := range expr.Args {
@@ -431,17 +476,26 @@ func valueReferencesFrame(expr ir.Expr, tainted map[string]bool) bool {
 	switch expr := expr.(type) {
 	case *ir.IdentExpr:
 		return tainted[expr.Name]
-	case *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.GPUCoordExpr, *ir.TimeNowExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr, *ir.ImageDimensionExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr:
+	case *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.NilLiteral, *ir.GPUCoordExpr, *ir.TimeNowExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr, *ir.ImageDimensionExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr:
 		return false
 	case *ir.BinaryExpr:
 		if expr.Operator == "+" && ast.TypeEqual(expr.Type(), ast.StringType) {
 			return true
 		}
 		return false
-	case *ir.UnaryExpr, *ir.LenExpr, *ir.PathQueryExpr:
+	case *ir.UnaryExpr:
+		return expr.Operator == "&" || isDynamicType(expr.Type())
+	case *ir.LenExpr, *ir.PathQueryExpr:
 		return false
-	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr:
+	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.KeysExpr, *ir.ValuesExpr, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr:
 		return true
+	case *ir.FieldExpr:
+		if !isDynamicType(expr.Type()) && !ast.TypeEqual(expr.Type(), ast.StringType) {
+			return false
+		}
+		return valueReferencesFrame(expr.Object, tainted)
+	case *ir.MapLookupExpr:
+		return valueReferencesFrame(expr.Map, tainted)
 	case *ir.CallExpr:
 		return isDynamicType(expr.Type())
 	case *ir.IndexExpr, *ir.SliceExpr:
@@ -509,16 +563,8 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	}
 	fmt.Fprintln(&out)
 
-	families, err := nestedCollectionFamilies(program)
-	if err != nil {
+	if err := emitProgramTypes(&out, program); err != nil {
 		return "", err
-	}
-	if len(families) > 0 {
-		for _, family := range families {
-			fmt.Fprintf(&out, "#define RT_CLONE_VALUE_%s(ARENA, VALUE) %s((ARENA), (VALUE))\n", family.name, family.cloneFn)
-			fmt.Fprintf(&out, "RT_DEFINE_COLLECTIONS(%s, %s)\n", family.name, family.cType)
-		}
-		fmt.Fprintln(&out)
 	}
 
 	tuples, err := collectTupleTypes(program)
@@ -568,7 +614,7 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	}
 
 	for _, fn := range program.Functions {
-		if err := emitFunc(&out, fn, opts); err != nil {
+		if err := emitFunc(&out, program, fn, opts); err != nil {
 			return "", err
 		}
 		fmt.Fprintln(&out)
@@ -592,7 +638,7 @@ func emitPrototype(out *bytes.Buffer, fn *ir.Func) error {
 	return emitSignature(out, fn, true)
 }
 
-func emitFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
+func emitFunc(out *bytes.Buffer, program *ir.Program, fn *ir.Func, opts Options) error {
 	emitLine(out, "", fn.Pos, opts.SourceRoot)
 	if err := emitSignature(out, fn, false); err != nil {
 		return err
@@ -613,7 +659,7 @@ func emitFunc(out *bytes.Buffer, fn *ir.Func, opts Options) error {
 		scratch = frameArena
 	}
 	fmt.Fprintf(out, "    %s trux_return_value;\n", returnType)
-	emitter := &funcEmitter{fn: fn, scratch: scratch}
+	emitter := &funcEmitter{program: program, opts: opts, fn: fn, scratch: scratch}
 	for _, stmt := range fn.Body {
 		if err := emitter.emitStmt(out, stmt, 1, opts); err != nil {
 			return err
@@ -873,11 +919,15 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		if err != nil {
 			return err
 		}
-		index, err := e.emitOrderedOperand(stmt.Target.Index, e.scratch)
+		valueArena := collectionValueArena(stmt.Target.Collection)
+		indexArena := e.scratch
+		if _, isMap := stmt.Target.Collection.Type().(*ast.MapType); isMap {
+			indexArena = valueArena
+		}
+		index, err := e.emitOrderedOperand(stmt.Target.Index, indexArena)
 		if err != nil {
 			return err
 		}
-		valueArena := collectionValueArena(stmt.Target.Collection)
 		value, err := e.emitOrderedOperand(stmt.Value, valueArena)
 		if err != nil {
 			return err
@@ -890,6 +940,60 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		e.writePrelude(out, indent, index.prelude)
 		e.writePrelude(out, indent, value.prelude)
 		fmt.Fprintf(out, "%s%s(%s, %s, %s);\n", indent, setter, collection.value, index.value, value.value)
+	case *ir.FieldAssignStmt:
+		target, err := e.emitLValue(stmt.Target, e.scratch)
+		if err != nil {
+			return err
+		}
+		valueArena := lvalueValueArena(stmt.Target)
+		value, err := e.emitOrderedOperand(stmt.Value, valueArena)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, target.prelude)
+		e.writePrelude(out, indent, value.prelude)
+		fmt.Fprintf(out, "%s%s = %s;\n", indent, target.value, value.value)
+	case *ir.DerefAssignStmt:
+		target, err := e.emitOrderedOperand(stmt.Target, e.scratch)
+		if err != nil {
+			return err
+		}
+		valueArena := collectionValueArena(stmt.Target)
+		value, err := e.emitOrderedOperand(stmt.Value, valueArena)
+		if err != nil {
+			return err
+		}
+		elemCType, err := emitType(stmt.Value.Type())
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, target.prelude)
+		e.writePrelude(out, indent, value.prelude)
+		fmt.Fprintf(out, "%s(*((%s*)rt_check_not_null_at(%s, %s, %d, %d))) = %s;\n",
+			indent,
+			elemCType,
+			target.value,
+			cStringLiteral(sourcePath(stmt.Pos.File, opts.SourceRoot)),
+			stmt.Pos.Line,
+			stmt.Pos.Column,
+			value.value,
+		)
+	case *ir.DeleteStmt:
+		mapVal, err := e.emitOrderedOperand(stmt.Map, e.scratch)
+		if err != nil {
+			return err
+		}
+		keyVal, err := e.emitOrderedOperand(stmt.Key, e.scratch)
+		if err != nil {
+			return err
+		}
+		mapName, err := mapRuntimeName(stmt.MapType.(*ast.MapType))
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, mapVal.prelude)
+		e.writePrelude(out, indent, keyVal.prelude)
+		fmt.Fprintf(out, "%srt_map_%s_delete(%s, %s);\n", indent, mapName, mapVal.value, keyVal.value)
 	case *ir.IfStmt:
 		condition, err := e.emitCondition(stmt.Condition)
 		if err != nil {
@@ -1393,6 +1497,170 @@ func collectionValueArena(collection ir.Expr) string {
 	return frameArena
 }
 
+func lvalueValueArena(expr ir.Expr) string {
+	for {
+		switch e := expr.(type) {
+		case *ir.FieldExpr:
+			if _, ok := e.Object.Type().(*ast.PointerType); ok {
+				return collectionValueArena(e.Object)
+			}
+			expr = e.Object
+		case *ir.IndexExpr:
+			return collectionValueArena(e.Collection)
+		case *ir.UnaryExpr:
+			if e.Operator == "*" {
+				return collectionValueArena(e.Operand)
+			}
+			return collectionValueArena(e)
+		default:
+			return collectionValueArena(expr)
+		}
+	}
+}
+
+func (e *funcEmitter) emitLValue(expr ir.Expr, targetArena string) (emittedExpr, error) {
+	switch expr := expr.(type) {
+	case *ir.IdentExpr:
+		return emittedExpr{value: mangleIdent(expr.Name)}, nil
+	case *ir.UnaryExpr:
+		if expr.Operator == "*" {
+			op, err := e.emitOrderedOperand(expr.Operand, targetArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			elemCType, err := emitType(expr.Type())
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			val := fmt.Sprintf("(*((%s*)rt_check_not_null_at(%s, %s, %d, %d)))",
+				elemCType,
+				op.value,
+				cStringLiteral(sourcePath(expr.Pos.File, e.opts.SourceRoot)),
+				expr.Pos.Line,
+				expr.Pos.Column,
+			)
+			return emittedExpr{prelude: op.prelude, value: val}, nil
+		}
+	case *ir.FieldExpr:
+		if ptrType, ok := expr.Object.Type().(*ast.PointerType); ok {
+			obj, err := e.emitOrderedOperand(expr.Object, targetArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			structCType, err := emitType(ptrType.Elem)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			val := fmt.Sprintf("(((%s*)rt_check_not_null_at(%s, %s, %d, %d))->%s)",
+				structCType,
+				obj.value,
+				cStringLiteral(sourcePath(expr.Pos.File, e.opts.SourceRoot)),
+				expr.Pos.Line,
+				expr.Pos.Column,
+				mangleIdent(expr.Field),
+			)
+			return emittedExpr{prelude: obj.prelude, value: val}, nil
+		}
+		obj, err := e.emitLValue(expr.Object, targetArena)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		return emittedExpr{prelude: obj.prelude, value: fmt.Sprintf("(%s.%s)", obj.value, mangleIdent(expr.Field))}, nil
+	case *ir.IndexExpr:
+		collection, err := e.emitOrderedOperand(expr.Collection, targetArena)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		index, err := e.emitOrderedOperand(expr.Index, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		addrFn, err := collectionHelper("addr", expr.Collection.Type())
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		return emittedExpr{prelude: joinPreludes(collection, index), value: fmt.Sprintf("(*%s(%s, %s))", addrFn, collection.value, index.value)}, nil
+	}
+	return e.emitOrderedOperand(expr, targetArena)
+}
+
+func (e *funcEmitter) emitDefaultValue(typ ast.Type, targetArena string) (string, error) {
+	return emitDefaultValueForProgram(e.program, typ, targetArena)
+}
+
+func emitDefaultValueForProgram(program *ir.Program, typ ast.Type, targetArena string) (string, error) {
+	switch t := typ.(type) {
+	case ast.ScalarType:
+		switch {
+		case ast.TypeEqual(t, ast.IntType):
+			return "0", nil
+		case ast.TypeEqual(t, ast.FloatType):
+			return "0.0", nil
+		case ast.TypeEqual(t, ast.BoolType):
+			return "false", nil
+		case ast.TypeEqual(t, ast.StringType):
+			return "RT_LIT(rt_string, NULL, 0)", nil
+		case ast.TypeEqual(t, ast.ErrorType):
+			return "NULL", nil
+		default:
+			return "", fmt.Errorf("unsupported default value type %s", typ)
+		}
+	case *ast.PointerType:
+		return "NULL", nil
+	case *ast.SliceType:
+		cType, err := emitType(t)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("RT_LIT(%s, NULL, 0)", cType), nil
+	case *ast.ArrayType:
+		cType, err := emitType(t)
+		if err != nil {
+			return "", err
+		}
+		elemCType, err := emitType(t.Elem)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("RT_LIT(%s, (%s*)rt_arena_alloc_count(%s, %d, sizeof(%s), true), %d)", cType, elemCType, targetArena, t.Length, elemCType, t.Length), nil
+	case *ast.ListType:
+		newFn, err := listHelper("new", t)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s(%s, 0)", newFn, targetArena), nil
+	case *ast.MapType:
+		mapName, err := mapRuntimeName(t)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("rt_map_%s_new(%s, 0)", mapName, targetArena), nil
+	case *ast.StructType:
+		cType, err := emitType(t)
+		if err != nil {
+			return "", err
+		}
+		if program == nil {
+			return fmt.Sprintf("RT_LIT(%s, 0)", cType), nil
+		}
+		sig, ok := program.Structs[t.TargetName()]
+		if !ok || len(sig.Fields) == 0 {
+			return fmt.Sprintf("RT_LIT(%s, 0)", cType), nil
+		}
+		var vals []string
+		for _, f := range sig.Fields {
+			v, err := emitDefaultValueForProgram(program, f.Type, targetArena)
+			if err != nil {
+				return "", err
+			}
+			vals = append(vals, v)
+		}
+		return fmt.Sprintf("RT_LIT(%s, %s)", cType, strings.Join(vals, ", ")), nil
+	default:
+		return "", fmt.Errorf("unsupported default value type %s", typ)
+	}
+}
+
 func emitCondition(expr ir.Expr) (string, error) {
 	condition, err := emitExpr(expr, frameArena)
 	if err != nil {
@@ -1453,7 +1721,98 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 			return emittedExpr{}, err
 		}
 		return emittedExpr{prelude: values.prelude, value: fmt.Sprintf("%s(%s, %s, %d)", ctor, targetArena, values.value, len(expr.Elements))}, nil
+	case *ir.StructLiteral:
+		st := expr.Type().(*ast.StructType)
+		cType, err := emitType(st)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		sig, ok := e.program.Structs[st.TargetName()]
+		if !ok {
+			return emittedExpr{}, fmt.Errorf("unknown struct %s", st.TargetName())
+		}
+		provided := make(map[string]string, len(expr.Fields))
+		var prelude []string
+		for _, f := range expr.Fields {
+			val, err := e.emitOrderedOperand(f.Value, targetArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			prelude = append(prelude, val.prelude...)
+			provided[f.Name] = val.value
+		}
+		if len(sig.Fields) == 0 {
+			return emittedExpr{prelude: prelude, value: fmt.Sprintf("RT_LIT(%s, 0)", cType)}, nil
+		}
+		fieldVals := make([]string, 0, len(sig.Fields))
+		for _, declField := range sig.Fields {
+			if val, ok := provided[declField.Name]; ok {
+				fieldVals = append(fieldVals, val)
+			} else {
+				defVal, err := e.emitDefaultValue(declField.Type, targetArena)
+				if err != nil {
+					return emittedExpr{}, err
+				}
+				fieldVals = append(fieldVals, defVal)
+			}
+		}
+		return emittedExpr{prelude: prelude, value: fmt.Sprintf("RT_LIT(%s, %s)", cType, strings.Join(fieldVals, ", "))}, nil
+	case *ir.MapLiteral:
+		mt := expr.Type().(*ast.MapType)
+		mapName, err := mapRuntimeName(mt)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		tmp, err := e.newTemp(expr.Type(), fmt.Sprintf("rt_map_%s_new(%s, %d)", mapName, targetArena, len(expr.Entries)))
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		prelude := []string{tmp.decl}
+		for _, entry := range expr.Entries {
+			k, err := e.emitOrderedOperand(entry.Key, targetArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			v, err := e.emitOrderedOperand(entry.Value, targetArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			prelude = append(prelude, k.prelude...)
+			prelude = append(prelude, v.prelude...)
+			prelude = append(prelude, fmt.Sprintf("rt_map_%s_set(%s, %s, %s);", mapName, tmp.name, k.value, v.value))
+		}
+		return emittedExpr{prelude: prelude, value: tmp.name}, nil
+	case *ir.NewExpr:
+		elemCType, err := emitType(expr.ElemType)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		defVal, err := e.emitDefaultValue(expr.ElemType, targetArena)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		ptrName := fmt.Sprintf("trux_tmp_%d", e.temp)
+		e.temp++
+		prelude := []string{
+			fmt.Sprintf("%s* %s = (%s*)rt_arena_alloc(%s, sizeof(%s));", elemCType, ptrName, elemCType, targetArena, elemCType),
+			fmt.Sprintf("*%s = %s;", ptrName, defVal),
+		}
+		return emittedExpr{prelude: prelude, value: ptrName}, nil
 	case *ir.MakeExpr:
+		if mt, ok := expr.Type().(*ast.MapType); ok {
+			mapName, err := mapRuntimeName(mt)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			if expr.Len == nil {
+				return emittedExpr{value: fmt.Sprintf("rt_map_%s_new(%s, 0)", mapName, targetArena)}, nil
+			}
+			length, err := e.emitOrderedOperand(expr.Len, e.scratch)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			return emittedExpr{prelude: length.prelude, value: fmt.Sprintf("rt_map_%s_new(%s, %s)", mapName, targetArena, length.value)}, nil
+		}
 		length, err := e.emitOrderedOperand(expr.Len, e.scratch)
 		if err != nil {
 			return emittedExpr{}, err
@@ -1666,7 +2025,7 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		for _, arg := range expr.Args {
 			argArena := e.scratch
-			if isDynamicType(expr.Type()) && ast.TypeEqual(arg.Type(), ast.StringType) {
+			if isDynamicType(expr.Type()) && isDynamicType(arg.Type()) {
 				argArena = callResultArena
 			}
 			emitArg, err := e.emitOrderedOperand(arg, argArena)
@@ -1683,11 +2042,127 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		return emittedExpr{prelude: prelude, value: fmt.Sprintf("%s(%s)", mangleFunc(expr.Callee), strings.Join(values, ", "))}, nil
 	case *ir.UnaryExpr:
+		if expr.Operator == "&" {
+			if _, ok := expr.Operand.(*ir.StructLiteral); ok {
+				lit, err := e.emitOrderedExpr(expr.Operand, targetArena)
+				if err != nil {
+					return emittedExpr{}, err
+				}
+				elemCType, err := emitType(expr.Operand.Type())
+				if err != nil {
+					return emittedExpr{}, err
+				}
+				ptrName := fmt.Sprintf("trux_tmp_%d", e.temp)
+				e.temp++
+				prelude := append([]string{}, lit.prelude...)
+				prelude = append(prelude,
+					fmt.Sprintf("%s* %s = (%s*)rt_arena_alloc(%s, sizeof(%s));", elemCType, ptrName, elemCType, targetArena, elemCType),
+					fmt.Sprintf("*%s = %s;", ptrName, lit.value),
+				)
+				return emittedExpr{prelude: prelude, value: ptrName}, nil
+			}
+			lval, err := e.emitLValue(expr.Operand, targetArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			return emittedExpr{prelude: lval.prelude, value: fmt.Sprintf("(&(%s))", lval.value)}, nil
+		}
+		if expr.Operator == "*" {
+			operand, err := e.emitOrderedOperand(expr.Operand, targetArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			elemCType, err := emitType(expr.Type())
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			val := fmt.Sprintf("(*((%s*)rt_check_not_null_at(%s, %s, %d, %d)))",
+				elemCType,
+				operand.value,
+				cStringLiteral(sourcePath(expr.Pos.File, e.opts.SourceRoot)),
+				expr.Pos.Line,
+				expr.Pos.Column,
+			)
+			return emittedExpr{prelude: operand.prelude, value: val}, nil
+		}
 		operand, err := e.emitOrderedOperand(expr.Operand, targetArena)
 		if err != nil {
 			return emittedExpr{}, err
 		}
 		return emittedExpr{prelude: operand.prelude, value: emitUnaryValue(expr.Operator, expr.Type(), operand.value)}, nil
+	case *ir.FieldExpr:
+		obj, err := e.emitOrderedOperand(expr.Object, targetArena)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		if ptrType, ok := expr.Object.Type().(*ast.PointerType); ok {
+			structCType, err := emitType(ptrType.Elem)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			val := fmt.Sprintf("(((%s*)rt_check_not_null_at(%s, %s, %d, %d))->%s)",
+				structCType,
+				obj.value,
+				cStringLiteral(sourcePath(expr.Pos.File, e.opts.SourceRoot)),
+				expr.Pos.Line,
+				expr.Pos.Column,
+				mangleIdent(expr.Field),
+			)
+			return emittedExpr{prelude: obj.prelude, value: val}, nil
+		}
+		return emittedExpr{prelude: obj.prelude, value: fmt.Sprintf("(%s.%s)", obj.value, mangleIdent(expr.Field))}, nil
+	case *ir.MapLookupExpr:
+		mVal, err := e.emitOrderedOperand(expr.Map, targetArena)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		kVal, err := e.emitOrderedOperand(expr.Key, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		mapName, err := mapRuntimeName(expr.MapType)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		valCType, err := emitType(expr.MapType.Value)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		tupleCType, err := emitType(expr.Type())
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		okName := fmt.Sprintf("trux_ok_%d", e.temp)
+		valName := fmt.Sprintf("trux_val_%d", e.temp)
+		tmpName := fmt.Sprintf("trux_tmp_%d", e.temp)
+		e.temp++
+		prelude := joinPreludes(mVal, kVal)
+		prelude = append(prelude,
+			fmt.Sprintf("bool %s = false;", okName),
+			fmt.Sprintf("%s %s = rt_map_%s_get_ok(%s, %s, &%s);", valCType, valName, mapName, mVal.value, kVal.value, okName),
+			fmt.Sprintf("%s %s = RT_LIT(%s, %s, %s);", tupleCType, tmpName, tupleCType, valName, okName),
+		)
+		return emittedExpr{prelude: prelude, value: tmpName}, nil
+	case *ir.KeysExpr:
+		mVal, err := e.emitOrderedOperand(expr.Map, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		mapName, err := mapRuntimeName(expr.MapType)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		return emittedExpr{prelude: mVal.prelude, value: fmt.Sprintf("rt_map_%s_keys(%s, %s)", mapName, targetArena, mVal.value)}, nil
+	case *ir.ValuesExpr:
+		mVal, err := e.emitOrderedOperand(expr.Map, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		mapName, err := mapRuntimeName(expr.MapType)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		return emittedExpr{prelude: mVal.prelude, value: fmt.Sprintf("rt_map_%s_values(%s, %s)", mapName, targetArena, mVal.value)}, nil
 	case *ir.BinaryExpr:
 		if expr.Operator == "&&" || expr.Operator == "||" {
 			return e.emitShortCircuit(expr, targetArena)
@@ -1715,6 +2190,13 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		if _, ok := expr.Value.Type().(*ast.ListType); ok {
 			return emittedExpr{prelude: value.prelude, value: fmt.Sprintf("rt_checked_len_i64(%s->len)", value.value)}, nil
+		}
+		if mt, ok := expr.Value.Type().(*ast.MapType); ok {
+			mapName, err := mapRuntimeName(mt)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			return emittedExpr{prelude: value.prelude, value: fmt.Sprintf("rt_map_%s_len(%s)", mapName, value.value)}, nil
 		}
 		return emittedExpr{prelude: value.prelude, value: fmt.Sprintf("rt_checked_len_i64(%s.len)", value.value)}, nil
 	case *ir.IndexExpr:
@@ -1871,8 +2353,14 @@ func exprHasSideEffect(expr ir.Expr) bool {
 		*ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ImageDimensionExpr, *ir.ReadPPMExpr,
 		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CallExpr,
 		*ir.ErrorsNewExpr, *ir.WriteFileExpr, *ir.WriteCSVExpr, *ir.WritePPMExpr,
-		*ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.PathQueryExpr:
+		*ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.PathQueryExpr,
+		*ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.MapLookupExpr, *ir.KeysExpr, *ir.ValuesExpr:
 		return true
+	case *ir.FieldExpr:
+		if _, isPtr := expr.Object.Type().(*ast.PointerType); isPtr {
+			return true
+		}
+		return exprHasSideEffect(expr.Object)
 	case *ir.ArrayLiteral:
 		for _, elem := range expr.Elements {
 			if exprHasSideEffect(elem) {
@@ -1890,6 +2378,9 @@ func exprHasSideEffect(expr ir.Expr) bool {
 	case *ir.CloneExpr:
 		return exprHasSideEffect(expr.Value)
 	case *ir.UnaryExpr:
+		if expr.Operator == "*" || expr.Operator == "&" {
+			return true
+		}
 		return exprHasSideEffect(expr.Operand)
 	case *ir.BinaryExpr:
 		return exprHasSideEffect(expr.Left) || exprHasSideEffect(expr.Right)
@@ -2298,6 +2789,20 @@ func emitType(typ ast.Type) (string, error) {
 		}
 	case *ast.TupleType:
 		return tupleTypeName(typ)
+	case *ast.StructType:
+		return mangleStruct(typ.TargetName()), nil
+	case *ast.PointerType:
+		elem, err := emitType(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return elem + "*", nil
+	case *ast.MapType:
+		name, err := mapRuntimeName(typ)
+		if err != nil {
+			return "", err
+		}
+		return "rt_map_" + name + "*", nil
 	case *ast.ArrayType:
 		name, err := elemRuntimeName(typ.Elem)
 		if err != nil {
@@ -2615,6 +3120,10 @@ func isDynamicType(typ ast.Type) bool {
 		}
 		return false
 	}
+	switch typ.(type) {
+	case *ast.StructType, *ast.PointerType, *ast.MapType:
+		return true
+	}
 	return ast.TypeEqual(typ, ast.StringType) || ast.TypeEqual(typ, ast.ErrorType) || isCollectionType(typ)
 }
 
@@ -2634,6 +3143,12 @@ func collectionHelper(op string, typ ast.Type) (string, error) {
 		return "rt_slice_" + name + "_" + op, nil
 	case *ast.ListType:
 		return listHelper(op, typ)
+	case *ast.MapType:
+		name, err := mapRuntimeName(typ)
+		if err != nil {
+			return "", err
+		}
+		return "rt_map_" + name + "_" + op, nil
 	default:
 		return "", fmt.Errorf("unsupported collection type %s", typ)
 	}
@@ -2673,7 +3188,35 @@ func cloneHelper(typ ast.Type) (string, error) {
 	if isCollectionType(typ) {
 		return collectionHelper("clone", typ)
 	}
+	switch t := typ.(type) {
+	case *ast.StructType:
+		return mangleStruct(t.TargetName()) + "_clone", nil
+	case *ast.PointerType:
+		name, err := elemRuntimeName(t)
+		if err != nil {
+			return "", err
+		}
+		return "rt_" + name + "_clone", nil
+	case *ast.MapType:
+		name, err := mapRuntimeName(t)
+		if err != nil {
+			return "", err
+		}
+		return "rt_map_" + name + "_clone", nil
+	}
 	return "", fmt.Errorf("clone does not support %s", typ)
+}
+
+func mapRuntimeName(typ *ast.MapType) (string, error) {
+	k, err := elemRuntimeName(typ.Key)
+	if err != nil {
+		return "", err
+	}
+	v, err := elemRuntimeName(typ.Value)
+	if err != nil {
+		return "", err
+	}
+	return k + "_" + v, nil
 }
 
 func elemRuntimeName(typ ast.Type) (string, error) {
@@ -2693,6 +3236,21 @@ func elemRuntimeName(typ ast.Type) (string, error) {
 		default:
 			return "", fmt.Errorf("unsupported element type %s", typ)
 		}
+	case *ast.StructType:
+		name := typ.TargetName()
+		return fmt.Sprintf("struct_%d_%s", len(name), name), nil
+	case *ast.PointerType:
+		name, err := elemRuntimeName(typ.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "ptr_" + name, nil
+	case *ast.MapType:
+		name, err := mapRuntimeName(typ)
+		if err != nil {
+			return "", err
+		}
+		return "map_" + name, nil
 	case *ast.ArrayType:
 		name, err := elemRuntimeName(typ.Elem)
 		if err != nil {
@@ -2722,47 +3280,545 @@ func elemRuntimeName(typ ast.Type) (string, error) {
 	}
 }
 
-func nestedCollectionFamilies(program *ir.Program) ([]collectionFamily, error) {
-	seen := map[string]bool{}
-	var families []collectionFamily
-	for _, typ := range program.UsedTypes {
-		if err := collectNestedCollectionFamilies(typ, seen, &families); err != nil {
-			return nil, err
-		}
-	}
-	return families, nil
+func isBuiltinCollectionElem(typ ast.Type) bool {
+	return ast.TypeEqual(typ, ast.IntType) ||
+		ast.TypeEqual(typ, ast.FloatType) ||
+		ast.TypeEqual(typ, ast.BoolType) ||
+		ast.TypeEqual(typ, ast.StringType)
 }
 
-func collectNestedCollectionFamilies(typ ast.Type, seen map[string]bool, families *[]collectionFamily) error {
-	elem, ok := ast.ElementType(typ)
-	if !ok {
-		return nil
+type mapFamily struct {
+	typ      *ast.MapType
+	name     string
+	keyName  string
+	keyCType string
+	valName  string
+	valCType string
+	eqFn     string
+	hashFn   string
+	zeroVal  string
+}
+
+func mapKeyHelpers(keyType ast.Type) (string, string, error) {
+	switch {
+	case ast.TypeEqual(keyType, ast.IntType):
+		return "rt_eq_int", "rt_hash_int", nil
+	case ast.TypeEqual(keyType, ast.BoolType):
+		return "rt_eq_bool", "rt_hash_bool", nil
+	case ast.TypeEqual(keyType, ast.StringType):
+		return "rt_eq_string", "rt_hash_string", nil
+	case isPointerType(keyType):
+		return "rt_eq_ptr", "rt_hash_ptr", nil
+	default:
+		return "", "", fmt.Errorf("unsupported map key type %s", keyType)
 	}
-	if err := collectNestedCollectionFamilies(elem, seen, families); err != nil {
-		return err
+}
+
+func isPointerType(typ ast.Type) bool {
+	_, ok := typ.(*ast.PointerType)
+	return ok
+}
+
+func emitStaticZeroValue(program *ir.Program, typ ast.Type) (string, error) {
+	switch t := typ.(type) {
+	case ast.ScalarType:
+		switch {
+		case ast.TypeEqual(t, ast.IntType):
+			return "0", nil
+		case ast.TypeEqual(t, ast.FloatType):
+			return "0.0", nil
+		case ast.TypeEqual(t, ast.BoolType):
+			return "false", nil
+		case ast.TypeEqual(t, ast.StringType):
+			return "RT_LIT(rt_string, NULL, 0)", nil
+		case ast.TypeEqual(t, ast.ErrorType):
+			return "NULL", nil
+		default:
+			return "", fmt.Errorf("unsupported zero value type %s", typ)
+		}
+	case *ast.PointerType, *ast.ListType, *ast.MapType:
+		return "NULL", nil
+	case *ast.ArrayType, *ast.SliceType:
+		cType, err := emitType(t)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("RT_LIT(%s, NULL, 0)", cType), nil
+	case *ast.StructType:
+		cType, err := emitType(t)
+		if err != nil {
+			return "", err
+		}
+		if program == nil {
+			return fmt.Sprintf("RT_LIT(%s, 0)", cType), nil
+		}
+		sig, ok := program.Structs[t.TargetName()]
+		if !ok || len(sig.Fields) == 0 {
+			return fmt.Sprintf("RT_LIT(%s, 0)", cType), nil
+		}
+		vals := make([]string, 0, len(sig.Fields))
+		for _, f := range sig.Fields {
+			v, err := emitStaticZeroValue(program, f.Type)
+			if err != nil {
+				return "", err
+			}
+			vals = append(vals, v)
+		}
+		return fmt.Sprintf("RT_LIT(%s, %s)", cType, strings.Join(vals, ", ")), nil
+	default:
+		return "", fmt.Errorf("unsupported zero value type %s", typ)
 	}
-	if !isCollectionType(elem) {
+}
+
+func emitCloneValueExpr(typ ast.Type, arenaExpr string, valueExpr string) (string, error) {
+	switch typ.(type) {
+	case ast.ScalarType:
+		if ast.TypeEqual(typ, ast.IntType) || ast.TypeEqual(typ, ast.FloatType) || ast.TypeEqual(typ, ast.BoolType) {
+			return valueExpr, nil
+		}
+	case *ast.GPUBufferType:
+		return valueExpr, nil
+	}
+	fn, err := cloneHelper(typ)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s(%s, %s)", fn, arenaExpr, valueExpr), nil
+}
+
+func emitProgramTypes(out *bytes.Buffer, program *ir.Program) error {
+	seenStructs := map[string]bool{}
+	var structOrder []semtypes.StructSig
+	seenPtrs := map[string]bool{}
+	var pointers []*ast.PointerType
+	seenCols := map[string]bool{}
+	var collections []collectionFamily
+	colByName := map[string]collectionFamily{}
+	seenMaps := map[string]bool{}
+	var maps []mapFamily
+	mapByName := map[string]mapFamily{}
+
+	var visitType func(typ ast.Type) error
+	ensureCollectionElem := func(elem ast.Type) error {
+		if err := visitType(elem); err != nil {
+			return err
+		}
+		if isBuiltinCollectionElem(elem) {
+			return nil
+		}
+		name, err := elemRuntimeName(elem)
+		if err != nil {
+			return err
+		}
+		if seenCols[name] {
+			return nil
+		}
+		cType, err := emitType(elem)
+		if err != nil {
+			return err
+		}
+		cloneFn, err := cloneHelper(elem)
+		if err != nil {
+			return err
+		}
+		seenCols[name] = true
+		fam := collectionFamily{name: name, cType: cType, cloneFn: cloneFn}
+		collections = append(collections, fam)
+		colByName[name] = fam
 		return nil
 	}
 
-	name, err := elemRuntimeName(elem)
-	if err != nil {
-		return err
-	}
-	if seen[name] {
+	visitStruct := func(name string) error {
+		if seenStructs[name] {
+			return nil
+		}
+		sig, ok := program.Structs[name]
+		if !ok {
+			return nil
+		}
+		seenStructs[name] = true
+		for _, f := range sig.Fields {
+			if err := visitType(f.Type); err != nil {
+				return err
+			}
+		}
+		structOrder = append(structOrder, sig)
 		return nil
 	}
-	cType, err := emitType(elem)
-	if err != nil {
-		return err
+
+	visitType = func(typ ast.Type) error {
+		if typ == nil {
+			return nil
+		}
+		switch t := typ.(type) {
+		case *ast.StructType:
+			return visitStruct(t.TargetName())
+		case *ast.PointerType:
+			if err := visitType(t.Elem); err != nil {
+				return err
+			}
+			name, err := elemRuntimeName(t)
+			if err != nil {
+				return err
+			}
+			if !seenPtrs[name] {
+				seenPtrs[name] = true
+				pointers = append(pointers, t)
+			}
+			return nil
+		case *ast.ArrayType:
+			return ensureCollectionElem(t.Elem)
+		case *ast.SliceType:
+			return ensureCollectionElem(t.Elem)
+		case *ast.ListType:
+			return ensureCollectionElem(t.Elem)
+		case *ast.MapType:
+			if err := ensureCollectionElem(t.Key); err != nil {
+				return err
+			}
+			if err := ensureCollectionElem(t.Value); err != nil {
+				return err
+			}
+			mName, err := mapRuntimeName(t)
+			if err != nil {
+				return err
+			}
+			if seenMaps[mName] {
+				return nil
+			}
+			kName, err := elemRuntimeName(t.Key)
+			if err != nil {
+				return err
+			}
+			kCType, err := emitType(t.Key)
+			if err != nil {
+				return err
+			}
+			vName, err := elemRuntimeName(t.Value)
+			if err != nil {
+				return err
+			}
+			vCType, err := emitType(t.Value)
+			if err != nil {
+				return err
+			}
+			eqFn, hashFn, err := mapKeyHelpers(t.Key)
+			if err != nil {
+				return err
+			}
+			zeroVal, err := emitStaticZeroValue(program, t.Value)
+			if err != nil {
+				return err
+			}
+			seenMaps[mName] = true
+			mf := mapFamily{
+				typ:      t,
+				name:     mName,
+				keyName:  kName,
+				keyCType: kCType,
+				valName:  vName,
+				valCType: vCType,
+				eqFn:     eqFn,
+				hashFn:   hashFn,
+				zeroVal:  zeroVal,
+			}
+			maps = append(maps, mf)
+			mapByName[mName] = mf
+			return nil
+		case *ast.TupleType:
+			for _, elem := range t.Types {
+				if err := visitType(elem); err != nil {
+					return err
+				}
+			}
+			return nil
+		default:
+			return nil
+		}
 	}
-	cloneFn, err := cloneHelper(elem)
-	if err != nil {
-		return err
+
+	var structNames []string
+	for name := range program.Structs {
+		structNames = append(structNames, name)
 	}
-	seen[name] = true
-	*families = append(*families, collectionFamily{name: name, cType: cType, cloneFn: cloneFn})
+	sort.Strings(structNames)
+	for _, name := range structNames {
+		if err := visitStruct(name); err != nil {
+			return err
+		}
+	}
+	for _, typ := range program.UsedTypes {
+		if err := visitType(typ); err != nil {
+			return err
+		}
+	}
+	for _, fn := range program.Functions {
+		if err := visitType(fn.ReturnType); err != nil {
+			return err
+		}
+		for _, p := range fn.Params {
+			if err := visitType(p.Type); err != nil {
+				return err
+			}
+		}
+	}
+
+	if len(structOrder) == 0 && len(pointers) == 0 && len(collections) == 0 && len(maps) == 0 {
+		return nil
+	}
+
+	// Pass 1: Forward declarations for structs, custom lists, and maps.
+	for _, sig := range structOrder {
+		cType := mangleStruct(sig.Name)
+		fmt.Fprintf(out, "typedef struct %s %s;\n", cType, cType)
+	}
+	for _, col := range collections {
+		fmt.Fprintf(out, "typedef struct rt_list_%s rt_list_%s;\n", col.name, col.name)
+	}
+	for _, m := range maps {
+		fmt.Fprintf(out, "typedef struct rt_map_%s rt_map_%s;\n", m.name, m.name)
+	}
+
+	// Pass 2: Clone function prototypes and RT_CLONE_VALUE_* macros.
+	for _, sig := range structOrder {
+		cType := mangleStruct(sig.Name)
+		rtName := fmt.Sprintf("struct_%d_%s", len(sig.Name), sig.Name)
+		fmt.Fprintf(out, "static RT_UNUSED %s %s_clone(rt_arena* arena, %s value);\n", cType, cType, cType)
+		fmt.Fprintf(out, "#define RT_CLONE_VALUE_%s(ARENA, VALUE) %s_clone((ARENA), (VALUE))\n", rtName, cType)
+	}
+	for _, p := range pointers {
+		cType, err := emitType(p)
+		if err != nil {
+			return err
+		}
+		rtName, err := elemRuntimeName(p)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "static RT_UNUSED %s rt_%s_clone(rt_arena* arena, %s value);\n", cType, rtName, cType)
+		fmt.Fprintf(out, "#define RT_CLONE_VALUE_%s(ARENA, VALUE) rt_%s_clone((ARENA), (VALUE))\n", rtName, rtName)
+	}
+	for _, m := range maps {
+		cType := "rt_map_" + m.name + "*"
+		fmt.Fprintf(out, "static RT_UNUSED %s rt_map_%s_clone(rt_arena* arena, %s value);\n", cType, m.name, cType)
+		fmt.Fprintf(out, "#define RT_CLONE_VALUE_map_%s(ARENA, VALUE) rt_map_%s_clone((ARENA), (VALUE))\n", m.name, m.name)
+	}
+	for _, col := range collections {
+		if strings.HasPrefix(col.name, "struct_") || strings.HasPrefix(col.name, "ptr_") || strings.HasPrefix(col.name, "map_") || col.name == "error" {
+			continue
+		}
+		fmt.Fprintf(out, "#define RT_CLONE_VALUE_%s(ARENA, VALUE) %s((ARENA), (VALUE))\n", col.name, col.cloneFn)
+	}
+
+	// Pass 3: Struct definitions, RT_DEFINE_COLLECTIONS, and RT_DEFINE_MAP in topological order.
+	emittedStructs := map[string]bool{}
+	emittedCols := map[string]bool{}
+	emittedMaps := map[string]bool{}
+
+	var emitStructDef func(name string) error
+	var emitColDef func(name string) error
+	var emitMapDef func(name string) error
+	var ensureValueTypeComplete func(typ ast.Type) error
+
+	ensureValueTypeComplete = func(typ ast.Type) error {
+		switch t := typ.(type) {
+		case *ast.StructType:
+			return emitStructDef(t.TargetName())
+		case *ast.ArrayType:
+			elemName, err := elemRuntimeName(t.Elem)
+			if err != nil {
+				return err
+			}
+			return emitColDef(elemName)
+		case *ast.SliceType:
+			elemName, err := elemRuntimeName(t.Elem)
+			if err != nil {
+				return err
+			}
+			return emitColDef(elemName)
+		case *ast.ListType:
+			elemName, err := elemRuntimeName(t.Elem)
+			if err != nil {
+				return err
+			}
+			return emitColDef(elemName)
+		case *ast.MapType:
+			mName, err := mapRuntimeName(t)
+			if err != nil {
+				return err
+			}
+			return emitMapDef(mName)
+		default:
+			return nil
+		}
+	}
+
+	emitStructDef = func(name string) error {
+		if emittedStructs[name] {
+			return nil
+		}
+		sig, ok := program.Structs[name]
+		if !ok {
+			return nil
+		}
+		emittedStructs[name] = true
+		for _, f := range sig.Fields {
+			switch ft := f.Type.(type) {
+			case *ast.StructType:
+				if err := emitStructDef(ft.TargetName()); err != nil {
+					return err
+				}
+			case *ast.ArrayType:
+				elemName, err := elemRuntimeName(ft.Elem)
+				if err != nil {
+					return err
+				}
+				if err := emitColDef(elemName); err != nil {
+					return err
+				}
+			case *ast.SliceType:
+				elemName, err := elemRuntimeName(ft.Elem)
+				if err != nil {
+					return err
+				}
+				if err := emitColDef(elemName); err != nil {
+					return err
+				}
+			}
+		}
+		cType := mangleStruct(sig.Name)
+		fmt.Fprintf(out, "struct %s {\n", cType)
+		if len(sig.Fields) == 0 {
+			fmt.Fprintln(out, "    uint8_t _empty;")
+		} else {
+			for _, f := range sig.Fields {
+				fCType, err := emitType(f.Type)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "    %s %s;\n", fCType, mangleIdent(f.Name))
+			}
+		}
+		fmt.Fprintln(out, "};")
+		return nil
+	}
+
+	emitColDef = func(name string) error {
+		if emittedCols[name] {
+			return nil
+		}
+		col, ok := colByName[name]
+		if !ok {
+			return nil
+		}
+		emittedCols[name] = true
+		for _, sig := range structOrder {
+			rtName := fmt.Sprintf("struct_%d_%s", len(sig.Name), sig.Name)
+			if rtName == name {
+				if err := emitStructDef(sig.Name); err != nil {
+					return err
+				}
+			}
+		}
+		fmt.Fprintf(out, "RT_DEFINE_COLLECTIONS(%s, %s)\n", col.name, col.cType)
+		return nil
+	}
+
+	emitMapDef = func(name string) error {
+		if emittedMaps[name] {
+			return nil
+		}
+		m, ok := mapByName[name]
+		if !ok {
+			return nil
+		}
+		emittedMaps[name] = true
+		if err := ensureValueTypeComplete(m.typ.Key); err != nil {
+			return err
+		}
+		if err := ensureValueTypeComplete(m.typ.Value); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "RT_DEFINE_MAP(%s, %s, %s, %s, %s, %s, %s, %s)\n",
+			m.name, m.keyName, m.keyCType, m.valName, m.valCType, m.eqFn, m.hashFn, m.zeroVal)
+		return nil
+	}
+
+	for _, sig := range structOrder {
+		if err := emitStructDef(sig.Name); err != nil {
+			return err
+		}
+	}
+	for _, col := range collections {
+		if err := emitColDef(col.name); err != nil {
+			return err
+		}
+	}
+	for _, m := range maps {
+		if err := emitMapDef(m.name); err != nil {
+			return err
+		}
+	}
+
+	// Pass 4: RT_DEFINE_MAP_LISTS for all maps.
+	for _, m := range maps {
+		fmt.Fprintf(out, "RT_DEFINE_MAP_LISTS(%s, %s, %s, %s, %s)\n",
+			m.name, m.keyName, m.keyCType, m.valName, m.valCType)
+	}
+
+	// Pass 5: Clone function bodies for structs and pointers.
+	for _, sig := range structOrder {
+		cType := mangleStruct(sig.Name)
+		fmt.Fprintf(out, "static RT_UNUSED %s %s_clone(rt_arena* arena, %s value) {\n", cType, cType, cType)
+		fmt.Fprintln(out, "    (void)arena;")
+		fmt.Fprintln(out, "    (void)value;")
+		if len(sig.Fields) == 0 {
+			fmt.Fprintf(out, "    return RT_LIT(%s, 0);\n", cType)
+		} else {
+			clonedFields := make([]string, 0, len(sig.Fields))
+			for _, f := range sig.Fields {
+				cf, err := emitCloneValueExpr(f.Type, "arena", "value."+mangleIdent(f.Name))
+				if err != nil {
+					return err
+				}
+				clonedFields = append(clonedFields, cf)
+			}
+			fmt.Fprintf(out, "    return RT_LIT(%s, %s);\n", cType, strings.Join(clonedFields, ", "))
+		}
+		fmt.Fprintln(out, "}")
+	}
+	for _, p := range pointers {
+		cType, err := emitType(p)
+		if err != nil {
+			return err
+		}
+		elemCType, err := emitType(p.Elem)
+		if err != nil {
+			return err
+		}
+		rtName, err := elemRuntimeName(p)
+		if err != nil {
+			return err
+		}
+		clonedElem, err := emitCloneValueExpr(p.Elem, "arena", "*value")
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "static RT_UNUSED %s rt_%s_clone(rt_arena* arena, %s value) {\n", cType, rtName, cType)
+		fmt.Fprintln(out, "    if (value == NULL) {")
+		fmt.Fprintln(out, "        return NULL;")
+		fmt.Fprintln(out, "    }")
+		fmt.Fprintf(out, "    %s copy = (%s)rt_arena_alloc(arena, sizeof(%s));\n", cType, cType, elemCType)
+		fmt.Fprintf(out, "    *copy = %s;\n", clonedElem)
+		fmt.Fprintln(out, "    return copy;")
+		fmt.Fprintln(out, "}")
+	}
+	fmt.Fprintln(out)
 	return nil
+}
+
+func mangleStruct(name string) string {
+	return fmt.Sprintf("trux_s_%d_%s", len(name), name)
 }
 
 func mangleFunc(name string) string {
@@ -2786,6 +3842,12 @@ func stmtPos(stmt ir.Stmt) token.Position {
 	case *ir.AssignStmt:
 		return stmt.Pos
 	case *ir.IndexAssignStmt:
+		return stmt.Pos
+	case *ir.FieldAssignStmt:
+		return stmt.Pos
+	case *ir.DerefAssignStmt:
+		return stmt.Pos
+	case *ir.DeleteStmt:
 		return stmt.Pos
 	case *ir.IfStmt:
 		return stmt.Pos

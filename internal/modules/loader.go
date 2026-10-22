@@ -57,17 +57,28 @@ type functionInfo struct {
 	public       bool
 }
 
+type structInfo struct {
+	unit         *fileUnit
+	decl         *ast.StructDecl
+	internalName string
+	public       bool
+}
+
 type packageKey struct {
 	dir  string
 	name string
 }
 
 type resolutionContext struct {
-	funcs         map[*fileUnit]map[string]*functionInfo
-	packageFuncs  map[packageKey]map[string]*functionInfo
-	directImports map[*fileUnit]map[string]importSet
-	privateDecls  map[string][]*functionInfo
-	publicDecls   map[string][]*functionInfo
+	funcs          map[*fileUnit]map[string]*functionInfo
+	packageFuncs   map[packageKey]map[string]*functionInfo
+	structs        map[*fileUnit]map[string]*structInfo
+	packageStructs map[packageKey]map[string]*structInfo
+	directImports  map[*fileUnit]map[string]importSet
+	privateDecls   map[string][]*functionInfo
+	publicDecls    map[string][]*functionInfo
+	privateStructs map[string][]*structInfo
+	publicStructs  map[string][]*structInfo
 }
 
 type importSet struct {
@@ -120,6 +131,7 @@ func load(entryPath string, sources map[string]string, includeTestEntries bool) 
 
 	program := &ast.Program{PackageName: entry.program.PackageName}
 	for _, unit := range l.order {
+		program.Structs = append(program.Structs, unit.program.Structs...)
 		program.Functions = append(program.Functions, unit.program.Functions...)
 	}
 
@@ -356,19 +368,59 @@ func (l *loader) resolveImport(unit *fileUnit, importDecl *ast.ImportDecl) (stri
 func (l *loader) validateAndMerge(entry *fileUnit) error {
 	needsHygiene := len(l.order) > 1
 	ctx := resolutionContext{
-		funcs:         map[*fileUnit]map[string]*functionInfo{},
-		packageFuncs:  map[packageKey]map[string]*functionInfo{},
-		directImports: map[*fileUnit]map[string]importSet{},
-		privateDecls:  map[string][]*functionInfo{},
-		publicDecls:   map[string][]*functionInfo{},
+		funcs:          map[*fileUnit]map[string]*functionInfo{},
+		packageFuncs:   map[packageKey]map[string]*functionInfo{},
+		structs:        map[*fileUnit]map[string]*structInfo{},
+		packageStructs: map[packageKey]map[string]*structInfo{},
+		directImports:  map[*fileUnit]map[string]importSet{},
+		privateDecls:   map[string][]*functionInfo{},
+		publicDecls:    map[string][]*functionInfo{},
+		privateStructs: map[string][]*structInfo{},
+		publicStructs:  map[string][]*structInfo{},
 	}
 
 	for _, unit := range l.order {
 		seenInFile := map[string]*ast.FuncDecl{}
+		seenStructsInFile := map[string]*ast.StructDecl{}
 		ctx.funcs[unit] = map[string]*functionInfo{}
+		ctx.structs[unit] = map[string]*structInfo{}
 		key := unit.packageKey()
 		if ctx.packageFuncs[key] == nil {
 			ctx.packageFuncs[key] = map[string]*functionInfo{}
+		}
+		if ctx.packageStructs[key] == nil {
+			ctx.packageStructs[key] = map[string]*structInfo{}
+		}
+
+		for _, st := range unit.program.Structs {
+			if strings.HasPrefix(st.Name, internalPrefix) {
+				return l.errorInUnit(unit, st.Pos, "struct name %q uses reserved compiler prefix %q", st.Name, internalPrefix)
+			}
+			if previous := seenStructsInFile[st.Name]; previous != nil {
+				return l.errorInUnit(unit, st.Pos, "duplicate struct %q in %s", st.Name, unit.path)
+			}
+			seenStructsInFile[st.Name] = st
+
+			internalName := st.Name
+			if needsHygiene {
+				internalName = fmt.Sprintf("%smod_%d_%s", internalPrefix, unit.index, st.Name)
+			}
+			info := &structInfo{
+				unit:         unit,
+				decl:         st,
+				internalName: internalName,
+				public:       st.Public,
+			}
+			ctx.structs[unit][st.Name] = info
+			if previous := ctx.packageStructs[key][st.Name]; previous != nil {
+				return l.errorInUnit(unit, st.Pos, "package %q defines struct %q in both %s and %s", key.name, st.Name, previous.decl.Pos.File, info.decl.Pos.File)
+			}
+			ctx.packageStructs[key][st.Name] = info
+			if st.Public {
+				ctx.publicStructs[st.Name] = append(ctx.publicStructs[st.Name], info)
+			} else {
+				ctx.privateStructs[st.Name] = append(ctx.privateStructs[st.Name], info)
+			}
 		}
 
 		for _, fn := range unit.program.Functions {
@@ -442,7 +494,27 @@ func (l *loader) validateAndMerge(entry *fileUnit) error {
 	}
 
 	for _, unit := range l.order {
+		for _, st := range unit.program.Structs {
+			for i := range st.Fields {
+				if err := l.rewriteType(unit, st.Fields[i].Pos, st.Fields[i].Type, ctx); err != nil {
+					return err
+				}
+			}
+			if info := ctx.structs[unit][st.Name]; info != nil && info.internalName != st.Name {
+				st.InternalName = info.internalName
+			}
+		}
 		for _, fn := range unit.program.Functions {
+			for i := range fn.Params {
+				if err := l.rewriteType(unit, fn.Params[i].Pos, fn.Params[i].Type, ctx); err != nil {
+					return err
+				}
+			}
+			if fn.ReturnType != nil {
+				if err := l.rewriteType(unit, fn.Pos, fn.ReturnType, ctx); err != nil {
+					return err
+				}
+			}
 			if err := l.rewriteCalls(unit, fn.Body.Statements, ctx); err != nil {
 				return err
 			}
@@ -461,6 +533,7 @@ func (l *loader) validateDirectImportSet(unit *fileUnit, packageName string, set
 	}
 
 	seen := map[string]*functionInfo{}
+	seenStructs := map[string]*structInfo{}
 	seenPackages := map[packageKey]struct{}{}
 	for _, ref := range set.refs {
 		key := ref.unit.packageKey()
@@ -477,9 +550,130 @@ func (l *loader) validateDirectImportSet(unit *fileUnit, packageName string, set
 			}
 			seen[name] = info
 		}
+		for name, info := range ctx.packageStructs[key] {
+			if !info.public {
+				continue
+			}
+			if previous := seenStructs[name]; previous != nil {
+				return l.errorInUnit(unit, ref.decl.Pos, "package %q exports struct %q from both %s and %s", packageName, name, previous.decl.Pos.File, info.decl.Pos.File)
+			}
+			seenStructs[name] = info
+		}
 	}
 
 	return nil
+}
+
+func (l *loader) rewriteType(unit *fileUnit, pos token.Position, typ ast.Type, ctx resolutionContext) error {
+	switch typ := typ.(type) {
+	case nil, ast.ScalarType:
+		return nil
+	case *ast.ArrayType:
+		return l.rewriteType(unit, pos, typ.Elem, ctx)
+	case *ast.SliceType:
+		return l.rewriteType(unit, pos, typ.Elem, ctx)
+	case *ast.ListType:
+		return l.rewriteType(unit, pos, typ.Elem, ctx)
+	case *ast.GPUBufferType:
+		return l.rewriteType(unit, pos, typ.Elem, ctx)
+	case *ast.PointerType:
+		return l.rewriteType(unit, pos, typ.Elem, ctx)
+	case *ast.MapType:
+		if err := l.rewriteType(unit, pos, typ.Key, ctx); err != nil {
+			return err
+		}
+		return l.rewriteType(unit, pos, typ.Value, ctx)
+	case *ast.TupleType:
+		for _, elem := range typ.Types {
+			if err := l.rewriteType(unit, pos, elem, ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	case *ast.StructType:
+		if typ.Package != "" {
+			set, ok := ctx.directImports[unit][typ.Package]
+			if !ok {
+				return l.errorInUnit(unit, pos, "package %q is not imported by %s", typ.Package, unit.path)
+			}
+			if set.isStdlib() {
+				return l.errorInUnit(unit, pos, "package %q has no struct %q", typ.Package, typ.Name)
+			}
+			var private *structInfo
+			seenPackages := map[packageKey]struct{}{}
+			for _, ref := range set.refs {
+				key := ref.unit.packageKey()
+				if _, seenPackage := seenPackages[key]; seenPackage {
+					continue
+				}
+				seenPackages[key] = struct{}{}
+				info := ctx.packageStructs[key][typ.Name]
+				if info == nil {
+					continue
+				}
+				if !info.public {
+					if private == nil {
+						private = info
+					}
+					continue
+				}
+				typ.ResolvedName = info.internalName
+				return nil
+			}
+			if private != nil {
+				return l.errorInUnit(unit, pos, "cannot use private struct %q from %s; it is declared in %s", typ.String(), unit.path, private.decl.Pos.File)
+			}
+			return l.errorInUnit(unit, pos, "package %q has no struct %q", typ.Package, typ.Name)
+		}
+
+		if info := ctx.structs[unit][typ.Name]; info != nil {
+			typ.ResolvedName = info.internalName
+			return nil
+		}
+		if info := ctx.packageStructs[unit.packageKey()][typ.Name]; info != nil {
+			typ.ResolvedName = info.internalName
+			return nil
+		}
+		if packageName, ok := l.directExportingStructPackage(unit, typ.Name, ctx); ok {
+			return l.errorInUnit(unit, pos, "imported struct %q must be referenced as %q", typ.Name, packageName+"."+typ.Name)
+		}
+		if private := ctx.privateStructs[typ.Name]; len(private) > 0 {
+			return l.errorInUnit(unit, pos, "cannot use private struct %q from %s; it is declared in %s", typ.Name, unit.path, private[0].decl.Pos.File)
+		}
+		if public := ctx.publicStructs[typ.Name]; len(public) > 0 {
+			packageName := public[0].unit.program.PackageName
+			return l.errorInUnit(unit, pos, "cannot use imported struct %q without a direct package import; import package %q and use %s.%s", typ.Name, packageName, packageName, typ.Name)
+		}
+	}
+	return nil
+}
+
+func (l *loader) directExportingStructPackage(unit *fileUnit, name string, ctx resolutionContext) (string, bool) {
+	packages := make([]string, 0, len(ctx.directImports[unit]))
+	for packageName := range ctx.directImports[unit] {
+		packages = append(packages, packageName)
+	}
+	sort.Strings(packages)
+
+	for _, packageName := range packages {
+		set := ctx.directImports[unit][packageName]
+		if set.isStdlib() {
+			continue
+		}
+		seenPackages := map[packageKey]struct{}{}
+		for _, ref := range set.refs {
+			key := ref.unit.packageKey()
+			if _, seenPackage := seenPackages[key]; seenPackage {
+				continue
+			}
+			seenPackages[key] = struct{}{}
+			info := ctx.packageStructs[key][name]
+			if info != nil && info.public {
+				return packageName, true
+			}
+		}
+	}
+	return "", false
 }
 
 func (l *loader) rewriteCalls(unit *fileUnit, statements []ast.Statement, ctx resolutionContext) error {
@@ -494,6 +688,18 @@ func (l *loader) rewriteCalls(unit *fileUnit, statements []ast.Statement, ctx re
 func (l *loader) rewriteStmtCalls(unit *fileUnit, stmt ast.Statement, ctx resolutionContext) error {
 	switch stmt := stmt.(type) {
 	case *ast.LetStmt:
+		if stmt.Type != nil {
+			if err := l.rewriteType(unit, stmt.Start, stmt.Type, ctx); err != nil {
+				return err
+			}
+		}
+		for i := range stmt.Bindings {
+			if stmt.Bindings[i].Type != nil {
+				if err := l.rewriteType(unit, stmt.Bindings[i].Pos, stmt.Bindings[i].Type, ctx); err != nil {
+					return err
+				}
+			}
+		}
 		return l.rewriteExprCalls(unit, stmt.Value, ctx)
 	case *ast.ReturnStmt:
 		values := stmt.Values
@@ -509,6 +715,16 @@ func (l *loader) rewriteStmtCalls(unit *fileUnit, stmt ast.Statement, ctx resolu
 	case *ast.AssignStmt:
 		return l.rewriteExprCalls(unit, stmt.Value, ctx)
 	case *ast.IndexAssignStmt:
+		if err := l.rewriteExprCalls(unit, stmt.Target, ctx); err != nil {
+			return err
+		}
+		return l.rewriteExprCalls(unit, stmt.Value, ctx)
+	case *ast.FieldAssignStmt:
+		if err := l.rewriteExprCalls(unit, stmt.Target, ctx); err != nil {
+			return err
+		}
+		return l.rewriteExprCalls(unit, stmt.Value, ctx)
+	case *ast.DerefAssignStmt:
 		if err := l.rewriteExprCalls(unit, stmt.Target, ctx); err != nil {
 			return err
 		}
@@ -550,11 +766,62 @@ func (l *loader) rewriteStmtCalls(unit *fileUnit, stmt ast.Statement, ctx resolu
 func (l *loader) rewriteExprCalls(unit *fileUnit, expr ast.Expression, ctx resolutionContext) error {
 	switch expr := expr.(type) {
 	case *ast.ArrayLiteral:
+		if err := l.rewriteType(unit, expr.Start, expr.Type, ctx); err != nil {
+			return err
+		}
 		return l.rewriteExprList(unit, expr.Elements, ctx)
 	case *ast.ListLiteral:
+		if err := l.rewriteType(unit, expr.Start, expr.Type, ctx); err != nil {
+			return err
+		}
 		return l.rewriteExprList(unit, expr.Elements, ctx)
+	case *ast.MapLiteral:
+		if err := l.rewriteType(unit, expr.Start, expr.Type, ctx); err != nil {
+			return err
+		}
+		for _, entry := range expr.Entries {
+			if err := l.rewriteExprCalls(unit, entry.Key, ctx); err != nil {
+				return err
+			}
+			if err := l.rewriteExprCalls(unit, entry.Value, ctx); err != nil {
+				return err
+			}
+		}
+		return nil
+	case *ast.StructLiteral:
+		if err := l.rewriteType(unit, expr.Start, expr.Type, ctx); err != nil {
+			return err
+		}
+		for _, field := range expr.Fields {
+			if err := l.rewriteExprCalls(unit, field.Value, ctx); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *ast.MakeExpr:
-		return l.rewriteExprCalls(unit, expr.Len, ctx)
+		if err := l.rewriteType(unit, expr.Start, expr.Type, ctx); err != nil {
+			return err
+		}
+		if expr.Len != nil {
+			return l.rewriteExprCalls(unit, expr.Len, ctx)
+		}
+		return nil
+	case *ast.NewExpr:
+		return l.rewriteType(unit, expr.Start, expr.ElemType, ctx)
+	case *ast.FieldExpr:
+		if ident, ok := expr.Object.(*ast.IdentExpr); ok && ident.Package == "" {
+			if set, imported := ctx.directImports[unit][ident.Name]; imported && !set.isStdlib() {
+				for _, ref := range set.refs {
+					info := ctx.packageFuncs[ref.unit.packageKey()][expr.Field]
+					if info != nil && info.public {
+						expr.ResolvedIdent = info.internalName
+						return nil
+					}
+				}
+				return l.errorInUnit(unit, expr.Start, "undefined or unexported member %q in package %q", expr.Field, ident.Name)
+			}
+		}
+		return l.rewriteExprCalls(unit, expr.Object, ctx)
 	case *ast.CallExpr:
 		for _, arg := range expr.Args {
 			if err := l.rewriteExprCalls(unit, arg, ctx); err != nil {
@@ -722,7 +989,7 @@ func (l *loader) directExportingPackage(unit *fileUnit, name string, ctx resolut
 
 func isBuiltin(name string) bool {
 	switch name {
-	case "print", "assert", "len", "clone", "append":
+	case "print", "assert", "len", "clone", "append", "new", "delete", "keys", "values":
 		return true
 	default:
 		return false

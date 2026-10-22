@@ -731,3 +731,52 @@ func findMainReturnCall(t *testing.T, program *ast.Program) *ast.CallExpr {
 	t.Fatal("missing main")
 	return nil
 }
+
+func TestLoadResolvesExportedAndPrivateStructsAcrossModules(t *testing.T) {
+	dir := t.TempDir()
+	writeSource(t, dir, "main.tx", `package main
+import "geom.tx"
+
+type Point struct {
+    x int
+}
+
+func main() int {
+    let local Point = Point{x: 1}
+    let remote geom.Point = geom.Point{x: 2, y: 3}
+    return local.x + remote.y
+}`)
+	writeSource(t, dir, "geom.tx", `package geom
+pub type Point struct {
+    x int
+    y int
+}`)
+
+	result, err := Load(filepath.Join(dir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Program.Structs) != 2 {
+		t.Fatalf("struct count = %d, want 2", len(result.Program.Structs))
+	}
+	if result.Program.Structs[0].TargetName() == result.Program.Structs[1].TargetName() {
+		t.Fatalf("expected distinct internal struct names, got %q", result.Program.Structs[0].TargetName())
+	}
+
+	writeSource(t, dir, "bad.tx", `package main
+import "geom.tx"
+
+func main() int {
+    let s geom.Secret = geom.Secret{code: 1}
+    return s.code
+}`)
+	writeSource(t, dir, "geom.tx", `package geom
+type Secret struct {
+    code int
+}`)
+	if _, err := Load(filepath.Join(dir, "bad.tx")); err == nil {
+		t.Fatal("expected error for private struct access across modules")
+	} else {
+		assertErrorContains(t, err, `cannot use private struct "geom.Secret"`)
+	}
+}

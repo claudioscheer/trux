@@ -20,8 +20,9 @@ func (e *ParseError) Error() string {
 }
 
 type Parser struct {
-	tokens []token.Token
-	pos    int
+	tokens            []token.Token
+	pos               int
+	inConditionHeader bool
 }
 
 func Parse(input string) (*ast.Program, error) {
@@ -73,6 +74,14 @@ func (p *Parser) parseProgram() (*ast.Program, error) {
 		if p.check(token.Import) {
 			return nil, p.errorf(p.current(), "imports must appear after package and before functions")
 		}
+		if p.check(token.TypeKw) || (p.check(token.Pub) && p.peek(1).Type == token.TypeKw) {
+			st, err := p.parseStructDecl()
+			if err != nil {
+				return nil, err
+			}
+			program.Structs = append(program.Structs, st)
+			continue
+		}
 		fn, err := p.parseFuncDecl()
 		if err != nil {
 			return nil, err
@@ -81,6 +90,72 @@ func (p *Parser) parseProgram() (*ast.Program, error) {
 	}
 
 	return program, nil
+}
+
+func (p *Parser) parseStructDecl() (*ast.StructDecl, error) {
+	public := false
+	start := p.current()
+	if p.match(token.Pub) {
+		public = true
+		if _, err := p.expect(token.TypeKw); err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		start, err = p.expect(token.TypeKw)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	name, err := p.expect(token.Ident)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := p.expect(token.Struct); err != nil {
+		return nil, err
+	}
+
+	if _, err := p.expect(token.LBrace); err != nil {
+		return nil, err
+	}
+
+	var fields []ast.StructField
+	for !p.check(token.RBrace) && !p.check(token.EOF) {
+		fieldName, err := p.expect(token.Ident)
+		if err != nil {
+			return nil, err
+		}
+		fieldType, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		prevLine := p.tokens[p.pos-1].Pos.Line
+		fields = append(fields, ast.StructField{
+			Pos:  fieldName.Pos,
+			Name: fieldName.Lexeme,
+			Type: fieldType,
+		})
+		if p.match(token.Comma) || p.match(token.Semicolon) {
+			continue
+		}
+		if !p.check(token.RBrace) && p.current().Pos.Line == prevLine {
+			return nil, p.errorf(p.current(), "expected %q or newline after struct field, got %s", ",", describe(p.current()))
+		}
+	}
+
+	if _, err := p.expect(token.RBrace); err != nil {
+		return nil, err
+	}
+
+	return &ast.StructDecl{
+		Pos:     start.Pos,
+		NamePos: name.Pos,
+		Name:    name.Lexeme,
+		Public:  public,
+		Fields:  fields,
+	}, nil
 }
 
 func (p *Parser) parseImportDecl() (*ast.ImportDecl, error) {
@@ -230,6 +305,28 @@ func (p *Parser) parseType() (ast.Type, error) {
 			return nil, err
 		}
 		return &ast.ListType{Elem: elem}, nil
+	case p.match(token.Asterisk):
+		elem, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.PointerType{Elem: elem}, nil
+	case p.match(token.Map):
+		if _, err := p.expect(token.LBracket); err != nil {
+			return nil, err
+		}
+		key, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(token.RBracket); err != nil {
+			return nil, err
+		}
+		val, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		return &ast.MapType{Key: key, Value: val}, nil
 	case p.check(token.Ident) && p.current().Lexeme == "gpu":
 		p.advance()
 		if _, err := p.expect(token.Dot); err != nil {
@@ -253,6 +350,16 @@ func (p *Parser) parseType() (ast.Type, error) {
 			return nil, err
 		}
 		return &ast.GPUBufferType{Elem: elem}, nil
+	case p.check(token.Ident):
+		first := p.advance()
+		if p.match(token.Dot) {
+			second, err := p.expect(token.Ident)
+			if err != nil {
+				return nil, err
+			}
+			return &ast.StructType{Package: first.Lexeme, Name: second.Lexeme}, nil
+		}
+		return &ast.StructType{Name: first.Lexeme}, nil
 	case p.match(token.IntType):
 		return ast.IntType, nil
 	case p.match(token.FloatType):
@@ -435,7 +542,10 @@ func (p *Parser) parseIfStmt() (ast.Statement, error) {
 		return nil, err
 	}
 
+	prevCond := p.inConditionHeader
+	p.inConditionHeader = true
 	condition, err := p.parseExpression(0)
+	p.inConditionHeader = prevCond
 	if err != nil {
 		return nil, err
 	}
@@ -500,43 +610,54 @@ func (p *Parser) parseForStmt() (ast.Statement, error) {
 	var condition ast.Expression
 	var post ast.Statement
 
+	prevCond := p.inConditionHeader
+	p.inConditionHeader = true
 	switch {
 	case p.check(token.LBrace):
 	case p.forHeaderHasSemicolon():
 		init, err = p.parseForInitStmt()
 		if err != nil {
+			p.inConditionHeader = prevCond
 			return nil, err
 		}
 		if _, err = p.expect(token.Semicolon); err != nil {
+			p.inConditionHeader = prevCond
 			return nil, err
 		}
 		if !p.check(token.Semicolon) {
 			condition, err = p.parseExpression(0)
 			if err != nil {
+				p.inConditionHeader = prevCond
 				return nil, err
 			}
 		}
 		if _, err = p.expect(token.Semicolon); err != nil {
+			p.inConditionHeader = prevCond
 			return nil, err
 		}
 		if !p.check(token.LBrace) {
 			post, err = p.parseForPostStmt()
 			if err != nil {
+				p.inConditionHeader = prevCond
 				return nil, err
 			}
 		}
 	default:
 		if p.check(token.Let) {
 			if _, err = p.parseLetStmt(); err != nil {
+				p.inConditionHeader = prevCond
 				return nil, err
 			}
+			p.inConditionHeader = prevCond
 			return nil, p.errorf(p.current(), `expected %q after for init statement`, string(token.Semicolon))
 		}
 		condition, err = p.parseExpression(0)
 		if err != nil {
+			p.inConditionHeader = prevCond
 			return nil, err
 		}
 	}
+	p.inConditionHeader = prevCond
 
 	body, err := p.parseBlock()
 	if err != nil {
@@ -554,7 +675,7 @@ func (p *Parser) forHeaderHasSemicolon() bool {
 	for i := p.pos; i < len(p.tokens); i++ {
 		switch p.tokens[i].Type {
 		case token.LParen, token.LBracket, token.LBrace:
-			if p.tokens[i].Type == token.LBrace && depth == 0 {
+			if p.tokens[i].Type == token.LBrace && depth == 0 && !p.isStructLiteralBraceAt(i) {
 				return false
 			}
 			depth++
@@ -640,6 +761,13 @@ func (p *Parser) parseAssignOrExprStmt() (ast.Statement, error) {
 			}, nil
 		case *ast.IndexExpr:
 			return &ast.IndexAssignStmt{Start: target.Start, Target: target, Value: value}, nil
+		case *ast.FieldExpr:
+			return &ast.FieldAssignStmt{Start: target.Start, Target: target, Value: value}, nil
+		case *ast.UnaryExpr:
+			if target.Operator == "*" {
+				return &ast.DerefAssignStmt{Start: target.Start, Target: target, Value: value}, nil
+			}
+			return nil, p.errorf(token.Token{Pos: expr.Pos()}, "invalid assignment target")
 		default:
 			return nil, p.errorf(token.Token{Pos: expr.Pos()}, "invalid assignment target")
 		}
@@ -655,6 +783,9 @@ func (p *Parser) parseExpression(minPrecedence int) (ast.Expression, error) {
 	}
 
 	for {
+		if p.current().Type == token.Asterisk && p.pos > 0 && p.current().Pos.Line > p.tokens[p.pos-1].Pos.Line {
+			return left, nil
+		}
 		precedence := p.precedence(p.current().Type)
 		if precedence < minPrecedence {
 			return left, nil
@@ -676,7 +807,7 @@ func (p *Parser) parseExpression(minPrecedence int) (ast.Expression, error) {
 }
 
 func (p *Parser) parseUnary() (ast.Expression, error) {
-	if p.check(token.Minus) || p.check(token.Not) {
+	if p.check(token.Minus) || p.check(token.Not) || p.check(token.Asterisk) || p.check(token.Ampersand) {
 		operator := p.advance()
 		operand, err := p.parseUnary()
 		if err != nil {
@@ -693,53 +824,90 @@ func (p *Parser) parsePostfix() (ast.Expression, error) {
 		return nil, err
 	}
 
-	for p.match(token.LBracket) {
-		if p.match(token.Colon) {
-			var end ast.Expression
-			if !p.check(token.RBracket) {
-				end, err = p.parseExpression(0)
-				if err != nil {
+	for {
+		if p.match(token.Dot) {
+			member, err := p.expect(token.Ident)
+			if err != nil {
+				return nil, err
+			}
+			expr = &ast.FieldExpr{
+				Start:  expr.Pos(),
+				Object: expr,
+				Field:  member.Lexeme,
+			}
+			continue
+		}
+		if p.match(token.LBracket) {
+			if p.match(token.Colon) {
+				var end ast.Expression
+				if !p.check(token.RBracket) {
+					end, err = p.parseExpression(0)
+					if err != nil {
+						return nil, err
+					}
+				}
+				if _, err := p.expect(token.RBracket); err != nil {
 					return nil, err
 				}
+				expr = &ast.SliceExpr{Start: expr.Pos(), Collection: expr, EndIndex: end}
+				continue
 			}
+
+			index, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			if p.match(token.Colon) {
+				var end ast.Expression
+				if !p.check(token.RBracket) {
+					end, err = p.parseExpression(0)
+					if err != nil {
+						return nil, err
+					}
+				}
+				if _, err := p.expect(token.RBracket); err != nil {
+					return nil, err
+				}
+				expr = &ast.SliceExpr{Start: expr.Pos(), Collection: expr, StartIndex: index, EndIndex: end}
+				continue
+			}
+
 			if _, err := p.expect(token.RBracket); err != nil {
 				return nil, err
 			}
-			expr = &ast.SliceExpr{Start: expr.Pos(), Collection: expr, EndIndex: end}
+			expr = &ast.IndexExpr{Start: expr.Pos(), Collection: expr, Index: index}
 			continue
 		}
-
-		index, err := p.parseExpression(0)
-		if err != nil {
-			return nil, err
-		}
-		if p.match(token.Colon) {
-			var end ast.Expression
-			if !p.check(token.RBracket) {
-				end, err = p.parseExpression(0)
-				if err != nil {
-					return nil, err
-				}
-			}
-			if _, err := p.expect(token.RBracket); err != nil {
-				return nil, err
-			}
-			expr = &ast.SliceExpr{Start: expr.Pos(), Collection: expr, StartIndex: index, EndIndex: end}
-			continue
-		}
-
-		if _, err := p.expect(token.RBracket); err != nil {
-			return nil, err
-		}
-		expr = &ast.IndexExpr{Start: expr.Pos(), Collection: expr, Index: index}
+		break
 	}
 
 	return expr, nil
 }
 
+func (p *Parser) isStructLiteralBraceAt(bracePos int) bool {
+	if bracePos < 0 || bracePos >= len(p.tokens) || p.tokens[bracePos].Type != token.LBrace {
+		return false
+	}
+	if bracePos+2 < len(p.tokens) && p.tokens[bracePos+1].Type == token.Ident && p.tokens[bracePos+2].Type == token.Colon {
+		return true
+	}
+	if bracePos+1 < len(p.tokens) && p.tokens[bracePos+1].Type == token.RBrace {
+		if !p.inConditionHeader {
+			return true
+		}
+		if bracePos+2 < len(p.tokens) {
+			switch p.tokens[bracePos+2].Type {
+			case token.LBrace, token.Equal, token.NotEqual, token.Dot, token.Semicolon:
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (p *Parser) parsePrimary() (ast.Expression, error) {
 	switch {
-	case p.check(token.LBracket), p.check(token.List):
+	case p.check(token.LBracket), p.check(token.List), p.check(token.Map):
 		return p.parseCollectionLiteral()
 	case p.check(token.Int):
 		tok := p.advance()
@@ -761,35 +929,58 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 		return &ast.NilLiteral{Start: tok.Pos}, nil
 	case p.check(token.Ident):
 		ident := p.advance()
-		packageName := ""
-		callee := ident.Lexeme
-		if p.match(token.Dot) {
-			member, err := p.expect(token.Ident)
+		if ident.Lexeme == "new" && p.match(token.LParen) {
+			typ, err := p.parseType()
 			if err != nil {
 				return nil, err
 			}
-			packageName = ident.Lexeme
-			callee = member.Lexeme
+			if _, err := p.expect(token.RParen); err != nil {
+				return nil, err
+			}
+			return &ast.NewExpr{Start: ident.Pos, ElemType: typ}, nil
+		}
+		if ident.Lexeme == "make" && p.match(token.LParen) {
+			return p.parseMakeExpr(ident)
 		}
 		if p.match(token.LParen) {
-			if packageName == "" && callee == "make" {
-				return p.parseMakeExpr(ident)
-			}
-
 			args, err := p.parseArguments()
 			if err != nil {
 				return nil, err
 			}
-
 			if _, err := p.expect(token.RParen); err != nil {
 				return nil, err
 			}
-
-			return &ast.CallExpr{Start: ident.Pos, Package: packageName, Callee: callee, Args: args}, nil
+			return &ast.CallExpr{Start: ident.Pos, Callee: ident.Lexeme, Args: args}, nil
 		}
-		return &ast.IdentExpr{Start: ident.Pos, Package: packageName, Name: callee}, nil
+		if p.check(token.LBrace) && p.isStructLiteralBraceAt(p.pos) {
+			return p.parseStructLiteral(ident.Pos, &ast.StructType{Name: ident.Lexeme})
+		}
+		if p.check(token.Dot) && p.peek(1).Type == token.Ident {
+			if p.peek(2).Type == token.LParen {
+				p.advance()
+				member := p.advance()
+				p.advance()
+				args, err := p.parseArguments()
+				if err != nil {
+					return nil, err
+				}
+				if _, err := p.expect(token.RParen); err != nil {
+					return nil, err
+				}
+				return &ast.CallExpr{Start: ident.Pos, Package: ident.Lexeme, Callee: member.Lexeme, Args: args}, nil
+			}
+			if p.peek(2).Type == token.LBrace && p.isStructLiteralBraceAt(p.pos+2) {
+				p.advance()
+				member := p.advance()
+				return p.parseStructLiteral(ident.Pos, &ast.StructType{Package: ident.Lexeme, Name: member.Lexeme})
+			}
+		}
+		return &ast.IdentExpr{Start: ident.Pos, Name: ident.Lexeme}, nil
 	case p.match(token.LParen):
+		prevCond := p.inConditionHeader
+		p.inConditionHeader = false
 		expr, err := p.parseExpression(0)
+		p.inConditionHeader = prevCond
 		if err != nil {
 			return nil, err
 		}
@@ -805,6 +996,48 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 	}
 }
 
+func (p *Parser) parseStructLiteral(start token.Position, structType *ast.StructType) (ast.Expression, error) {
+	if _, err := p.expect(token.LBrace); err != nil {
+		return nil, err
+	}
+	prevCond := p.inConditionHeader
+	p.inConditionHeader = false
+	defer func() {
+		p.inConditionHeader = prevCond
+	}()
+
+	var fields []ast.StructFieldInit
+	for !p.check(token.RBrace) && !p.check(token.EOF) {
+		fieldTok, err := p.expect(token.Ident)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(token.Colon); err != nil {
+			return nil, err
+		}
+		val, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, ast.StructFieldInit{
+			Pos:   fieldTok.Pos,
+			Name:  fieldTok.Lexeme,
+			Value: val,
+		})
+		if !p.match(token.Comma) && !p.match(token.Semicolon) {
+			break
+		}
+	}
+	if _, err := p.expect(token.RBrace); err != nil {
+		return nil, err
+	}
+	return &ast.StructLiteral{
+		Start:  start,
+		Type:   structType,
+		Fields: fields,
+	}, nil
+}
+
 func (p *Parser) parseCollectionLiteral() (ast.Expression, error) {
 	start := p.current().Pos
 	typ, err := p.parseType()
@@ -814,6 +1047,44 @@ func (p *Parser) parseCollectionLiteral() (ast.Expression, error) {
 
 	if _, err := p.expect(token.LBrace); err != nil {
 		return nil, err
+	}
+	prevCond := p.inConditionHeader
+	p.inConditionHeader = false
+	defer func() {
+		p.inConditionHeader = prevCond
+	}()
+
+	if mapType, ok := typ.(*ast.MapType); ok {
+		var entries []ast.MapEntry
+		for !p.check(token.RBrace) && !p.check(token.EOF) {
+			key, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := p.expect(token.Colon); err != nil {
+				return nil, err
+			}
+			val, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, ast.MapEntry{
+				Pos:   key.Pos(),
+				Key:   key,
+				Value: val,
+			})
+			if !p.match(token.Comma) {
+				break
+			}
+		}
+		if _, err := p.expect(token.RBrace); err != nil {
+			return nil, err
+		}
+		return &ast.MapLiteral{
+			Start:   start,
+			Type:    mapType,
+			Entries: entries,
+		}, nil
 	}
 
 	elements, err := p.parseExpressionList(token.RBrace)
@@ -839,6 +1110,9 @@ func (p *Parser) parseMakeExpr(ident token.Token) (ast.Expression, error) {
 	typ, err := p.parseType()
 	if err != nil {
 		return nil, err
+	}
+	if _, isMap := typ.(*ast.MapType); isMap && p.match(token.RParen) {
+		return &ast.MakeExpr{Start: ident.Pos, Type: typ, Len: nil}, nil
 	}
 	if _, err := p.expect(token.Comma); err != nil {
 		return nil, err
@@ -919,6 +1193,17 @@ func (p *Parser) check(typ token.Type) bool {
 	return p.current().Type == typ
 }
 
+func (p *Parser) peek(offset int) token.Token {
+	idx := p.pos + offset
+	if idx < 0 {
+		return p.tokens[0]
+	}
+	if idx >= len(p.tokens) {
+		return p.tokens[len(p.tokens)-1]
+	}
+	return p.tokens[idx]
+}
+
 func (p *Parser) advance() token.Token {
 	tok := p.current()
 	if !p.check(token.EOF) {
@@ -961,7 +1246,7 @@ func describe(tok token.Token) string {
 func isLiteralToken(typ token.Type) bool {
 	switch typ {
 	case token.Assign, token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
-		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Percent, token.And, token.Or, token.Not,
+		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Percent, token.And, token.Or, token.Not, token.Ampersand,
 		token.Comma, token.Colon, token.Dot, token.Semicolon, token.LParen, token.RParen, token.LBrace, token.RBrace, token.LBracket, token.RBracket:
 		return true
 	default:

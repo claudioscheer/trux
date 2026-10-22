@@ -1658,3 +1658,111 @@ func main() int {
 		t.Fatal("expected type check error for bare call to multi-return function")
 	}
 }
+
+func TestTypeCheckStructsPointersAndMaps(t *testing.T) {
+	src := `package main
+
+type Node struct {
+    val int
+    next *Node
+}
+
+func setNext(n *Node, next *Node) int {
+    n.next = next
+    return 0
+}
+
+func insert(mut m map[string]int, k string, v int) int {
+    m[k] = v
+    return len(m)
+}
+
+func main() int {
+    let head Node = Node{val: 1, next: nil}
+    let second *Node = &Node{val: 2}
+    let third *Node = new(Node)
+    *third = Node{val: 3}
+    setNext(&head, second)
+    setNext(second, third)
+    if head.next != nil && head.next.next == third {
+        head.next.val = 20
+    }
+    let m map[string]int = map[string]int{"a": 1}
+    insert(m, "b", 2)
+    let val int, ok bool = m["b"]
+    if ok {
+        delete(m, "a")
+    }
+    let ks list[string] = keys(m)
+    let vs list[int] = values(m)
+    let cloned map[string]int = clone(m)
+    return val + len(ks) + len(vs) + len(cloned)
+}
+`
+	program := mustParseOrLoadProgram(t, src)
+	info, err := Check(program)
+	if err != nil {
+		t.Fatalf("unexpected type check error: %v", err)
+	}
+	if len(info.Structs) != 1 {
+		t.Fatalf("expected 1 struct, got %d", len(info.Structs))
+	}
+	if len(info.DeleteCalls) != 1 || len(info.KeysCalls) != 1 || len(info.ValuesCalls) != 1 || len(info.MapLookups) != 1 {
+		t.Fatalf("unexpected map call metadata: delete=%d keys=%d values=%d lookups=%d",
+			len(info.DeleteCalls), len(info.KeysCalls), len(info.ValuesCalls), len(info.MapLookups))
+	}
+}
+
+func TestTypeCheckRejectsInvalidStructsPointersAndMaps(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "recursive value struct",
+			src: `package main
+type Bad struct {
+    self Bad
+}
+func main() int {
+    return 0
+}`,
+			want: `invalid recursive struct "Bad"`,
+		},
+		{
+			name: "invalid map key type",
+			src: `package main
+func main() int {
+    let m map[float]int = make(map[float]int)
+    return 0
+}`,
+			want: `invalid map key type float`,
+		},
+		{
+			name: "non-mut map parameter mutation",
+			src: `package main
+func put(m map[string]int) int {
+    m["a"] = 1
+    return 0
+}
+func main() int {
+    return 0
+}`,
+			want: `cannot mutate parameter-owned collection`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			program := mustParseOrLoadProgram(t, tt.src)
+			_, err := Check(program)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tt.want)
+			}
+		})
+	}
+}

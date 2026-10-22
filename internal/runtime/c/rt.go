@@ -522,6 +522,18 @@ static RT_UNUSED void rt_assert_fail_at(rt_string message, const char* file, int
     exit(1);
 }
 
+static RT_UNUSED void* rt_check_not_null_at(const void* ptr, const char* file, int line, int column) {
+    if (ptr == NULL) {
+        if (file != NULL && file[0] != '\0' && line > 0) {
+            fprintf(stderr, "trux runtime error: nil pointer dereference\n  at %s:%d:%d\n", file, line, column);
+        } else {
+            fprintf(stderr, "trux runtime error: nil pointer dereference\n");
+        }
+        exit(1);
+    }
+    return (void*)ptr;
+}
+
 static RT_UNUSED void rt_check_array_like(const void* data, size_t len, const char* what) {
     if (len > 0 && data == NULL) {
         fprintf(stderr, "trux runtime error: invalid %s: non-zero length with NULL data\n", what);
@@ -1022,7 +1034,7 @@ typedef struct { \
     CTYPE* data; \
     size_t len; \
 } rt_slice_##NAME; \
-typedef struct { \
+typedef struct rt_list_##NAME { \
     CTYPE* data; \
     size_t len; \
     size_t cap; \
@@ -1067,6 +1079,18 @@ static RT_UNUSED CTYPE rt_slice_##NAME##_get(rt_slice_##NAME value, int64_t inde
 static RT_UNUSED CTYPE rt_list_##NAME##_get(rt_list_##NAME* value, int64_t index) { \
     rt_check_array_like(value->data, value->len, "list"); \
     return value->data[rt_check_index(value->len, index)]; \
+} \
+static RT_UNUSED CTYPE* rt_array_##NAME##_addr(rt_array_##NAME value, int64_t index) { \
+    rt_check_array_like(value.data, value.len, "array"); \
+    return &value.data[rt_check_index(value.len, index)]; \
+} \
+static RT_UNUSED CTYPE* rt_slice_##NAME##_addr(rt_slice_##NAME value, int64_t index) { \
+    rt_check_array_like(value.data, value.len, "slice"); \
+    return &value.data[rt_check_index(value.len, index)]; \
+} \
+static RT_UNUSED CTYPE* rt_list_##NAME##_addr(rt_list_##NAME* value, int64_t index) { \
+    rt_check_array_like(value->data, value->len, "list"); \
+    return &value->data[rt_check_index(value->len, index)]; \
 } \
 static RT_UNUSED void rt_array_##NAME##_set(rt_array_##NAME value, int64_t index, CTYPE elem) { \
     rt_check_array_like(value.data, value.len, "array"); \
@@ -1176,6 +1200,291 @@ RT_DEFINE_COLLECTIONS(int, int64_t)
 RT_DEFINE_COLLECTIONS(float, double)
 RT_DEFINE_COLLECTIONS(bool, bool)
 RT_DEFINE_COLLECTIONS(string, rt_string)
+
+static RT_UNUSED uint64_t rt_hash_int(int64_t key) {
+    uint64_t x = (uint64_t)key;
+    x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+    x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+    return x ^ (x >> 31);
+}
+
+static RT_UNUSED bool rt_eq_int(int64_t a, int64_t b) {
+    return a == b;
+}
+
+static RT_UNUSED uint64_t rt_hash_bool(bool key) {
+    return key ? UINT64_C(0x9e3779b97f4a7c15) : UINT64_C(0xcbf29ce484222325);
+}
+
+static RT_UNUSED bool rt_eq_bool(bool a, bool b) {
+    return a == b;
+}
+
+static RT_UNUSED uint64_t rt_hash_string(rt_string key) {
+    rt_check_string(key);
+    uint64_t hash = UINT64_C(14695981039346656037);
+    for (size_t i = 0; i < key.len; i++) {
+        hash ^= (uint64_t)key.data[i];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static RT_UNUSED bool rt_eq_string(rt_string a, rt_string b) {
+    return rt_string_equal(a, b);
+}
+
+static RT_UNUSED uint64_t rt_hash_ptr(const void* key) {
+    uint64_t x = (uint64_t)(uintptr_t)key;
+    x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+    x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+    return x ^ (x >> 31);
+}
+
+static RT_UNUSED bool rt_eq_ptr(const void* a, const void* b) {
+    return a == b;
+}
+
+#define RT_DEFINE_MAP(NAME, KEY_NAME, KEY_CTYPE, VAL_NAME, VAL_CTYPE, KEY_EQ_FN, KEY_HASH_FN, ZERO_VAL) \
+typedef struct { \
+    uint64_t hash; \
+    KEY_CTYPE key; \
+    VAL_CTYPE value; \
+    bool deleted; \
+} rt_map_entry_##NAME; \
+typedef struct rt_map_##NAME { \
+    rt_map_entry_##NAME* entries; \
+    size_t* buckets; \
+    size_t len; \
+    size_t entries_len; \
+    size_t entries_cap; \
+    size_t bucket_cap; \
+} rt_map_##NAME; \
+static RT_UNUSED void rt_map_##NAME##_free(void* ptr) { \
+    rt_map_##NAME* m = (rt_map_##NAME*)ptr; \
+    if (m->entries != NULL) { \
+        free(m->entries); \
+    } \
+    if (m->buckets != NULL) { \
+        free(m->buckets); \
+    } \
+} \
+static RT_UNUSED void rt_map_##NAME##_rehash(rt_map_##NAME* m, size_t min_bucket_cap) { \
+    size_t new_bucket_cap = m->bucket_cap == 0 ? 8 : m->bucket_cap * 2; \
+    while (new_bucket_cap < min_bucket_cap) { \
+        if (new_bucket_cap > SIZE_MAX / 2) { \
+            rt_runtime_fail("map capacity overflow"); \
+        } \
+        new_bucket_cap *= 2; \
+    } \
+    size_t* new_buckets = (size_t*)malloc(rt_checked_bytes(new_bucket_cap, sizeof(size_t))); \
+    if (new_buckets == NULL) { \
+        rt_runtime_fail("allocation failed"); \
+    } \
+    memset(new_buckets, 0, new_bucket_cap * sizeof(size_t)); \
+    size_t write_idx = 0; \
+    size_t mask = new_bucket_cap - 1; \
+    for (size_t i = 0; i < m->entries_len; i++) { \
+        if (m->entries[i].deleted) { \
+            continue; \
+        } \
+        if (write_idx != i) { \
+            m->entries[write_idx] = m->entries[i]; \
+        } \
+        size_t b = (size_t)m->entries[write_idx].hash & mask; \
+        while (new_buckets[b] != 0) { \
+            b = (b + 1) & mask; \
+        } \
+        new_buckets[b] = write_idx + 1; \
+        write_idx++; \
+    } \
+    m->entries_len = write_idx; \
+    if (m->buckets != NULL) { \
+        free(m->buckets); \
+    } \
+    m->buckets = new_buckets; \
+    m->bucket_cap = new_bucket_cap; \
+} \
+static RT_UNUSED rt_map_##NAME* rt_map_##NAME##_new(rt_arena* arena, int64_t initial_cap) { \
+    size_t cap = rt_checked_count(initial_cap, "map capacity"); \
+    size_t offset = sizeof(rt_list_allocation); \
+    size_t align = RT_ALIGNOF(rt_map_##NAME); \
+    if (align > 1 && offset % align != 0) { \
+        size_t padding = align - (offset % align); \
+        if (offset > SIZE_MAX - padding) { \
+            rt_runtime_fail("allocation size overflow"); \
+        } \
+        offset += padding; \
+    } \
+    if (offset > SIZE_MAX - sizeof(rt_map_##NAME)) { \
+        rt_runtime_fail("allocation size overflow"); \
+    } \
+    uint8_t* block = (uint8_t*)malloc(offset + sizeof(rt_map_##NAME)); \
+    if (block == NULL) { \
+        rt_runtime_fail("allocation failed"); \
+    } \
+    rt_list_allocation* node = (rt_list_allocation*)block; \
+    rt_map_##NAME* m = (rt_map_##NAME*)(block + offset); \
+    m->entries = NULL; \
+    m->buckets = NULL; \
+    m->len = 0; \
+    m->entries_len = 0; \
+    m->entries_cap = 0; \
+    m->bucket_cap = 0; \
+    rt_arena_track_list(arena, node, m, rt_map_##NAME##_free); \
+    if (cap > 0) { \
+        m->entries = (rt_map_entry_##NAME*)malloc(rt_checked_bytes(cap, sizeof(rt_map_entry_##NAME))); \
+        if (m->entries == NULL) { \
+            rt_runtime_fail("allocation failed"); \
+        } \
+        m->entries_cap = cap; \
+        if (cap > SIZE_MAX / 2) { \
+            rt_runtime_fail("map capacity overflow"); \
+        } \
+        rt_map_##NAME##_rehash(m, cap * 2); \
+    } \
+    return m; \
+} \
+static RT_UNUSED bool rt_map_##NAME##_find_bucket(rt_map_##NAME* m, KEY_CTYPE key, uint64_t hash, size_t* out_bucket) { \
+    if (m == NULL || m->bucket_cap == 0) { \
+        return false; \
+    } \
+    size_t mask = m->bucket_cap - 1; \
+    size_t b = (size_t)hash & mask; \
+    size_t first_tombstone = SIZE_MAX; \
+    for (;;) { \
+        size_t slot = m->buckets[b]; \
+        if (slot == 0) { \
+            if (out_bucket != NULL) { \
+                *out_bucket = (first_tombstone != SIZE_MAX) ? first_tombstone : b; \
+            } \
+            return false; \
+        } \
+        if (slot == SIZE_MAX) { \
+            if (first_tombstone == SIZE_MAX) { \
+                first_tombstone = b; \
+            } \
+        } else { \
+            rt_map_entry_##NAME* e = &m->entries[slot - 1]; \
+            if (!e->deleted && e->hash == hash && KEY_EQ_FN(e->key, key)) { \
+                if (out_bucket != NULL) { \
+                    *out_bucket = b; \
+                } \
+                return true; \
+            } \
+        } \
+        b = (b + 1) & mask; \
+    } \
+} \
+static RT_UNUSED int64_t rt_map_##NAME##_len(rt_map_##NAME* m) { \
+    if (m == NULL) { \
+        return 0; \
+    } \
+    return rt_checked_len_i64(m->len); \
+} \
+static RT_UNUSED VAL_CTYPE rt_map_##NAME##_get(rt_map_##NAME* m, KEY_CTYPE key) { \
+    uint64_t hash = KEY_HASH_FN(key); \
+    size_t b = 0; \
+    if (rt_map_##NAME##_find_bucket(m, key, hash, &b)) { \
+        return m->entries[m->buckets[b] - 1].value; \
+    } \
+    return ZERO_VAL; \
+} \
+static RT_UNUSED VAL_CTYPE rt_map_##NAME##_get_ok(rt_map_##NAME* m, KEY_CTYPE key, bool* out_ok) { \
+    uint64_t hash = KEY_HASH_FN(key); \
+    size_t b = 0; \
+    if (rt_map_##NAME##_find_bucket(m, key, hash, &b)) { \
+        if (out_ok != NULL) { \
+            *out_ok = true; \
+        } \
+        return m->entries[m->buckets[b] - 1].value; \
+    } \
+    if (out_ok != NULL) { \
+        *out_ok = false; \
+    } \
+    return ZERO_VAL; \
+} \
+static RT_UNUSED void rt_map_##NAME##_set(rt_map_##NAME* m, KEY_CTYPE key, VAL_CTYPE value) { \
+    if (m == NULL) { \
+        rt_runtime_fail("assignment to entry in nil map"); \
+    } \
+    if ((m->entries_len + 1) * 2 > m->bucket_cap) { \
+        rt_map_##NAME##_rehash(m, m->bucket_cap == 0 ? 8 : m->bucket_cap * 2); \
+    } \
+    uint64_t hash = KEY_HASH_FN(key); \
+    size_t b = 0; \
+    if (rt_map_##NAME##_find_bucket(m, key, hash, &b)) { \
+        m->entries[m->buckets[b] - 1].value = value; \
+        return; \
+    } \
+    if (m->entries_len == m->entries_cap) { \
+        size_t new_cap = m->entries_cap == 0 ? 4 : m->entries_cap * 2; \
+        if (new_cap < m->entries_cap || new_cap > SIZE_MAX / sizeof(rt_map_entry_##NAME)) { \
+            rt_runtime_fail("map capacity overflow"); \
+        } \
+        rt_map_entry_##NAME* data = (rt_map_entry_##NAME*)realloc(m->entries, new_cap * sizeof(rt_map_entry_##NAME)); \
+        if (data == NULL) { \
+            rt_runtime_fail("allocation failed"); \
+        } \
+        m->entries = data; \
+        m->entries_cap = new_cap; \
+    } \
+    size_t idx = m->entries_len++; \
+    m->entries[idx] = RT_LIT(rt_map_entry_##NAME, hash, key, value, false); \
+    m->buckets[b] = idx + 1; \
+    m->len++; \
+} \
+static RT_UNUSED void rt_map_##NAME##_delete(rt_map_##NAME* m, KEY_CTYPE key) { \
+    if (m == NULL || m->len == 0) { \
+        return; \
+    } \
+    uint64_t hash = KEY_HASH_FN(key); \
+    size_t b = 0; \
+    if (rt_map_##NAME##_find_bucket(m, key, hash, &b)) { \
+        size_t idx = m->buckets[b] - 1; \
+        m->entries[idx].deleted = true; \
+        m->buckets[b] = SIZE_MAX; \
+        m->len--; \
+    } \
+} \
+static RT_UNUSED rt_map_##NAME* rt_map_##NAME##_clone(rt_arena* arena, rt_map_##NAME* value) { \
+    if (value == NULL) { \
+        return rt_map_##NAME##_new(arena, 0); \
+    } \
+    rt_map_##NAME* copy = rt_map_##NAME##_new(arena, rt_checked_len_i64(value->len)); \
+    for (size_t i = 0; i < value->entries_len; i++) { \
+        if (!value->entries[i].deleted) { \
+            KEY_CTYPE k = RT_CLONE_VALUE_##KEY_NAME(arena, value->entries[i].key); \
+            VAL_CTYPE v = RT_CLONE_VALUE_##VAL_NAME(arena, value->entries[i].value); \
+            rt_map_##NAME##_set(copy, k, v); \
+        } \
+    } \
+    return copy; \
+}
+
+#define RT_DEFINE_MAP_LISTS(NAME, KEY_NAME, KEY_CTYPE, VAL_NAME, VAL_CTYPE) \
+static RT_UNUSED rt_list_##KEY_NAME* rt_map_##NAME##_keys(rt_arena* arena, rt_map_##NAME* m) { \
+    rt_list_##KEY_NAME* out = rt_list_##KEY_NAME##_new(arena, m == NULL ? 0 : m->len); \
+    if (m != NULL) { \
+        for (size_t i = 0; i < m->entries_len; i++) { \
+            if (!m->entries[i].deleted) { \
+                rt_list_##KEY_NAME##_append(out, m->entries[i].key); \
+            } \
+        } \
+    } \
+    return out; \
+} \
+static RT_UNUSED rt_list_##VAL_NAME* rt_map_##NAME##_values(rt_arena* arena, rt_map_##NAME* m) { \
+    rt_list_##VAL_NAME* out = rt_list_##VAL_NAME##_new(arena, m == NULL ? 0 : m->len); \
+    if (m != NULL) { \
+        for (size_t i = 0; i < m->entries_len; i++) { \
+            if (!m->entries[i].deleted) { \
+                rt_list_##VAL_NAME##_append(out, m->entries[i].value); \
+            } \
+        } \
+    } \
+    return out; \
+}
 
 typedef struct {
     rt_list_string* f0;

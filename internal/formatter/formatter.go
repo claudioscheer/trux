@@ -217,7 +217,7 @@ func needsSpace(tokens []token.Token, index int, prevprev token.Token, prev toke
 
 	if curr.Type == token.LBracket {
 		switch prev.Type {
-		case token.List, token.RBracket:
+		case token.List, token.Map, token.RBracket:
 			return false
 		case token.Ident:
 			return prevprev.Type == token.Let || isFunctionParamType(tokens, index)
@@ -230,18 +230,32 @@ func needsSpace(tokens []token.Token, index int, prevprev token.Token, prev toke
 		}
 	}
 
+	if prev.Type == token.Colon {
+		return !isInsideBrackets(tokens, index-1)
+	}
+
+	if prev.Type == token.RBracket && isTypeCloseBracket(tokens, index-1) {
+		if isTypeToken(curr.Type) || curr.Type == token.Ident || curr.Type == token.Asterisk || curr.Type == token.Map || curr.Type == token.List || curr.Type == token.LBracket {
+			return false
+		}
+	}
+
 	if isTypeToken(curr.Type) && prev.Type == token.RBracket {
 		return false
 	}
 
 	if curr.Type == token.LBrace {
-		if isFunctionBodyBrace(tokens, index) {
+		if isFunctionBodyBrace(tokens, index) || prev.Type == token.Struct {
 			return true
 		}
-		if prev.Type == token.RBracket || (isTypeToken(prev.Type) && prevprev.Type == token.RBracket) {
+		if isCollectionLiteralOpenBrace(tokens, index) {
 			return false
 		}
 		return true
+	}
+
+	if isPrefixAsterisk(tokens, index-1, prevprev, prev, curr) {
+		return false
 	}
 
 	if isPrefixOperand(prevprev, prev, curr) {
@@ -329,15 +343,110 @@ func innermostOpenBrace(tokens []token.Token, before int) int {
 	return -1
 }
 
+func isInsideBrackets(tokens []token.Token, before int) bool {
+	bracketDepth := 0
+	braceDepth := 0
+	for i := before; i >= 0; i-- {
+		switch tokens[i].Type {
+		case token.RBracket:
+			bracketDepth++
+		case token.LBracket:
+			if bracketDepth == 0 {
+				return braceDepth == 0
+			}
+			bracketDepth--
+		case token.RBrace:
+			braceDepth++
+		case token.LBrace:
+			if braceDepth == 0 {
+				return false
+			}
+			braceDepth--
+		}
+	}
+	return false
+}
+
+func matchingOpenBracket(tokens []token.Token, rbracket int) int {
+	if rbracket < 0 || rbracket >= len(tokens) || tokens[rbracket].Type != token.RBracket {
+		return -1
+	}
+	depth := 0
+	for i := rbracket; i >= 0; i-- {
+		switch tokens[i].Type {
+		case token.RBracket:
+			depth++
+		case token.LBracket:
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func isTypeCloseBracket(tokens []token.Token, rbracket int) bool {
+	lbracket := matchingOpenBracket(tokens, rbracket)
+	if lbracket < 0 {
+		return false
+	}
+	if lbracket == 0 || lbracket+1 == rbracket {
+		return true
+	}
+	switch tokens[lbracket-1].Type {
+	case token.Map, token.List, token.RBracket, token.Asterisk:
+		return true
+	case token.Ident:
+		if lbracket >= 2 {
+			switch tokens[lbracket-2].Type {
+			case token.Let, token.Comma, token.LParen, token.Mut:
+				return true
+			}
+		}
+		return !lineHasToken(tokens, token.Assign) && tokens[0].Type == token.Ident
+	case token.RParen:
+		return isFunctionReturnType(tokens, lbracket)
+	default:
+		return false
+	}
+}
+
+func lineHasToken(tokens []token.Token, typ token.Type) bool {
+	for _, tok := range tokens {
+		if tok.Type == typ {
+			return true
+		}
+	}
+	return false
+}
+
 func isCollectionLiteralOpenBrace(tokens []token.Token, lbrace int) bool {
 	if lbrace < 1 {
 		return false
 	}
+	if isFunctionBodyBrace(tokens, lbrace) || tokens[lbrace-1].Type == token.Struct {
+		return false
+	}
+	if lbrace+2 < len(tokens) && tokens[lbrace+1].Type == token.Ident && tokens[lbrace+2].Type == token.Colon {
+		return true
+	}
 	switch prev := tokens[lbrace-1]; prev.Type {
 	case token.RBracket:
 		return true
-	case token.IntType, token.FloatType, token.StringType, token.BoolType:
-		return lbrace >= 2 && tokens[lbrace-2].Type == token.RBracket
+	case token.IntType, token.FloatType, token.StringType, token.BoolType, token.ErrorType:
+		return lbrace >= 2 && (tokens[lbrace-2].Type == token.RBracket || tokens[lbrace-2].Type == token.Asterisk)
+	case token.Ident:
+		if lbrace >= 2 && (tokens[lbrace-2].Type == token.RBracket || tokens[lbrace-2].Type == token.Asterisk || tokens[lbrace-2].Type == token.Dot) {
+			return true
+		}
+		if tokens[0].Type != token.If && tokens[0].Type != token.For && tokens[0].Type != token.Else {
+			return true
+		}
+		if lbrace+1 < len(tokens) && tokens[lbrace+1].Type == token.RBrace && lbrace+2 < len(tokens) && tokens[lbrace+2].Type != token.EOF {
+			return true
+		}
+		return false
 	default:
 		return false
 	}
@@ -398,8 +507,33 @@ func noSpaceBefore(typ token.Type) bool {
 
 func noSpaceAfter(typ token.Type) bool {
 	switch typ {
-	case token.LParen, token.LBracket, token.Colon, token.Dot:
+	case token.LParen, token.LBracket, token.Dot, token.Ampersand:
 		return true
+	default:
+		return false
+	}
+}
+
+func isPrefixAsterisk(tokens []token.Token, asteriskIdx int, prevprev token.Token, prev token.Token, curr token.Token) bool {
+	if prev.Type != token.Asterisk {
+		return false
+	}
+	switch prevprev.Type {
+	case "", token.Assign, token.LParen, token.LBrace, token.LBracket, token.RBracket, token.Comma, token.Colon, token.Semicolon,
+		token.Return, token.If, token.For, token.Else,
+		token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
+		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Percent, token.And, token.Or, token.Not, token.Ampersand, token.In:
+		return true
+	case token.RParen:
+		return isFunctionReturnType(tokens, asteriskIdx)
+	case token.Ident:
+		if asteriskIdx >= 2 {
+			switch tokens[asteriskIdx-2].Type {
+			case token.Let, token.Comma, token.LParen, token.Mut, token.LBrace, token.Semicolon:
+				return true
+			}
+		}
+		return !lineHasToken(tokens, token.Assign) && tokens[0].Type == token.Ident
 	default:
 		return false
 	}
@@ -410,14 +544,14 @@ func isPrefixOperand(prevprev token.Token, prev token.Token, curr token.Token) b
 		return false
 	}
 	switch curr.Type {
-	case token.Ident, token.Int, token.Float, token.True, token.False, token.LParen, token.Minus, token.Not:
+	case token.Ident, token.Int, token.Float, token.True, token.False, token.LParen, token.Minus, token.Not, token.Asterisk, token.Ampersand:
 	default:
 		return false
 	}
 	switch prevprev.Type {
-	case "", token.Assign, token.LParen, token.LBrace, token.Comma, token.Semicolon, token.Return,
+	case "", token.Assign, token.LParen, token.LBrace, token.Comma, token.Colon, token.Semicolon, token.Return,
 		token.Equal, token.NotEqual, token.Less, token.LessEqual, token.Greater, token.GreaterEqual,
-		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Not, token.In, token.LBracket, token.If, token.For, token.Else:
+		token.Plus, token.Minus, token.Asterisk, token.Slash, token.Not, token.Ampersand, token.In, token.LBracket, token.If, token.For, token.Else:
 		return true
 	default:
 		return false

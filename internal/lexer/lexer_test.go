@@ -108,6 +108,43 @@ func TestMutIsKeyword(t *testing.T) {
 	})
 }
 
+func TestLexesStructPointerAndMapTokens(t *testing.T) {
+	assertTokens(t, Lex("pub type Point struct { x int } let p *Point = &pt let m map[string]int = make(map[string]int)"), []expectedToken{
+		{token.Pub, "pub"},
+		{token.TypeKw, "type"},
+		{token.Ident, "Point"},
+		{token.Struct, "struct"},
+		{token.LBrace, "{"},
+		{token.Ident, "x"},
+		{token.IntType, "int"},
+		{token.RBrace, "}"},
+		{token.Let, "let"},
+		{token.Ident, "p"},
+		{token.Asterisk, "*"},
+		{token.Ident, "Point"},
+		{token.Assign, "="},
+		{token.Ampersand, "&"},
+		{token.Ident, "pt"},
+		{token.Let, "let"},
+		{token.Ident, "m"},
+		{token.Map, "map"},
+		{token.LBracket, "["},
+		{token.StringType, "string"},
+		{token.RBracket, "]"},
+		{token.IntType, "int"},
+		{token.Assign, "="},
+		{token.Ident, "make"},
+		{token.LParen, "("},
+		{token.Map, "map"},
+		{token.LBracket, "["},
+		{token.StringType, "string"},
+		{token.RBracket, "]"},
+		{token.IntType, "int"},
+		{token.RParen, ")"},
+		{token.EOF, ""},
+	})
+}
+
 func TestElifIsIdentifier(t *testing.T) {
 	assertTokens(t, Lex("elif"), []expectedToken{
 		{token.Ident, "elif"},

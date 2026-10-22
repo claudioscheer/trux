@@ -365,3 +365,33 @@ func main() int {
 		t.Fatalf("unexpected formatting:\n%s\nwant:\n%s", formatted, src)
 	}
 }
+
+func TestFormatStructsPointersAndMaps(t *testing.T) {
+	src := `package main
+
+pub type Point struct {
+  x int
+  y int
+}
+
+func clonePtr(p *Point) *Point {
+  let out *Point = new(Point)
+  *out = *p
+  return out
+}
+
+func main() int {
+  let p Point = Point{x: 1, y: 2}
+  let ptr *Point = &p
+  let m map[string]*Point = map[string]*Point{"origin": ptr}
+  return m["origin"].x
+}
+`
+	formatted, err := Format("test.tx", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if formatted != src {
+		t.Fatalf("unexpected formatting:\n%s\nwant:\n%s", formatted, src)
+	}
+}

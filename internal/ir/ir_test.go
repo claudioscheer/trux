@@ -597,6 +597,70 @@ func main() int {
 	}
 }
 
+func TestBuildCreatesTypedIRForStructsPointersAndMaps(t *testing.T) {
+	program := mustParse(t, `package main
+type Point struct {
+    x int
+    y int
+}
+
+func main() int {
+    let p Point = Point{x: 1, y: 2}
+    p.x = 3
+    let ptr *Point = new(Point)
+    *ptr = p
+    let m map[string]int = map[string]int{"a": ptr.x}
+    m["b"] = 10
+    let val int, ok bool = m["b"]
+    delete(m, "a")
+    let ks list[string] = keys(m)
+    let vs list[int] = values(m)
+    if ok {
+        return val + len(ks) + len(vs)
+    }
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	built, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := built.Structs["Point"]; !ok {
+		t.Fatalf("expected Point in built.Structs: %#v", built.Structs)
+	}
+	mainFn := built.Functions[0]
+	if _, ok := mainFn.Body[0].(*LetStmt).Value.(*StructLiteral); !ok {
+		t.Fatalf("stmt 0 value = %T, want StructLiteral", mainFn.Body[0].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[1].(*FieldAssignStmt); !ok {
+		t.Fatalf("stmt 1 = %T, want FieldAssignStmt", mainFn.Body[1])
+	}
+	if _, ok := mainFn.Body[2].(*LetStmt).Value.(*NewExpr); !ok {
+		t.Fatalf("stmt 2 value = %T, want NewExpr", mainFn.Body[2].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[3].(*DerefAssignStmt); !ok {
+		t.Fatalf("stmt 3 = %T, want DerefAssignStmt", mainFn.Body[3])
+	}
+	if _, ok := mainFn.Body[4].(*LetStmt).Value.(*MapLiteral); !ok {
+		t.Fatalf("stmt 4 value = %T, want MapLiteral", mainFn.Body[4].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[6].(*LetStmt).Value.(*MapLookupExpr); !ok {
+		t.Fatalf("stmt 6 value = %T, want MapLookupExpr", mainFn.Body[6].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[7].(*DeleteStmt); !ok {
+		t.Fatalf("stmt 7 = %T, want DeleteStmt", mainFn.Body[7])
+	}
+	if _, ok := mainFn.Body[8].(*LetStmt).Value.(*KeysExpr); !ok {
+		t.Fatalf("stmt 8 value = %T, want KeysExpr", mainFn.Body[8].(*LetStmt).Value)
+	}
+	if _, ok := mainFn.Body[9].(*LetStmt).Value.(*ValuesExpr); !ok {
+		t.Fatalf("stmt 9 value = %T, want ValuesExpr", mainFn.Body[9].(*LetStmt).Value)
+	}
+}
+
 func mustParse(t *testing.T, src string) *ast.Program {
 	t.Helper()
 

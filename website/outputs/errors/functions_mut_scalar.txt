@@ -1,4 +1,4 @@
-examples/errors/functions_mut_scalar.tx:3:20: mut parameter "n" must be array, slice, list, or map, got int
+examples/errors/functions_mut_scalar.tx:3:20: mut parameter "n" must be array, slice, or list, got int
 1 | package main
 2 | 
 3 | func increment(mut n int) int {

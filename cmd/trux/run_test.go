@@ -419,25 +419,16 @@ func TestBuildCommandCompilesAndRunsHTTPServer(t *testing.T) {
 import "http"
 
 func handle(request int) int {
-    let method string = http.method(request)
-    let path string = http.path(request)
     let query string = http.query(request)
     let agent string = http.header(request, "User-Agent")
     let body string = http.body(request)
-
-    if method == "POST" {
-        if path == "/hello" {
-            http.respond(request, 200, "text/plain", query + "|" + agent + "|" + body)
-            return 0
-        }
-    }
-
-    http.respond(request, 404, "text/plain", "missing")
+    http.text(request, 200, query + "|" + agent + "|" + body)
     return 0
 }
 
 func main() int {
-    http.serve("127.0.0.1", %d, 4, handle)
+    http.post("/hello", handle)
+    http.listen(%d)
     return 0
 }`, port))
 	outputPath := filepath.Join(t.TempDir(), "server")
@@ -494,14 +485,14 @@ func main() int {
 		t.Helper()
 		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 500*time.Millisecond)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("dial: %v, stderr: %s", err, stderr.String())
 		}
 		defer conn.Close()
 		if err := conn.SetDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := conn.Write([]byte(request)); err != nil {
-			t.Fatal(err)
+			t.Fatalf("write: %v, stderr: %s", err, stderr.String())
 		}
 		response, err := io.ReadAll(conn)
 		if err != nil {
@@ -519,6 +510,153 @@ func main() int {
 	transferEncoding := "POST /hello HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 7\r\n\r\npayload"
 	if status := rawHTTPStatus(t, transferEncoding); status != "HTTP/1.1 400 Bad Request" {
 		t.Fatalf("Transfer-Encoding status = %q, want 400", status)
+	}
+}
+
+func TestBuildCommandCompilesAndRunsHTTPMultiFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("http runtime is POSIX-only")
+	}
+	requireCC(t)
+
+	port := freeTCPPort(t)
+	tempDir := t.TempDir()
+
+	exDir := filepath.Join("..", "..", "examples", "projects", "http_multi_file")
+	mainContent, err := os.ReadFile(filepath.Join(exDir, "main.tx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainContentStr := strings.Replace(string(mainContent), "8080", strconv.Itoa(port), 1)
+	if err := os.WriteFile(filepath.Join(tempDir, "main.tx"), []byte(mainContentStr), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sub := range []string{"middleware", "handlers"} {
+		if err := os.MkdirAll(filepath.Join(tempDir, sub), 0755); err != nil {
+			t.Fatal(err)
+		}
+		entries, err := os.ReadDir(filepath.Join(exDir, sub))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			content, err := os.ReadFile(filepath.Join(exDir, sub, e.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(tempDir, sub, e.Name()), content, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	outputPath := filepath.Join(tempDir, "server")
+	if err := buildFile(filepath.Join(tempDir, "main.tx"), outputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(outputPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	})
+
+	client := &stdhttp.Client{Timeout: 500 * time.Millisecond}
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+
+	deadline := time.Now().Add(3 * time.Second)
+	var resp *stdhttp.Response
+	for time.Now().Before(deadline) {
+		resp, err = client.Get(baseURL + "/health")
+		if err == nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("server did not start: %v\nstderr:\n%s", err, stderr.String())
+	}
+	defer resp.Body.Close()
+
+	healthBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("/health status = %d, want 200", resp.StatusCode)
+	}
+	if resp.Header.Get("X-Server") != "trux-uring" {
+		t.Fatalf("/health X-Server = %q, want trux-uring", resp.Header.Get("X-Server"))
+	}
+	if resp.Header.Get("X-Health") != "healthy" {
+		t.Fatalf("/health X-Health = %q, want healthy", resp.Header.Get("X-Health"))
+	}
+	if string(healthBody) != "{\"status\":\"ok\"}\n" {
+		t.Fatalf("/health body = %q", string(healthBody))
+	}
+
+	unauthResp, err := client.Get(baseURL + "/api/users/42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unauthResp.Body.Close()
+	unauthBody, _ := io.ReadAll(unauthResp.Body)
+	if unauthResp.StatusCode != 401 {
+		t.Fatalf("/api/users/42 status = %d, want 401", unauthResp.StatusCode)
+	}
+	if unauthResp.Header.Get("WWW-Authenticate") != "Bearer" {
+		t.Fatalf("/api/users/42 WWW-Authenticate = %q, want Bearer", unauthResp.Header.Get("WWW-Authenticate"))
+	}
+	if string(unauthBody) != "{\"error\":\"unauthorized\"}\n" {
+		t.Fatalf("/api/users/42 body = %q", string(unauthBody))
+	}
+
+	req, _ := stdhttp.NewRequest("GET", baseURL+"/api/users/42", nil)
+	req.Header.Set("Authorization", "Bearer secret-token")
+	authResp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer authResp.Body.Close()
+	authBody, _ := io.ReadAll(authResp.Body)
+	if authResp.StatusCode != 200 {
+		t.Fatalf("/api/users/42 with auth status = %d, want 200", authResp.StatusCode)
+	}
+	if string(authBody) != "{\"id\":\"42\",\"auth_user\":\"user-42\",\"role\":\"admin\"}\n" {
+		t.Fatalf("/api/users/42 with auth body = %q", string(authBody))
+	}
+
+	putReq, _ := stdhttp.NewRequest("PUT", baseURL+"/api/users/99", strings.NewReader("{\"name\":\"Alice\"}"))
+	putReq.Header.Set("Authorization", "Bearer secret-token")
+	putResp, err := client.Do(putReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer putResp.Body.Close()
+	putBody, _ := io.ReadAll(putResp.Body)
+	if putResp.StatusCode != 200 {
+		t.Fatalf("PUT /api/users/99 status = %d, want 200", putResp.StatusCode)
+	}
+	if string(putBody) != "{\"updated_id\":\"99\",\"payload\":{\"name\":\"Alice\"}}\n" {
+		t.Fatalf("PUT /api/users/99 body = %q", string(putBody))
+	}
+
+	notfoundResp, err := client.Get(baseURL + "/unknown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer notfoundResp.Body.Close()
+	notfoundBody, _ := io.ReadAll(notfoundResp.Body)
+	if notfoundResp.StatusCode != 404 {
+		t.Fatalf("/unknown status = %d, want 404", notfoundResp.StatusCode)
+	}
+	if string(notfoundBody) != "{\"error\":\"custom not found\"}\n" {
+		t.Fatalf("/unknown body = %q", string(notfoundBody))
 	}
 }
 
@@ -1898,7 +2036,8 @@ func handle(request int) int {
 }
 
 func main() int {
-    http.serve("127.0.0.1", 8080, 2, handle)
+    http.get("/", handle)
+    http.listen(8080)
     return 0
 }`)
 	outDir := t.TempDir()
@@ -2035,12 +2174,13 @@ func TestCompileGeneratedUsesPthreadForHTTP(t *testing.T) {
 import "http"
 
 func handle(request int) int {
-    http.respond(request, 200, "text/plain", "ok")
+    http.text(request, 200, "ok")
     return 0
 }
 
 func main() int {
-    http.serve("127.0.0.1", 8080, 2, handle)
+    http.get("/", handle)
+    http.listen(8080)
     return 0
 }`)
 	result, err := compileFile(path, compileOptions{})
@@ -2063,8 +2203,8 @@ func main() int {
 	}
 
 	log := readFile(t, logPath)
-	if !strings.Contains(log, "-pthread") {
-		t.Fatalf("compiler args = %q, want -pthread", log)
+	if !strings.Contains(log, "-pthread") || !strings.Contains(log, "-luring") {
+		t.Fatalf("compiler args = %q, want -pthread and -luring", log)
 	}
 }
 
@@ -2087,8 +2227,8 @@ int main(void) { return 0; }
 	}
 
 	log := readFile(t, logPath)
-	if !strings.Contains(log, "-pthread") {
-		t.Fatalf("compiler args = %q, want -pthread", log)
+	if !strings.Contains(log, "-pthread") || !strings.Contains(log, "-luring") {
+		t.Fatalf("compiler args = %q, want -pthread and -luring", log)
 	}
 }
 

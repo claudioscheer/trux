@@ -251,12 +251,13 @@ import "http"
 
 func handle(request int) int {
     let path string = http.path(request)
-    http.respond(request, 200, "text/plain", path)
+    http.text(request, 200, path)
     return 0
 }
 
 func main() int {
-    http.serve("127.0.0.1", 8080, 4, handle)
+    http.get("/users", handle)
+    http.serve("127.0.0.1", 8080, 4)
     return 0
 }`)
 
@@ -265,8 +266,9 @@ func main() int {
 		"#include \"trux_http_runtime.h\"",
 		"int64_t trux_f_6_handle(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t trux_v_7_request);",
 		"rt_http_path(&trux_frame, trux_v_7_request)",
-		"rt_http_respond(trux_v_7_request, 200, RT_LIT(rt_string, (const uint8_t*)\"text/plain\", 10), trux_v_4_path);",
-		"rt_http_serve(RT_LIT(rt_string, (const uint8_t*)\"127.0.0.1\", 9), 8080, 4, trux_f_6_handle);",
+		"rt_http_text(trux_v_7_request, 200, trux_v_4_path);",
+		"rt_http_register_route(RT_LIT(rt_string, (const uint8_t*)\"GET\", 3), RT_LIT(rt_string, (const uint8_t*)\"/users\", 6), trux_f_6_handle);",
+		"rt_http_serve(RT_LIT(rt_string, (const uint8_t*)\"127.0.0.1\", 9), 8080, 4);",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {

@@ -97,10 +97,20 @@ func stmtNeedsFrame(stmt ir.Stmt) bool {
 		return true
 	case *ir.TimeSleepStmt:
 		return exprNeedsFrame(stmt.Millis)
-	case *ir.HTTPServeStmt:
+	case *ir.HTTPServeStmt, *ir.HTTPListenStmt, *ir.HTTPRouteStmt, *ir.HTTPUseStmt, *ir.HTTPNotFoundStmt:
 		return true
 	case *ir.HTTPRespondStmt:
 		return exprNeedsFrame(stmt.Request) || exprNeedsFrame(stmt.Status) || exprNeedsFrame(stmt.ContentType) || exprNeedsFrame(stmt.Body)
+	case *ir.HTTPTextStmt:
+		return exprNeedsFrame(stmt.Request) || exprNeedsFrame(stmt.Status) || exprNeedsFrame(stmt.Body)
+	case *ir.HTTPJSONStmt:
+		return exprNeedsFrame(stmt.Request) || exprNeedsFrame(stmt.Status) || exprNeedsFrame(stmt.Body)
+	case *ir.HTTPStatusStmt:
+		return exprNeedsFrame(stmt.Request) || exprNeedsFrame(stmt.Status)
+	case *ir.HTTPSetStmt:
+		return exprNeedsFrame(stmt.Request) || exprNeedsFrame(stmt.Key) || exprNeedsFrame(stmt.Val)
+	case *ir.HTTPSetHeaderStmt:
+		return exprNeedsFrame(stmt.Request) || exprNeedsFrame(stmt.Name) || exprNeedsFrame(stmt.Val)
 	case *ir.ExprStmt:
 		return exprNeedsFrame(stmt.Expr)
 	default:
@@ -327,7 +337,7 @@ func stmtPublishesFrame(stmt ir.Stmt, declared map[string]bool, tainted map[stri
 		return exprPublishesFrame(stmt.Millis, declared, tainted)
 	case *ir.BreakStmt, *ir.ContinueStmt, *ir.GPUSyncStmt:
 		return false
-	case *ir.GPUCopyStmt, *ir.GPUFreeStmt, *ir.GPULaunchStmt, *ir.HTTPServeStmt, *ir.HTTPRespondStmt:
+	case *ir.GPUCopyStmt, *ir.GPUFreeStmt, *ir.GPULaunchStmt, *ir.HTTPServeStmt, *ir.HTTPListenStmt, *ir.HTTPRouteStmt, *ir.HTTPUseStmt, *ir.HTTPNotFoundStmt, *ir.HTTPSetStmt, *ir.HTTPSetHeaderStmt, *ir.HTTPTextStmt, *ir.HTTPJSONStmt, *ir.HTTPStatusStmt, *ir.HTTPRespondStmt:
 		return true
 	default:
 		return true
@@ -477,6 +487,9 @@ func Generate(program *ir.Program) (string, error) {
 func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	var out bytes.Buffer
 
+	if program.UsesHTTP {
+		out.WriteString("#ifndef _GNU_SOURCE\n#define _GNU_SOURCE\n#endif\n")
+	}
 	if len(program.Kernels) > 0 {
 		out.WriteString("#define TRUX_RUNTIME_CUDA 1\n")
 	}
@@ -1170,6 +1183,13 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		}
 		e.writePrelude(out, indent, millis.prelude)
 		fmt.Fprintf(out, "%srt_time_sleep_millis(%s);\n", indent, millis.value)
+	case *ir.HTTPListenStmt:
+		port, err := e.emitOrderedOperand(stmt.Port, e.scratch)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, port.prelude)
+		fmt.Fprintf(out, "%srt_http_listen(%s);\n", indent, port.value)
 	case *ir.HTTPServeStmt:
 		host, err := e.emitOrderedOperand(stmt.Host, e.scratch)
 		if err != nil {
@@ -1186,7 +1206,112 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		e.writePrelude(out, indent, host.prelude)
 		e.writePrelude(out, indent, port.prelude)
 		e.writePrelude(out, indent, workers.prelude)
-		fmt.Fprintf(out, "%srt_http_serve(%s, %s, %s, %s);\n", indent, host.value, port.value, workers.value, mangleFunc(stmt.HandlerName))
+		fmt.Fprintf(out, "%srt_http_serve(%s, %s, %s);\n", indent, host.value, port.value, workers.value)
+	case *ir.HTTPUseStmt:
+		if stmt.Prefix != nil {
+			prefix, err := e.emitOrderedOperand(stmt.Prefix, e.scratch)
+			if err != nil {
+				return err
+			}
+			e.writePrelude(out, indent, prefix.prelude)
+			fmt.Fprintf(out, "%srt_http_register_middleware(%s, %s);\n", indent, prefix.value, mangleFunc(stmt.HandlerName))
+		} else {
+			fmt.Fprintf(out, "%srt_http_register_middleware(RT_LIT(rt_string, NULL, 0), %s);\n", indent, mangleFunc(stmt.HandlerName))
+		}
+	case *ir.HTTPRouteStmt:
+		method, err := e.emitOrderedOperand(stmt.Method, e.scratch)
+		if err != nil {
+			return err
+		}
+		path, err := e.emitOrderedOperand(stmt.Path, e.scratch)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, method.prelude)
+		e.writePrelude(out, indent, path.prelude)
+		fmt.Fprintf(out, "%srt_http_register_route(%s, %s, %s);\n", indent, method.value, path.value, mangleFunc(stmt.HandlerName))
+	case *ir.HTTPNotFoundStmt:
+		fmt.Fprintf(out, "%srt_http_register_not_found(%s);\n", indent, mangleFunc(stmt.HandlerName))
+	case *ir.HTTPSetStmt:
+		request, err := e.emitOrderedOperand(stmt.Request, e.scratch)
+		if err != nil {
+			return err
+		}
+		key, err := e.emitOrderedOperand(stmt.Key, e.scratch)
+		if err != nil {
+			return err
+		}
+		val, err := e.emitOrderedOperand(stmt.Val, e.scratch)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, request.prelude)
+		e.writePrelude(out, indent, key.prelude)
+		e.writePrelude(out, indent, val.prelude)
+		fmt.Fprintf(out, "%srt_http_set_context(%s, %s, %s);\n", indent, request.value, key.value, val.value)
+	case *ir.HTTPSetHeaderStmt:
+		request, err := e.emitOrderedOperand(stmt.Request, e.scratch)
+		if err != nil {
+			return err
+		}
+		name, err := e.emitOrderedOperand(stmt.Name, e.scratch)
+		if err != nil {
+			return err
+		}
+		val, err := e.emitOrderedOperand(stmt.Val, e.scratch)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, request.prelude)
+		e.writePrelude(out, indent, name.prelude)
+		e.writePrelude(out, indent, val.prelude)
+		fmt.Fprintf(out, "%srt_http_set_header(%s, %s, %s);\n", indent, request.value, name.value, val.value)
+	case *ir.HTTPTextStmt:
+		request, err := e.emitOrderedOperand(stmt.Request, e.scratch)
+		if err != nil {
+			return err
+		}
+		status, err := e.emitOrderedOperand(stmt.Status, e.scratch)
+		if err != nil {
+			return err
+		}
+		body, err := e.emitOrderedOperand(stmt.Body, e.scratch)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, request.prelude)
+		e.writePrelude(out, indent, status.prelude)
+		e.writePrelude(out, indent, body.prelude)
+		fmt.Fprintf(out, "%srt_http_text(%s, %s, %s);\n", indent, request.value, status.value, body.value)
+	case *ir.HTTPJSONStmt:
+		request, err := e.emitOrderedOperand(stmt.Request, e.scratch)
+		if err != nil {
+			return err
+		}
+		status, err := e.emitOrderedOperand(stmt.Status, e.scratch)
+		if err != nil {
+			return err
+		}
+		body, err := e.emitOrderedOperand(stmt.Body, e.scratch)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, request.prelude)
+		e.writePrelude(out, indent, status.prelude)
+		e.writePrelude(out, indent, body.prelude)
+		fmt.Fprintf(out, "%srt_http_json(%s, %s, %s);\n", indent, request.value, status.value, body.value)
+	case *ir.HTTPStatusStmt:
+		request, err := e.emitOrderedOperand(stmt.Request, e.scratch)
+		if err != nil {
+			return err
+		}
+		status, err := e.emitOrderedOperand(stmt.Status, e.scratch)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, request.prelude)
+		e.writePrelude(out, indent, status.prelude)
+		fmt.Fprintf(out, "%srt_http_status(%s, %s);\n", indent, request.value, status.value)
 	case *ir.HTTPRespondStmt:
 		request, err := e.emitOrderedOperand(stmt.Request, e.scratch)
 		if err != nil {
@@ -1447,6 +1572,18 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 				return emittedExpr{}, err
 			}
 			return emittedExpr{prelude: joinPreludes(request, name), value: fmt.Sprintf("rt_http_header(%s, %s, %s)", targetArena, request.value, name.value)}, nil
+		case semtypes.HTTPCallParam:
+			name, err := e.emitOrderedOperand(expr.Name, e.scratch)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			return emittedExpr{prelude: joinPreludes(request, name), value: fmt.Sprintf("rt_http_param(%s, %s, %s)", targetArena, request.value, name.value)}, nil
+		case semtypes.HTTPCallContext:
+			name, err := e.emitOrderedOperand(expr.Name, e.scratch)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			return emittedExpr{prelude: joinPreludes(request, name), value: fmt.Sprintf("rt_http_context(%s, %s, %s)", targetArena, request.value, name.value)}, nil
 		default:
 			return emittedExpr{}, fmt.Errorf("unsupported HTTP request string expression %s", expr.Kind)
 		}
@@ -1909,6 +2046,18 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 				return "", err
 			}
 			return fmt.Sprintf("rt_http_header(%s, %s, %s)", targetArena, request, name), nil
+		case semtypes.HTTPCallParam:
+			name, err := emitExpr(expr.Name, frameArena)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("rt_http_param(%s, %s, %s)", targetArena, request, name), nil
+		case semtypes.HTTPCallContext:
+			name, err := emitExpr(expr.Name, frameArena)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("rt_http_context(%s, %s, %s)", targetArena, request, name), nil
 		default:
 			return "", fmt.Errorf("unsupported HTTP request string expression %s", expr.Kind)
 		}
@@ -2592,6 +2741,24 @@ func stmtPos(stmt ir.Stmt) token.Position {
 	case *ir.TimeSleepStmt:
 		return stmt.Pos
 	case *ir.HTTPServeStmt:
+		return stmt.Pos
+	case *ir.HTTPListenStmt:
+		return stmt.Pos
+	case *ir.HTTPUseStmt:
+		return stmt.Pos
+	case *ir.HTTPRouteStmt:
+		return stmt.Pos
+	case *ir.HTTPNotFoundStmt:
+		return stmt.Pos
+	case *ir.HTTPSetStmt:
+		return stmt.Pos
+	case *ir.HTTPSetHeaderStmt:
+		return stmt.Pos
+	case *ir.HTTPTextStmt:
+		return stmt.Pos
+	case *ir.HTTPJSONStmt:
+		return stmt.Pos
+	case *ir.HTTPStatusStmt:
 		return stmt.Pos
 	case *ir.HTTPRespondStmt:
 		return stmt.Pos

@@ -1,0 +1,9 @@
+package handlers
+
+import "http"
+
+pub func check(request int) int {
+  http.setHeader(request, "X-Health", "healthy")
+  http.json(request, 200, "{\"status\":\"ok\"}\n")
+  return 0
+}

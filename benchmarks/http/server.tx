@@ -1,0 +1,50 @@
+package main
+
+import "http"
+
+func authMiddleware(request int) int {
+  let token string = http.header(request, "Authorization")
+  if token == "Bearer secret-benchmark-token" {
+    http.set(request, "userId", "bench-user-1")
+    return 0
+  }
+  http.setHeader(request, "WWW-Authenticate", "Bearer")
+  http.json(request, 401, "{\"error\":\"unauthorized\"}\n")
+  return 1
+}
+
+func plaintext(request int) int {
+  http.text(request, 200, "Hello, World!\n")
+  return 0
+}
+
+func json(request int) int {
+  http.json(request, 200, "{\"message\":\"Hello, World!\"}\n")
+  return 0
+}
+
+func userById(request int) int {
+  let id string = http.param(request, "id")
+  let resp string = "{\"id\":\"" + id + "\",\"role\":\"member\"}\n"
+  http.json(request, 200, resp)
+  return 0
+}
+
+func protectedData(request int) int {
+  let user string = http.context(request, "userId")
+  let resp string = "{\"user\":\"" + user + "\",\"data\":\"privileged\"}\n"
+  http.json(request, 200, resp)
+  return 0
+}
+
+func main() int {
+  http.get("/plaintext", plaintext)
+  http.get("/json", json)
+  http.get("/users/:id", userById)
+
+  http.useAt("/api", authMiddleware)
+  http.get("/api/data", protectedData)
+
+  http.listen(8080)
+  return 0
+}

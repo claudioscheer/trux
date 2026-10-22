@@ -2,6 +2,7 @@ package ir
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/claudioscheer/trux/internal/ast"
 	"github.com/claudioscheer/trux/internal/token"
@@ -206,14 +207,88 @@ type TimeSleepStmt struct {
 func (*TimeSleepStmt) stmtNode() {}
 
 type HTTPServeStmt struct {
-	Pos         token.Position
-	Host        Expr
-	Port        Expr
-	Workers     Expr
-	HandlerName string
+	Pos     token.Position
+	Host    Expr
+	Port    Expr
+	Workers Expr
 }
 
 func (*HTTPServeStmt) stmtNode() {}
+
+type HTTPListenStmt struct {
+	Pos  token.Position
+	Port Expr
+}
+
+func (*HTTPListenStmt) stmtNode() {}
+
+type HTTPUseStmt struct {
+	Pos         token.Position
+	Prefix      Expr
+	HandlerName string
+}
+
+func (*HTTPUseStmt) stmtNode() {}
+
+type HTTPRouteStmt struct {
+	Pos         token.Position
+	Method      Expr
+	Path        Expr
+	HandlerName string
+}
+
+func (*HTTPRouteStmt) stmtNode() {}
+
+type HTTPNotFoundStmt struct {
+	Pos         token.Position
+	HandlerName string
+}
+
+func (*HTTPNotFoundStmt) stmtNode() {}
+
+type HTTPSetStmt struct {
+	Pos     token.Position
+	Request Expr
+	Key     Expr
+	Val     Expr
+}
+
+func (*HTTPSetStmt) stmtNode() {}
+
+type HTTPSetHeaderStmt struct {
+	Pos     token.Position
+	Request Expr
+	Name    Expr
+	Val     Expr
+}
+
+func (*HTTPSetHeaderStmt) stmtNode() {}
+
+type HTTPTextStmt struct {
+	Pos     token.Position
+	Request Expr
+	Status  Expr
+	Body    Expr
+}
+
+func (*HTTPTextStmt) stmtNode() {}
+
+type HTTPJSONStmt struct {
+	Pos     token.Position
+	Request Expr
+	Status  Expr
+	Body    Expr
+}
+
+func (*HTTPJSONStmt) stmtNode() {}
+
+type HTTPStatusStmt struct {
+	Pos     token.Position
+	Request Expr
+	Status  Expr
+}
+
+func (*HTTPStatusStmt) stmtNode() {}
 
 type HTTPRespondStmt struct {
 	Pos         token.Position
@@ -906,12 +981,75 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 			}
 			if httpSig, ok := b.info.HTTPCalls[call]; ok {
 				switch httpSig.Kind {
-				case types.HTTPCallServe:
-					args, err := b.buildExprs(call.Args[:3])
+				case types.HTTPCallListen:
+					arg, err := b.buildExpr(call.Args[0])
 					if err != nil {
 						return nil, err
 					}
-					return &HTTPServeStmt{Pos: stmt.Pos(), Host: args[0], Port: args[1], Workers: args[2], HandlerName: httpSig.HandlerName}, nil
+					return &HTTPListenStmt{Pos: stmt.Pos(), Port: arg}, nil
+				case types.HTTPCallServe:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &HTTPServeStmt{Pos: stmt.Pos(), Host: args[0], Port: args[1], Workers: args[2]}, nil
+				case types.HTTPCallUse:
+					return &HTTPUseStmt{Pos: stmt.Pos(), HandlerName: httpSig.HandlerName}, nil
+				case types.HTTPCallUseAt:
+					prefix, err := b.buildExpr(call.Args[0])
+					if err != nil {
+						return nil, err
+					}
+					return &HTTPUseStmt{Pos: stmt.Pos(), Prefix: prefix, HandlerName: httpSig.HandlerName}, nil
+				case types.HTTPCallGet, types.HTTPCallPost, types.HTTPCallPut, types.HTTPCallDelete, types.HTTPCallPatch:
+					path, err := b.buildExpr(call.Args[0])
+					if err != nil {
+						return nil, err
+					}
+					method := &StringLiteral{Value: strings.ToUpper(string(httpSig.Kind))}
+					return &HTTPRouteStmt{Pos: stmt.Pos(), Method: method, Path: path, HandlerName: httpSig.HandlerName}, nil
+				case types.HTTPCallRoute:
+					method, err := b.buildExpr(call.Args[0])
+					if err != nil {
+						return nil, err
+					}
+					path, err := b.buildExpr(call.Args[1])
+					if err != nil {
+						return nil, err
+					}
+					return &HTTPRouteStmt{Pos: stmt.Pos(), Method: method, Path: path, HandlerName: httpSig.HandlerName}, nil
+				case types.HTTPCallNotFound:
+					return &HTTPNotFoundStmt{Pos: stmt.Pos(), HandlerName: httpSig.HandlerName}, nil
+				case types.HTTPCallSet:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &HTTPSetStmt{Pos: stmt.Pos(), Request: args[0], Key: args[1], Val: args[2]}, nil
+				case types.HTTPCallSetHeader:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &HTTPSetHeaderStmt{Pos: stmt.Pos(), Request: args[0], Name: args[1], Val: args[2]}, nil
+				case types.HTTPCallText:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &HTTPTextStmt{Pos: stmt.Pos(), Request: args[0], Status: args[1], Body: args[2]}, nil
+				case types.HTTPCallJSON:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &HTTPJSONStmt{Pos: stmt.Pos(), Request: args[0], Status: args[1], Body: args[2]}, nil
+				case types.HTTPCallStatus:
+					args, err := b.buildExprs(call.Args)
+					if err != nil {
+						return nil, err
+					}
+					return &HTTPStatusStmt{Pos: stmt.Pos(), Request: args[0], Status: args[1]}, nil
 				case types.HTTPCallRespond:
 					args, err := b.buildExprs(call.Args)
 					if err != nil {
@@ -1191,7 +1329,7 @@ func (b builder) buildHTTPExpr(expr *ast.CallExpr, sig types.HTTPCallSig, typ as
 			return nil, err
 		}
 		return &HTTPRequestStringExpr{Kind: sig.Kind, Request: request, Typ: typ, Origin: origin}, nil
-	case types.HTTPCallHeader:
+	case types.HTTPCallHeader, types.HTTPCallParam, types.HTTPCallContext:
 		request, err := b.buildExpr(expr.Args[0])
 		if err != nil {
 			return nil, err

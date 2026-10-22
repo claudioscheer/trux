@@ -1,0 +1,30 @@
+package main
+
+import "http"
+import "middleware/auth.tx"
+import "handlers/health.tx"
+import "handlers/user.tx"
+
+func notFound(request int) int {
+  http.json(request, 404, "{\"error\":\"custom not found\"}\n")
+  return 0
+}
+
+func main() int {
+  // Global middleware (applied to all routes)
+  http.use(middleware.serverHeader)
+
+  // Public endpoint
+  http.get("/health", handlers.check)
+
+  // Protected route group: auth middleware runs before route handler
+  http.useAt("/api", middleware.authenticate)
+  http.get("/api/users/:id", handlers.getUser)
+  http.put("/api/users/:id", handlers.updateUser)
+
+  // Custom 404 handler
+  http.notFound(notFound)
+
+  http.listen(8080)
+  return 0
+}

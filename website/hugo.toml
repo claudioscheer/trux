@@ -109,6 +109,11 @@ disableKinds = ["taxonomy", "term"]
     identifier = "examples"
     weight = 20
   [[menu.primary]]
+    name = "Benchmarks"
+    url = "docs/benchmarks/"
+    identifier = "benchmarks"
+    weight = 25
+  [[menu.primary]]
     name = "GitHub"
     url = "https://github.com/claudioscheer/trux"
     identifier = "github"

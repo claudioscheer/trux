@@ -25,7 +25,24 @@ const (
 	CallTimeNowUnixMillis  CallKind = "nowUnixMillis"
 	CallTimeMonotonicNanos CallKind = "monotonicNanos"
 	CallTimeSleepMillis    CallKind = "sleepMillis"
+	CallHTTPListen         CallKind = "listen"
 	CallHTTPServe          CallKind = "serve"
+	CallHTTPUse            CallKind = "use"
+	CallHTTPUseAt          CallKind = "useAt"
+	CallHTTPGet            CallKind = "get"
+	CallHTTPPost           CallKind = "post"
+	CallHTTPPut            CallKind = "put"
+	CallHTTPDelete         CallKind = "delete"
+	CallHTTPPatch          CallKind = "patch"
+	CallHTTPRoute          CallKind = "route"
+	CallHTTPNotFound       CallKind = "notFound"
+	CallHTTPParam          CallKind = "param"
+	CallHTTPSet            CallKind = "set"
+	CallHTTPContext        CallKind = "context"
+	CallHTTPSetHeader      CallKind = "setHeader"
+	CallHTTPText           CallKind = "text"
+	CallHTTPJSON           CallKind = "json"
+	CallHTTPStatus         CallKind = "status"
 	CallHTTPMethod         CallKind = "method"
 	CallHTTPPath           CallKind = "path"
 	CallHTTPQuery          CallKind = "query"
@@ -227,7 +244,24 @@ var packages = []Package{
 	{
 		Name: "http",
 		Members: []Member{
-			{Package: "http", Name: "serve", Kind: CallHTTPServe, StatementOnly: true, Detail: "serve HTTP requests with a worker pool", SignatureText: "http.serve(host string, port int, workers int, handler)"},
+			{Package: "http", Name: "listen", Kind: CallHTTPListen, StatementOnly: true, Detail: "listen for HTTP requests on 0.0.0.0 with auto-detected cores", SignatureText: "http.listen(port int)"},
+			{Package: "http", Name: "serve", Kind: CallHTTPServe, StatementOnly: true, Detail: "serve HTTP requests with explicit host, port, and worker threads", SignatureText: "http.serve(host string, port int, workers int)"},
+			{Package: "http", Name: "use", Kind: CallHTTPUse, StatementOnly: true, Detail: "register global middleware", SignatureText: "http.use(middleware)"},
+			{Package: "http", Name: "useAt", Kind: CallHTTPUseAt, StatementOnly: true, Detail: "register prefix-scoped middleware", SignatureText: "http.useAt(prefix string, middleware)"},
+			{Package: "http", Name: "get", Kind: CallHTTPGet, StatementOnly: true, Detail: "register GET route handler", SignatureText: "http.get(path string, handler)"},
+			{Package: "http", Name: "post", Kind: CallHTTPPost, StatementOnly: true, Detail: "register POST route handler", SignatureText: "http.post(path string, handler)"},
+			{Package: "http", Name: "put", Kind: CallHTTPPut, StatementOnly: true, Detail: "register PUT route handler", SignatureText: "http.put(path string, handler)"},
+			{Package: "http", Name: "delete", Kind: CallHTTPDelete, StatementOnly: true, Detail: "register DELETE route handler", SignatureText: "http.delete(path string, handler)"},
+			{Package: "http", Name: "patch", Kind: CallHTTPPatch, StatementOnly: true, Detail: "register PATCH route handler", SignatureText: "http.patch(path string, handler)"},
+			{Package: "http", Name: "route", Kind: CallHTTPRoute, StatementOnly: true, Detail: "register custom method route handler", SignatureText: "http.route(method string, path string, handler)"},
+			{Package: "http", Name: "notFound", Kind: CallHTTPNotFound, StatementOnly: true, Detail: "register custom 404 handler", SignatureText: "http.notFound(handler)"},
+			{Package: "http", Name: "param", Kind: CallHTTPParam, Params: []Param{{Name: "request", Type: ast.IntType}, {Name: "name", Type: ast.StringType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "HTTP route path parameter"},
+			{Package: "http", Name: "set", Kind: CallHTTPSet, Params: []Param{{Name: "request", Type: ast.IntType}, {Name: "key", Type: ast.StringType}, {Name: "value", Type: ast.StringType}}, StatementOnly: true, Detail: "set request-scoped context value"},
+			{Package: "http", Name: "context", Kind: CallHTTPContext, Params: []Param{{Name: "request", Type: ast.IntType}, {Name: "key", Type: ast.StringType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "get request-scoped context value"},
+			{Package: "http", Name: "setHeader", Kind: CallHTTPSetHeader, Params: []Param{{Name: "request", Type: ast.IntType}, {Name: "name", Type: ast.StringType}, {Name: "value", Type: ast.StringType}}, StatementOnly: true, Detail: "set custom HTTP response header"},
+			{Package: "http", Name: "text", Kind: CallHTTPText, Params: []Param{{Name: "request", Type: ast.IntType}, {Name: "status", Type: ast.IntType}, {Name: "body", Type: ast.StringType}}, StatementOnly: true, Detail: "respond with text/plain body"},
+			{Package: "http", Name: "json", Kind: CallHTTPJSON, Params: []Param{{Name: "request", Type: ast.IntType}, {Name: "status", Type: ast.IntType}, {Name: "body", Type: ast.StringType}}, StatementOnly: true, Detail: "respond with application/json body"},
+			{Package: "http", Name: "status", Kind: CallHTTPStatus, Params: []Param{{Name: "request", Type: ast.IntType}, {Name: "status", Type: ast.IntType}}, StatementOnly: true, Detail: "respond with HTTP status code only"},
 			{Package: "http", Name: "method", Kind: CallHTTPMethod, Params: []Param{{Name: "request", Type: ast.IntType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "HTTP request method"},
 			{Package: "http", Name: "path", Kind: CallHTTPPath, Params: []Param{{Name: "request", Type: ast.IntType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "HTTP request path without query string"},
 			{Package: "http", Name: "query", Kind: CallHTTPQuery, Params: []Param{{Name: "request", Type: ast.IntType}}, ReturnType: ast.StringType, ResultOrigin: ResultFrameOwned, Detail: "HTTP request raw query string without question mark"},

@@ -3,6 +3,7 @@
 /trux
 *.test
 *.out
+benchmarks/**/server
 
 # Go build artifacts
 *.o

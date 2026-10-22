@@ -822,18 +822,39 @@ func TestCheckAllowsStandardHTTPPackage(t *testing.T) {
 	program := mustLoadProgram(t, `package main
 import "http"
 
+func mw(request int) int {
+    http.set(request, "user", "alice")
+    let u string = http.context(request, "user")
+    http.setHeader(request, "X-User", u)
+    return 0
+}
+
 func handle(request int) int {
     let method string = http.method(request)
     let path string = http.path(request)
     let query string = http.query(request)
     let agent string = http.header(request, "User-Agent")
+    let id string = http.param(request, "id")
     let body string = http.body(request)
-    http.respond(request, 200, "text/plain", method + path + query + agent + body)
+    http.text(request, 200, method + path + query + agent + id + body)
+    http.json(request, 200, "{}")
+    http.status(request, 204)
+    http.respond(request, 200, "text/plain", "ok")
     return 0
 }
 
 func main() int {
-    http.serve("127.0.0.1", 8080, 8, handle)
+    http.use(mw)
+    http.useAt("/api", mw)
+    http.get("/users/:id", handle)
+    http.post("/users", handle)
+    http.put("/users", handle)
+    http.delete("/users", handle)
+    http.patch("/users", handle)
+    http.route("OPTIONS", "/users", handle)
+    http.notFound(handle)
+    http.listen(8080)
+    http.serve("127.0.0.1", 8080, 8)
     return 0
 }`)
 
@@ -852,18 +873,29 @@ func main() int {
 		HTTPCallQuery,
 		HTTPCallHeader,
 		HTTPCallBody,
+		HTTPCallParam,
+		HTTPCallSet,
+		HTTPCallContext,
+		HTTPCallSetHeader,
+		HTTPCallText,
+		HTTPCallJSON,
+		HTTPCallStatus,
 		HTTPCallRespond,
+		HTTPCallUse,
+		HTTPCallUseAt,
+		HTTPCallGet,
+		HTTPCallPost,
+		HTTPCallPut,
+		HTTPCallDelete,
+		HTTPCallPatch,
+		HTTPCallRoute,
+		HTTPCallNotFound,
+		HTTPCallListen,
 		HTTPCallServe,
 	} {
-		if kinds[kind] != 1 {
-			t.Fatalf("HTTP call count for %s = %d, want 1", kind, kinds[kind])
+		if kinds[kind] < 1 {
+			t.Fatalf("HTTP call count for %s = %d, want >= 1", kind, kinds[kind])
 		}
-	}
-
-	mainFn := program.Functions[1]
-	serveCall := mainFn.Body.Statements[0].(*ast.ExprStmt).Expr.(*ast.CallExpr)
-	if info.HTTPCalls[serveCall].HandlerName != "handle" {
-		t.Fatalf("handler name = %q, want handle", info.HTTPCalls[serveCall].HandlerName)
 	}
 }
 
@@ -878,17 +910,13 @@ func TestCheckRejectsInvalidHTTPServeCalls(t *testing.T) {
 			src: `package main
 import "http"
 
-func handle(request int) int {
-    return 0
-}
-
 func main() int {
-    return http.serve("127.0.0.1", 8080, 1, handle)
+    return http.serve("127.0.0.1", 8080, 1)
 }`,
 			want: "http.serve can only be used as a statement",
 		},
 		{
-			name: "non identifier handler",
+			name: "non identifier handler in get",
 			src: `package main
 import "http"
 
@@ -897,13 +925,13 @@ func handle(request int) int {
 }
 
 func main() int {
-    http.serve("127.0.0.1", 8080, 1, handle(1))
+    http.get("/", handle(1))
     return 0
 }`,
-			want: "http.serve fourth argument must be a handler function name",
+			want: "http.get argument must be a handler function name",
 		},
 		{
-			name: "wrong handler signature",
+			name: "wrong handler signature in get",
 			src: `package main
 import "http"
 
@@ -912,7 +940,7 @@ func handle(request string) int {
 }
 
 func main() int {
-    http.serve("127.0.0.1", 8080, 1, handle)
+    http.get("/", handle)
     return 0
 }`,
 			want: `http handler "handle" must have signature func handle(request int) int`,
@@ -922,12 +950,8 @@ func main() int {
 			src: `package main
 import "http"
 
-func handle(request int) int {
-    return 0
-}
-
 func main() int {
-    http.serve("127.0.0.1", 8080, "many", handle)
+    http.serve("127.0.0.1", 8080, "many")
     return 0
 }`,
 			want: "http.serve workers has type string, want int",

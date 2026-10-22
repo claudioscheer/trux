@@ -607,6 +607,30 @@ func (l *loader) rewriteExprCalls(unit *fileUnit, expr ast.Expression, ctx resol
 		if expr.EndIndex != nil {
 			return l.rewriteExprCalls(unit, expr.EndIndex, ctx)
 		}
+	case *ast.IdentExpr:
+		if expr.Package != "" {
+			set, ok := ctx.directImports[unit][expr.Package]
+			if !ok {
+				return l.errorInUnit(unit, expr.Start, "package %q is not imported by %s", expr.Package, unit.path)
+			}
+			for _, ref := range set.refs {
+				info := ctx.packageFuncs[ref.unit.packageKey()][expr.Name]
+				if info != nil && info.public {
+					expr.Package = ""
+					expr.Name = info.internalName
+					return nil
+				}
+			}
+			return l.errorInUnit(unit, expr.Start, "undefined or unexported member %q in package %q", expr.Name, expr.Package)
+		}
+		if info := ctx.funcs[unit][expr.Name]; info != nil {
+			expr.Name = info.internalName
+			return nil
+		}
+		if info := ctx.packageFuncs[unit.packageKey()][expr.Name]; info != nil {
+			expr.Name = info.internalName
+			return nil
+		}
 	}
 
 	return nil

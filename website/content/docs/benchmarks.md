@@ -53,14 +53,14 @@ Simulates constrained edge environments, micro instances, or single-core serverl
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext Baseline** (`/plaintext`) | 100 | **162,761** | 15.99 MB/s | 0.94 ms | 489 µs | 1.26 ms | 4.31 ms | 9.4 MiB |
-| **Plaintext Baseline** (`/plaintext`) | 1,000 | **172,765** | 16.97 MB/s | 5.74 ms | 5.61 ms | 6.68 ms | 9.40 ms | 15.4 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **60,993** | 9.77 MB/s | 2.37 ms | 1.17 ms | 7.02 ms | 11.12 ms | 30.4 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **59,980** | 9.61 MB/s | 16.48 ms | 18.66 ms | 21.53 ms | 28.28 ms | 33.2 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **146,278** | 19.53 MB/s | 684 µs | 559 µs | 1.21 ms | 2.49 ms | 33.6 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **143,482** | 19.16 MB/s | 6.88 ms | 6.77 ms | 7.67 ms | 9.98 ms | 33.8 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **66,073** | 8.76 MB/s | 2.26 ms | 1.07 ms | 6.86 ms | 10.64 ms | 34.1 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **62,864** | 8.33 MB/s | 15.73 ms | 18.22 ms | 20.77 ms | 27.94 ms | 34.9 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 100 | **171,472** | 16.84 MB/s | 1.35 ms | 467 µs | 1.24 ms | 26.18 ms | 9.8 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 1,000 | **181,616** | 17.84 MB/s | 5.55 ms | 5.34 ms | 6.29 ms | 8.94 ms | 17.1 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **62,174** | 9.96 MB/s | 2.28 ms | 1.16 ms | 6.71 ms | 10.52 ms | 30.9 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **61,224** | 9.81 MB/s | 16.18 ms | 18.83 ms | 21.02 ms | 28.85 ms | 34.2 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **148,280** | 19.80 MB/s | 683 µs | 558 µs | 1.20 ms | 2.50 ms | 34.3 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **144,907** | 19.35 MB/s | 6.84 ms | 6.72 ms | 7.73 ms | 10.16 ms | 33.9 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **57,428** | 7.61 MB/s | 3.84 ms | 1.12 ms | 10.69 ms | 28.03 ms | 34.2 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **46,161** | 6.12 MB/s | 21.44 ms | 23.28 ms | 37.02 ms | 42.74 ms | 34.5 MiB |
 
 ---
 
@@ -70,14 +70,14 @@ Simulates standard dual-core virtual machines (`--cpuset-cpus="0,1" --cpus="2.0"
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext Baseline** (`/plaintext`) | 100 | **189,399** | 18.60 MB/s | 0.90 ms | 422 µs | 1.22 ms | 5.93 ms | 13.9 MiB |
-| **Plaintext Baseline** (`/plaintext`) | 1,000 | **321,646** | 31.59 MB/s | 3.20 ms | 2.88 ms | 4.14 ms | 8.11 ms | 20.9 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **53,790** | 8.62 MB/s | 2.45 ms | 1.45 ms | 6.76 ms | 11.18 ms | 21.9 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **71,345** | 11.43 MB/s | 13.88 ms | 14.76 ms | 21.07 ms | 26.73 ms | 28.0 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **140,253** | 18.73 MB/s | 715 µs | 598 µs | 1.27 ms | 2.58 ms | 28.4 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **212,590** | 28.38 MB/s | 4.63 ms | 4.44 ms | 6.14 ms | 8.40 ms | 30.4 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **55,743** | 7.39 MB/s | 2.43 ms | 1.38 ms | 6.86 ms | 11.42 ms | 31.5 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **74,955** | 9.94 MB/s | 13.17 ms | 13.91 ms | 20.03 ms | 25.87 ms | 32.0 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 100 | **187,385** | 18.41 MB/s | 890 µs | 422 µs | 1.20 ms | 4.83 ms | 13.9 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 1,000 | **321,562** | 31.59 MB/s | 3.11 ms | 2.87 ms | 4.19 ms | 7.27 ms | 20.7 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **52,168** | 8.36 MB/s | 2.81 ms | 1.47 ms | 7.81 ms | 19.13 ms | 22.3 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **70,855** | 11.35 MB/s | 13.97 ms | 15.01 ms | 21.16 ms | 30.68 ms | 28.3 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **139,039** | 18.56 MB/s | 723 µs | 611 µs | 1.27 ms | 2.51 ms | 27.8 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **211,987** | 28.30 MB/s | 4.65 ms | 4.46 ms | 6.24 ms | 8.74 ms | 30.4 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **41,320** | 5.48 MB/s | 5.92 ms | 1.59 ms | 19.46 ms | 43.76 ms | 30.7 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **56,472** | 7.49 MB/s | 18.61 ms | 16.28 ms | 34.46 ms | 53.94 ms | 31.6 MiB |
 
 ---
 
@@ -87,14 +87,14 @@ Simulates multi-core production server nodes (`--cpuset-cpus="0,1,2,3" --cpus="4
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext Baseline** (`/plaintext`) | 100 | **222,763** | 21.88 MB/s | 0.87 ms | 342 µs | 1.17 ms | 7.54 ms | 21.9 MiB |
-| **Plaintext Baseline** (`/plaintext`) | 1,000 | **452,747** | 44.47 MB/s | 2.49 ms | 1.75 ms | 4.97 ms | 11.97 ms | 29.7 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **38,497** | 6.17 MB/s | 3.03 ms | 2.13 ms | 6.96 ms | 12.92 ms | 32.3 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **55,219** | 8.85 MB/s | 17.99 ms | 17.85 ms | 28.38 ms | 36.15 ms | 40.8 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **154,332** | 20.61 MB/s | 661 µs | 540 µs | 1.20 ms | 2.50 ms | 41.0 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **280,389** | 37.44 MB/s | 3.57 ms | 3.29 ms | 6.09 ms | 9.67 ms | 45.5 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **39,346** | 5.22 MB/s | 2.97 ms | 2.05 ms | 6.92 ms | 12.82 ms | 46.9 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **56,003** | 7.42 MB/s | 17.75 ms | 17.61 ms | 28.12 ms | 35.89 ms | 50.5 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 100 | **242,837** | 23.85 MB/s | 832 µs | 317 µs | 1.06 ms | 5.02 ms | 22.1 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 1,000 | **440,072** | 43.23 MB/s | 2.55 ms | 1.79 ms | 5.30 ms | 12.02 ms | 29.9 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **38,644** | 6.19 MB/s | 2.95 ms | 2.11 ms | 6.61 ms | 12.46 ms | 31.6 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **54,240** | 8.69 MB/s | 18.20 ms | 17.98 ms | 28.60 ms | 37.06 ms | 40.4 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **153,217** | 20.46 MB/s | 669 µs | 549 µs | 1.22 ms | 2.53 ms | 40.3 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **262,383** | 35.03 MB/s | 3.78 ms | 3.57 ms | 6.25 ms | 9.55 ms | 45.1 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **39,400** | 5.22 MB/s | 2.97 ms | 2.09 ms | 6.90 ms | 12.81 ms | 45.6 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **56,217** | 7.45 MB/s | 17.64 ms | 17.59 ms | 27.92 ms | 34.58 ms | 49.3 MiB |
 
 ---
 

@@ -2,11 +2,20 @@ package main
 
 import "io"
 
+type Note struct {
+  seed string
+  extra string
+}
+
+func formatSummary(note *Note) string {
+  return note.seed + "\n" + note.extra
+}
+
 func main() int {
   let seed string, readErr error = io.readFile("examples/projects/file_notes/seed.txt")
   assert(readErr == nil, "read seed.txt")
-  let extra string = io.readLine()
-  let summary string = seed + "\n" + extra
+  let note Note = Note{seed: seed, extra: io.readLine()}
+  let summary string = formatSummary(&note)
 
   let writeErr error = io.writeFile("examples/projects/file_notes/summary.txt", summary)
   assert(writeErr == nil, "write summary.txt")

@@ -1,5 +1,10 @@
 package main
 
+type Queue struct {
+  values list[int]
+  head int
+}
+
 // A `mut` list parameter can grow the caller's list.
 // The call site stays ordinary: `push(items, 2)`, not `push(mut items, 2)`.
 func push(mut xs list[int], value int) int {
@@ -26,21 +31,31 @@ func setFirst(mut xs []int, value int) int {
   return xs[0]
 }
 
-// A simple queue can use a list for storage and a one-element array for the head.
-// Trux does not have list removal yet, so dequeue advances the head instead of compacting.
-func enqueue(mut values list[int], value int) int {
-  append(values, value)
-  return len(values)
+// A `mut` map parameter can insert, update, or delete entries in the caller's map.
+func bumpCount(mut counts map[string]int, key string) int {
+  let current int, ok bool = counts[key]
+  if ok {
+    counts[key] = current + 1
+  } else {
+    counts[key] = 1
+  }
+  return counts[key]
 }
 
-func dequeue(values list[int], mut head [1]int) int {
-  let value int = values[head[0]]
-  head[0] = head[0] + 1
+// A queue struct passed by pointer keeps both its backing list and head index together.
+func enqueue(q *Queue, value int) int {
+  append(q.values, value)
+  return len(q.values)
+}
+
+func dequeue(q *Queue) int {
+  let value int = q.values[q.head]
+  q.head = q.head + 1
   return value
 }
 
-func queued(values list[int], head [1]int) int {
-  return len(values) - head[0]
+func queued(q *Queue) int {
+  return len(q.values) - q.head
 }
 
 func main() int {
@@ -60,13 +75,16 @@ func main() int {
   let view []int = xs[:]
   print(setFirst(view, 9), " ", xs[0])
 
-  // Queue state is split across the mutable list and mutable head index.
-  let queue list[int] = list[int]{}
-  let head [1]int = [1]int{0}
-  let firstSize int = enqueue(queue, 10)
-  let secondSize int = enqueue(queue, 20)
-  print(firstSize, " ", secondSize, " ", queued(queue, head))
-  print(dequeue(queue, head), " ", dequeue(queue, head), " ", queued(queue, head))
+  // Maps can be mutated in place through `mut` parameters.
+  let counts map[string]int = make(map[string]int)
+  print(bumpCount(counts, "hits"), " ", bumpCount(counts, "hits"))
+
+  // A Queue struct mutated through `*Queue` keeps values and head index in one place.
+  let queue Queue = Queue{values: list[int]{}, head: 0}
+  let firstSize int = enqueue(&queue, 10)
+  let secondSize int = enqueue(&queue, 20)
+  print(firstSize, " ", secondSize, " ", queued(&queue))
+  print(dequeue(&queue), " ", dequeue(&queue), " ", queued(&queue))
 
   return 0
 }

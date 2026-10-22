@@ -2,12 +2,23 @@ package handlers
 
 import "http"
 
+type UserView struct {
+  id string
+  authUser string
+  role string
+}
+
+func formatUserJson(u *UserView) string {
+  return "{\"id\":\"" + u.id + "\",\"auth_user\":\"" + u.authUser + "\",\"role\":\"" + u.role + "\"}\n"
+}
+
 pub func getUser(request int) int {
-  let id string = http.param(request, "id")
-  let userId string = http.context(request, "userId")
-  let role string = http.context(request, "role")
-  let body string = "{\"id\":\"" + id + "\",\"auth_user\":\"" + userId + "\",\"role\":\"" + role + "\"}\n"
-  http.json(request, 200, body)
+  let view UserView = UserView{
+    id: http.param(request, "id"),
+    authUser: http.context(request, "userId"),
+    role: http.context(request, "role"),
+  }
+  http.json(request, 200, formatUserJson(&view))
   return 0
 }
 

@@ -1,7 +1,12 @@
 package alpha
 
+type config struct {
+  base int
+}
+
 func value() int {
-  return 10
+  let c config = config{base: 10}
+  return c.base
 }
 
 pub func alpha() int {

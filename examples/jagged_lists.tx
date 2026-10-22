@@ -1,6 +1,11 @@
 package main
 
-func sum(row list[int]) int {
+type RowSummary struct {
+  length int
+  total int
+}
+
+func summarize(row list[int]) RowSummary {
   let total int = 0
   let i int = 0
 
@@ -9,7 +14,7 @@ func sum(row list[int]) int {
     i = i + 1
   }
 
-  return total
+  return RowSummary{length: len(row), total: total}
 }
 
 func main() int {
@@ -18,7 +23,11 @@ func main() int {
   append(rows[0], 9)
   append(rows[2], 6)
 
-  print(len(rows[0]), " ", len(rows[1]), " ", len(rows[2]))
-  print(sum(rows[0]), " ", sum(rows[1]), " ", sum(rows[2]))
+  let r0 RowSummary = summarize(rows[0])
+  let r1 RowSummary = summarize(rows[1])
+  let r2 RowSummary = summarize(rows[2])
+
+  print(r0.length, " ", r1.length, " ", r2.length)
+  print(r0.total, " ", r1.total, " ", r2.total)
   return 0
 }

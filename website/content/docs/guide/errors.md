@@ -77,6 +77,7 @@ errors currently don't.
 | integer overflow | `integer overflow in +` | [Operators](/docs/guide/operators/#checked-integer-arithmetic) |
 | division or remainder by zero | `integer division by zero` | [Operators](/docs/guide/operators/#checked-integer-arithmetic) |
 | index or slice out of range | `index 5 out of bounds for length 3` | [Collections](/docs/guide/collections/#bounds-checks) |
+| nil pointer dereference | `nil pointer dereference` | [Pointers](/docs/guide/types/#pointers) |
 | failed `assert` | `assertion failed: <message>` | [Control flow](/docs/guide/control-flow/#assert) |
 | malformed stdin input | `invalid int input` | [Standard library](/docs/stdlib/#runtime-errors) |
 | CUDA call failed | `CUDA <operation> failed: …` | [GPU](/docs/guide/gpu/#kernel-errors) |
@@ -87,7 +88,7 @@ Under `trux run`, a failed program is followed by `execute <temp path>: exit sta
 
 **Common mistakes.** Expecting exceptions or `try`/`catch`. Trux uses Go-style explicit `error` values for fallible
 operations (such as file and CSV IO), and reserves runtime panics for unrecoverable programmer errors (such as
-integer overflow, index out of bounds, or a failed `assert`).
+integer overflow, index out of bounds, nil pointer dereference, or a failed `assert`).
 
 **When you don't need it.** Don't add `assert`s that repeat the built-in checks above.
 

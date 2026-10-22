@@ -12,9 +12,9 @@ that matter most:
 - **Types are always written.** `let count int = 0`, never `count := 0`.
 - **No implicit conversions.** `1 + 2.0` is a compile error, and there is no cast between `int` and `float`.
 - **Newlines end statements.** Semicolons appear only in the three-part `for` header.
-- **Functions cannot change the collections you pass them** unless the parameter is marked `mut`.
-- **Mistakes stop the program.** Overflow, division by zero, a bad index, or a failed `assert` ends the run with a
-  `trux runtime error`.
+- **Functions cannot change the collections you pass them** unless the parameter is marked `mut` (or you pass a pointer `*T`).
+- **Mistakes stop the program.** Overflow, division by zero, a bad index, a nil pointer dereference, or a failed `assert`
+  ends the run with a `trux runtime error`.
 
 ## How each feature is described
 
@@ -38,18 +38,18 @@ marked **not executed**.
 
 | Page | Features |
 | --- | --- |
-| [Program structure](/docs/guide/program-structure/) | `package`, `import`, `main`, comments, names |
-| [Types and values](/docs/guide/types/) | `int`, `float`, `string`, `bool`, literals, no implicit conversions |
-| [Variables](/docs/guide/variables/) | `let`, assignment, scope |
-| [Operators and expressions](/docs/guide/operators/) | arithmetic, checked integer math, comparison, logic, `in` |
-| [Functions](/docs/guide/functions/) | parameters, returns, recursion, `mut` parameters |
+| [Program structure](/docs/guide/program-structure/) | `package`, `import`, `type ... struct`, `main`, comments, names |
+| [Types and values](/docs/guide/types/) | `int`, `float`, `string`, `bool`, `error`, structs, pointers `*T`, `new(T)`, literals, no implicit conversions |
+| [Variables](/docs/guide/variables/) | `let`, assignment, field/pointer/map assignment, comma-ok lookup, scope |
+| [Operators and expressions](/docs/guide/operators/) | arithmetic, checked integer math, `&x`, `*p`, comparison, logic, `in` |
+| [Functions](/docs/guide/functions/) | parameters, returns, recursion, `mut` parameters, pointer parameters |
 | [Control flow](/docs/guide/control-flow/) | `if`, the three `for` forms, `break`, `continue`, `assert` |
-| [Arrays, slices, and lists](/docs/guide/collections/) | `[N]T`, `[]T`, `list[T]`, `make`, `append`, bounds checks |
-| [Memory and ownership](/docs/guide/memory/) | arenas, borrowing, `clone` |
-| [Modules and packages](/docs/guide/modules/) | multi-file programs, `pub func`, imports |
+| [Arrays, slices, lists, and maps](/docs/guide/collections/) | `[N]T`, `[]T`, `list[T]`, `map[K]V`, `make`, `append`, `delete`, `keys`, `values`, bounds checks |
+| [Memory and ownership](/docs/guide/memory/) | arenas, borrowing, `new(T)`, `clone` |
+| [Modules and packages](/docs/guide/modules/) | multi-file programs, `pub func`, `pub type ... struct`, imports |
 | [Testing](/docs/guide/testing/) | `.test.tx` files and `trux test` |
 | [Errors and failures](/docs/guide/errors/) | compile errors, runtime errors, exit codes |
 | [GPU programming](/docs/guide/gpu/) | `kernel func`, device buffers, launches, `gpu.sync` |
 
-The [standard library](/docs/stdlib/) covers the built-in packages `io`, `csv`, `image`, `time`, `http`, and `gpu`. For
+The [standard library](/docs/stdlib/) covers the built-in packages `io`, `csv`, `image`, `time`, `http`, `gpu`, and `errors`. For
 one dense reference, see the [language specification](/docs/design-notes/specs/).

@@ -9,8 +9,8 @@ weight: 700
 
 ### Is Trux Go?
 
-No. Trux borrows some syntax from Go (`package`, `func`, `for`, slices) but it is a different, much smaller language and
-is not Go-compatible. The compiler happens to be written in Go.
+No. Trux borrows some syntax from Go (`package`, `func`, `type ... struct`, `for`, slices, maps) but it is a different,
+much smaller language and is not Go-compatible. The compiler happens to be written in Go.
 
 ### Is Trux ready for production?
 
@@ -26,10 +26,12 @@ and to learn from. CUDA is "C plus kernels", so the same backend can target NVID
 
 Not implemented today, so don't expect these to work:
 
-- structs, maps, tuples (outside multiple returns), enums, pointers, or user-defined types
-- generics, closures, or function values (except naming a handler for `http.serve` or a kernel for `gpu.launch*`)
+- generics, interfaces, enums, or tuples outside multiple returns
+- methods on structs (use ordinary functions taking `T` or `*T` instead)
+- closures or function values (except naming a handler for `http` routes or a kernel for `gpu.launch*`)
 - type inference (`x := 1`), compound assignment (`+=`), and `++` / `--`
 - conversions between `int`, `float`, and `string`
+- pointer arithmetic (`p + 1`)
 - global variables and constants
 - removing elements from a list
 - command-line arguments for programs (`main` takes no parameters)
@@ -54,9 +56,9 @@ The compiler doesn't analyze whether a loop always returns, and an `if` without 
 
 ### `cannot mutate parameter-owned collection`
 
-A function tried to `append` to, or assign an element of, a collection it received as an ordinary parameter. Either mark
-the parameter `mut` (if the caller's collection should change), or `clone` it into a local first (if the function should
-work on its own copy). See [Memory and ownership](/docs/guide/memory/).
+A function tried to `append` to, `delete` from, or assign an element of, a collection or map it received as an ordinary
+parameter. Either mark the parameter `mut` (if the caller's collection should change), or `clone` it into a local first
+(if the function should work on its own copy). See [Memory and ownership](/docs/guide/memory/).
 
 ### `cannot mutate collection with unknown ownership`
 
@@ -70,7 +72,7 @@ append(ys, 4)
 The same applies when passing such a value to a `mut` parameter
 (`cannot pass collection with unknown ownership to mut parameter ...`).
 
-### `print can only be used as a statement` (or `append`, `assert`, ...)
+### `print can only be used as a statement` (or `append`, `delete`, `assert`, ...)
 
 Some builtins and library calls don't produce a value and must be on their own line. See
 [statement-only builtins](/docs/guide/operators/#statement-only-builtins).
@@ -114,6 +116,7 @@ All runtime errors start with `trux runtime error:` and exit with status `1`.
 | `integer division by zero`, `integer remainder by zero` | `x / 0` or `x % 0` on integers |
 | `index 5 out of bounds for length 3` | indexing past the end (or a negative index) |
 | `slice 2:9 out of bounds for length 4` | slice bounds outside the collection, or start after end |
+| `nil pointer dereference` | dereferencing `*p` or accessing `p.field` when `p` is `nil` |
 | `assertion failed: <message>` | an `assert` condition was `false` |
 | `invalid int input`, `invalid float input`, `invalid bool input` | [`io.readInt`](/docs/stdlib/io/#errors) and friends couldn't parse the line |
 

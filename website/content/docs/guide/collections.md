@@ -1,19 +1,19 @@
 ---
-title: "Arrays, slices, and lists"
-description: "Fixed arrays, slice views, growable lists, the collection builtins, and bounds checks."
+title: "Arrays, slices, lists, and maps"
+description: "Fixed arrays, slice views, growable lists, hash maps, collection builtins, and bounds checks."
 icon: "view_list"
 weight: 700
 ---
 
-Trux has three collection shapes. All of them support `len`, indexing, and slicing, and any of them can hold scalars or
-other collections.
+Trux has four collection shapes: fixed-size arrays, slice views, growable lists, and key-value maps. Arrays, slices, and
+lists are indexed by `int` and support slicing; maps are indexed by any comparable key type `K`.
 
-| | Array `[N]T` | Slice `[]T` | List `list[T]` |
-| --- | --- | --- | --- |
-| Length | fixed at compile time | fixed when created | grows with `append` |
-| Created with | `[N]T{...}` | slicing, `make([]T, n)` | `list[T]{...}` |
-| Element assignment | yes | yes, writes to the underlying storage | yes |
-| `append` | no | no | yes |
+| | Array `[N]T` | Slice `[]T` | List `list[T]` | Map `map[K]V` |
+| --- | --- | --- | --- | --- |
+| Size | fixed at compile time | fixed when created | grows with `append` | grows on key assignment, shrinks with `delete` |
+| Created with | `[N]T{...}` | slicing, `make([]T, n)` | `list[T]{...}` | `map[K]V{...}`, `make(map[K]V)` |
+| Element assignment | yes | yes, writes to underlying storage | yes | yes (`m[k] = v`) |
+| `len` | yes | yes | yes | yes |
 
 ## Arrays
 
@@ -63,17 +63,15 @@ view[0] = 8                // ys[1] is now 8
 let scratch []int = make([]int, 3)   // 0 0 0
 ```
 
-`make` only creates slices, and its length must be an `int`.
-
 **Common mistakes.** Slicing past the end; see [Bounds checks](#bounds-checks).
 
 **When you don't need it.** If you need your own independent copy, use [`clone`](/docs/guide/memory/#clone).
 
 **Related:** [Memory and ownership](/docs/guide/memory/).
 
-## Lists
+## Lists {#lists}
 
-**What it is.** `list[T]` is a growable collection. `append(list, value)` adds one element at the end.
+**What it is.** `list[T]` is a growable sequence. `append(list, value)` adds one element at the end.
 
 **Why.** Reading input of unknown size, such as CSV rows or lines from stdin, needs a collection that grows.
 
@@ -94,7 +92,8 @@ append(alias, 3)
 print(len(items))   // 3
 ```
 
-There is no way to remove elements yet. `examples/mut_parameters.tx` shows a queue that advances a head index instead.
+There is no builtin to remove elements from the middle of a list. `examples/mut_parameters.tx` shows a `Queue` struct
+that advances a `head` index instead.
 
 **Common mistakes.** `append` only works on lists:
 
@@ -107,6 +106,38 @@ Appending to a list parameter needs [`mut`](/docs/guide/functions/#mut-parameter
 **When you don't need it.** If the size is fixed, an array or `make([]T, n)` is simpler and cannot be shared by accident.
 
 **Related:** [`mut` parameters](/docs/guide/functions/#mut-parameters), [`csv`](/docs/stdlib/csv/).
+
+## Maps {#maps}
+
+**What it is.** `map[K]V` is a growable hash table mapping keys of type `K` to values of type `V`. Any comparable type
+can be a key (`int`, `float`, `string`, `bool`, `error`, pointers `*T`, and arrays or structs composed of comparable
+types); `V` can be any type.
+
+**Why.** Fast O(1) lookup, counting, deduplication, and indexing by name or ID.
+
+**How to use it.** Create a map with a map literal `map[K]V{k: v, ...}` or `make(map[K]V)` (optionally with an initial
+capacity hint `make(map[K]V, cap)`):
+
+```trux
+let stock map[string]int = map[string]int{"bolts": 6, "nuts": 10}
+stock["washers"] = 5
+delete(stock, "nuts")
+
+// Single-value lookup returns the value or V's zero value when missing:
+let count int = stock["bolts"]
+
+// Comma-ok lookup also reports whether the key was present:
+let missing int, ok bool = stock["nuts"]   // 0, false
+
+// Snapshot keys or values in insertion order as a list:
+let ks list[string] = keys(stock)
+let vs list[int] = values(stock)
+```
+
+Like lists, a map variable is a **shared handle**: assigning a map copies the handle, use `clone(m)` for an independent
+deep copy, and mark map parameters `mut` when a function inserts, updates, or deletes entries.
+
+**Related:** [`mut` parameters](/docs/guide/functions/#mut-parameters), [`clone`](/docs/guide/memory/#clone).
 
 ## Strings as collections {#strings-as-collections}
 
@@ -131,9 +162,10 @@ Build a new string with `+` instead: `"T" + text[1:]`.
 
 ## Nested collections
 
-**What it is.** Collections whose elements are collections: `[2][2]int`, `list[list[int]]`, `[][]int`.
+**What it is.** Collections whose elements are collections or structs: `[2][2]int`, `list[list[int]]`, `[][]float`,
+`map[string]list[int]`.
 
-**Why.** Grids and rows of different lengths without a struct type.
+**Why.** Grids, jagged rows, and grouped records.
 
 **How to use it.**
 
@@ -161,9 +193,9 @@ print(m[1][0])   // 3
 **When you don't need it.** For numeric grids that go to the GPU or to an image file, use one flat slice indexed as
 `row * width + col`: that is the layout [`gpu`](/docs/guide/gpu/) buffers and [`image`](/docs/stdlib/image/) use.
 
-## Bounds checks
+## Bounds checks {#bounds-checks}
 
-**What it is.** Every index and slice expression is checked at run time.
+**What it is.** Every array, slice, list, and string index or slice expression is checked at run time.
 
 **Why.** An out-of-range access in C reads or overwrites unrelated memory. In Trux it stops the program at once.
 
@@ -186,10 +218,15 @@ bounds-checked; see [GPU programming](/docs/guide/gpu/#kernels).
 
 | Builtin | Works on | Returns |
 | --- | --- | --- |
-| `len(x)` | string, array, slice, list | `int` |
+| `len(x)` | string, array, slice, list, map | `int` |
 | `append(list, value)` | list (statement only) | |
+| `delete(map, key)` | map (statement only) | |
+| `keys(map)` | `map[K]V` | `list[K]` in insertion order |
+| `values(map)` | `map[K]V` | `list[V]` in insertion order |
 | `make([]T, n)` | slice types | a new zero-filled `[]T` |
-| `clone(x)` | string, array, slice, list | an independent deep copy, see [Memory and ownership](/docs/guide/memory/#clone) |
+| `make(map[K]V)` / `make(map[K]V, cap)` | map types | a new empty `map[K]V` |
+| `new(T)` | any host type `T` | a durable zero-initialized `*T` |
+| `clone(x)` | string, array, slice, list, map, struct | an independent deep copy, see [Memory and ownership](/docs/guide/memory/#clone) |
 
 ## Full example
 

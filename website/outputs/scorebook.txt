@@ -2,4 +2,4 @@ total 322
 average 80
 best 104
 passing 3
-curved best 100 grade A
+curved best 100 grade A A count 2

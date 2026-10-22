@@ -13,7 +13,7 @@ import "time"
 // last. i is the output element from gpu.launch1d. The thread turns that
 // single index back into channel, y, and x. Neighbor taps that fall outside
 // the image contribute nothing.
-kernel func conv3(i int, input gpu.Buffer[float], weight gpu.Buffer[float], output gpu.Buffer[float], width int, height int, inCh int, outCh int) {
+kernel func conv3(i int, input gpu.Buffer [float], weight gpu.Buffer [float], output gpu.Buffer [float], width int, height int, inCh int, outCh int) {
   let spatial int = width * height
   let oc int = i / spatial
   let rem int = i - oc * spatial
@@ -27,9 +27,9 @@ kernel func conv3(i int, input gpu.Buffer[float], weight gpu.Buffer[float], outp
         let iy int = y + ky - 1
         let ix int = x + kx - 1
         if iy >= 0 && iy < height && ix >= 0 && ix < width {
-          let inIndex int = (ic * height + iy) * width + ix
-          let wIndex int = ((oc * inCh + ic) * 3 + ky) * 3 + kx
-          sum = sum + input[inIndex] * weight[wIndex]
+          let inIndex int = (ic *height + iy) * width + ix
+          let wIndex int = ((oc *inCh + ic) * 3 + ky) * 3 + kx
+          sum = sum + input[inIndex] *weight[wIndex]
         }
       }
     }
@@ -55,9 +55,9 @@ func conv3Cpu(input []float, weight []float, mut output []float, width int, heig
               let iy int = y + ky - 1
               let ix int = x + kx - 1
               if iy >= 0 && iy < height && ix >= 0 && ix < width {
-                let inIndex int = (ic * height + iy) * width + ix
-                let wIndex int = ((oc * inCh + ic) * 3 + ky) * 3 + kx
-                sum = sum + input[inIndex] * weight[wIndex]
+                let inIndex int = (ic *height + iy) * width + ix
+                let wIndex int = ((oc *inCh + ic) * 3 + ky) * 3 + kx
+                sum = sum + input[inIndex] *weight[wIndex]
               }
             }
           }
@@ -66,7 +66,7 @@ func conv3Cpu(input []float, weight []float, mut output []float, width int, heig
         if sum < 0.0 {
           sum = 0.0
         }
-        output[(oc * height + y) * width + x] = sum
+        output[(oc *height + y) * width + x] = sum
       }
     }
   }

@@ -13,7 +13,7 @@ import "time"
 // neighbors. Border cells are copied unchanged so the CPU and GPU stay on the
 // same edge rule. Each thread writes one cell of nextGrid and only reads
 // currentGrid.
-kernel func jacobiKernel(row int, col int, currentGrid gpu.Buffer[int], nextGrid gpu.Buffer[int], width int, height int) {
+kernel func jacobiKernel(row int, col int, currentGrid gpu.Buffer [int], nextGrid gpu.Buffer [int], width int, height int) {
   let index int = row * width + col
 
   if row == 0 || col == 0 || row == height - 1 || col == width - 1 {
@@ -135,7 +135,7 @@ func main() int {
 
   let mismatches int = 0
   for let i int = 0; i < total; i = i + 1 {
-    if cpuCurrent[i] != gpuOut[i] {
+    if cpuCurrent[i] != gpuOut[i]{
       mismatches = mismatches + 1
     }
   }

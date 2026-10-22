@@ -3,20 +3,29 @@ package main
 import "io"
 import "csv"
 
+type Member struct {
+  name string
+  team string
+}
+
 func main() int {
-  let name string = io.readLine()
-  let team string = io.readLine()
+  let added Member = Member{name: io.readLine(), team: io.readLine()}
   let cells list[string], readErr error = csv.read("examples/projects/csv_roster/roster.csv", 2)
   assert(readErr == nil, "read roster.csv")
 
-  append(cells, name)
-  append(cells, team)
+  append(cells, added.name)
+  append(cells, added.team)
   let writeErr error = csv.write("examples/projects/csv_roster/out.csv", cells, 2)
   assert(writeErr == nil, "write out.csv")
 
+  let teamsByMember map[string]string = make(map[string]string)
+  for let i int = 2; i < len(cells); i = i + 2 {
+    teamsByMember[cells[i]] = cells[i + 1]
+  }
+
   print(len(cells), " cells")
   print(cells[0], " ", cells[1])
-  print(name, " ", team)
+  print(added.name, " ", teamsByMember[added.name])
 
   return 0
 }

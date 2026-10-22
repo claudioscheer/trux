@@ -2,13 +2,23 @@ package main
 
 import "io"
 
-func main() int {
-  let name string = io.readLine()
-  let start int = io.readInt()
+type Counter struct {
+  owner string
+  value int
+}
 
-  print("counter for ", name)
+func advance(c *Counter) int {
+  let current int = c.value
+  c.value = c.value + 1
+  return current
+}
+
+func main() int {
+  let counter Counter = Counter{owner: io.readLine(), value: io.readInt()}
+
+  print("counter for ", counter.owner)
   for let i int = 0; i < 3; i = i + 1 {
-    print(start + i)
+    print(advance(&counter))
   }
 
   return 0

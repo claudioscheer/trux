@@ -1,6 +1,6 @@
 ---
 title: "Operators and expressions"
-description: "Arithmetic, checked integer math, comparison, logic, string containment, and precedence."
+description: "Arithmetic, checked integer math, pointers, comparison, logic, string containment, and precedence."
 icon: "calculate"
 weight: 400
 ---
@@ -62,16 +62,38 @@ can legitimately be zero, test it before dividing.
 
 **Related:** [Bounds checks](/docs/guide/collections/#bounds-checks), [Errors and failures](/docs/guide/errors/).
 
+## Pointers and field access
+
+**What it is.** `&x` takes the address of an assignable lvalue or struct literal, `*p` dereferences a pointer `*T`, and
+`s.field` accesses a struct field (auto-dereferencing one pointer level when `s` is `*Struct`).
+
+**Why.** Passing pointers and reading or updating struct fields are direct C operations with runtime `nil` protection.
+
+**How to use it.**
+
+```trux
+let pt Point = Point{x: 2, y: 5}
+let ptr *Point = &pt
+ptr.x = 10            // auto-dereferences ptr
+let copy Point = *ptr // reads the Point value
+```
+
+Dereferencing or accessing a field on a `nil` pointer stops the program with `trux runtime error: nil pointer dereference`.
+
+**Related:** [Structs and pointers](/docs/guide/types/#structs).
+
 ## Comparison
 
-**What it is.** `==` and `!=` on two values of the same scalar type, and `<`, `<=`, `>`, `>=` on two `int` or two
-`float` values. The result is a `bool`.
+**What it is.** `==` and `!=` on two values of the same comparable type (scalars, `error`, pointers `*T`, `nil`, and
+arrays or structs whose elements/fields are comparable), and `<`, `<=`, `>`, `>=` on two `int` or two `float` values.
+The result is a `bool`.
 
 **Why.** Comparisons feed `if` and `for` conditions, which must be `bool`.
 
-**How to use it.** Strings compare by content: `"ab" == "a" + "b"` is `true`.
+**How to use it.** Strings compare by content (`"ab" == "a" + "b"` is `true`), pointers compare by address (or against
+`nil`), and comparable structs compare field by field.
 
-**Common mistakes.** Collections cannot be compared with `==`:
+**Common mistakes.** Slices, lists, maps, and structs/arrays containing them cannot be compared with `==`:
 
 {{< include "examples/errors/operators_compare_collections.tx" "trux" >}}
 
@@ -86,7 +108,8 @@ Compare element by element in a loop instead.
 **What it is.** `&&` (and), `||` (or), and `!` (not) on `bool` values. `&&` and `||` short-circuit: the right side runs
 only when it can change the result.
 
-**Why.** Short-circuiting lets you guard a check, as in `i < len(xs) && xs[i] > 0`, without an out-of-bounds error.
+**Why.** Short-circuiting lets you guard a check, as in `i < len(xs) && xs[i] > 0` or `ptr != nil && ptr.x > 0`,
+without an out-of-bounds or nil-pointer error.
 
 **How to use it.** All operands must be `bool`. There is no truthiness: `if count` is rejected, write `if count > 0`.
 
@@ -117,15 +140,15 @@ From lowest to highest binding. Operators on the same row are left-associative.
 | 3 | `==` `!=` `<` `<=` `>` `>=` `in` |
 | 4 | `+` `-` |
 | 5 | `*` `/` `%` |
-| 6 (highest) | unary `-` and `!`, then calls, indexing `x[i]`, and slicing `x[a:b]` |
+| 6 (highest) | unary `-`, `!`, `&`, `*`, then calls, field access `x.f`, indexing `x[i]`, and slicing `x[a:b]` |
 
-Use parentheses whenever they make the intent clearer: `(a + b) / 2.0`.
+Use parentheses whenever they make the intent clearer: `(a + b) / 2.0` or `(*ptr).field`.
 
-## Statement-only builtins
+## Statement-only builtins {#statement-only-builtins}
 
-**What it is.** Calls that produce no value and can only stand alone on a line: `print`, `assert`, `append`,
-`time.sleepMillis`, `http.serve`, `http.respond`, and the GPU copy,
-launch, `sync`, and `free` calls. (File writes like `io.writeFile`, `csv.write`, and `image.writePpm` return `error`.)
+**What it is.** Calls that produce no value and can only stand alone on a line: `print`, `assert`, `append`, `delete`,
+`time.sleepMillis`, `http.serve`, `http.respond`, and the GPU copy, launch, `sync`, and `free` calls. (File writes like
+`io.writeFile`, `csv.write`, and `image.writePpm` return `error`.)
 
 **Why.** They exist for their effect. Using one inside an expression is always a mistake, so the compiler rejects it.
 

@@ -51,12 +51,13 @@ trux/
 - **`internal/token`** defines token types and the keyword table. Adding a keyword starts here.
 - **`internal/lexer`** produces tokens with file/line/column positions. It decodes string escapes and turns problems
   (unterminated strings, unknown escapes, stray characters) into `Illegal` tokens that the parser reports.
-- **`internal/ast`** holds the node types (`Program`, `FuncDecl`, statements, expressions) and the type representations
-  (`ScalarType`, `ArrayType`, `SliceType`, `ListType`, `GPUBufferType`) with `TypeEqual` and `ElementType` helpers.
+- **`internal/ast`** holds the node types (`Program`, `StructDecl`, `FuncDecl`, statements, expressions) and the type
+  representations (`ScalarType`, `StructType`, `PointerType`, `ArrayType`, `SliceType`, `ListType`, `MapType`,
+  `GPUBufferType`, `TupleType`) with `TypeEqual`, `IsComparable`, and `ElementType` helpers.
 - **`internal/parser`** is a recursive-descent parser with precedence climbing for binary operators.
 - **`internal/modules`** loads the entry file and its imports, applies the package and visibility rules, renames private
-  functions to unique internal names, resolves qualified calls, and merges everything into one `ast.Program`.
-  `LoadTest` is the variant used by `trux test`, which includes the entry `.test.tx` file.
+  functions and structs to unique internal names, resolves qualified calls and types, and merges everything into one
+  `ast.Program`. `LoadTest` is the variant used by `trux test`, which includes the entry `.test.tx` file.
 
 ## Middle
 

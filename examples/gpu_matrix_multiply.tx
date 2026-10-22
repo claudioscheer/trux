@@ -12,11 +12,11 @@ import "time"
 // Each GPU thread computes one output cell. row and col are the thread
 // coordinates supplied by gpu.launch2d, which also skips threads outside the
 // matrix. The source uses flat indexing because GPU buffers are 1D.
-kernel func matmulKernel(row int, col int, a gpu.Buffer[int], b gpu.Buffer[int], out gpu.Buffer[int], n int) {
+kernel func matmulKernel(row int, col int, a gpu.Buffer [int], b gpu.Buffer [int], out gpu.Buffer [int], n int) {
   let sum int = 0
 
   for let k int = 0; k < n; k = k + 1 {
-    sum = sum + a[row * n + k] * b[k * n + col]
+    sum = sum + a[row * n + k] *b[k * n + col]
   }
 
   out[row * n + col] = sum
@@ -90,7 +90,7 @@ func main() int {
       let sum int = 0
 
       for let k int = 0; k < n; k = k + 1 {
-        sum = sum + a[row * n + k] * b[k * n + col]
+        sum = sum + a[row * n + k] *b[k * n + col]
       }
 
       cpuOut[row * n + col] = sum
@@ -117,7 +117,7 @@ func main() int {
   // every output cell matches the CPU baseline.
   let mismatches int = 0
   for let i int = 0; i < total; i = i + 1 {
-    if cpuOut[i] != gpuOut[i] {
+    if cpuOut[i] != gpuOut[i]{
       mismatches = mismatches + 1
     }
   }

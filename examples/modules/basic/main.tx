@@ -3,6 +3,7 @@ package main
 import "math.tx"
 
 func main() int {
-  print(math.add(3, 4))
+  let p math.Pair = math.Pair{a: 3, b: 4}
+  print(math.add(p.a, p.b), " ", math.sumPair(p))
   return 0
 }

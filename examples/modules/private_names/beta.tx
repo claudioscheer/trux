@@ -1,7 +1,12 @@
 package beta
 
+type config struct {
+  base int
+}
+
 func value() int {
-  return 20
+  let c config = config{base: 20}
+  return c.base
 }
 
 pub func beta() int {

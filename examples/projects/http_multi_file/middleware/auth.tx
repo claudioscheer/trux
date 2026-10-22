@@ -2,11 +2,20 @@ package middleware
 
 import "http"
 
+type Session struct {
+  userId string
+  role string
+}
+
 pub func authenticate(request int) int {
+  let sessions map[string]Session = map[string]Session{
+    "Bearer secret-token": Session{userId: "user-42", role: "admin"},
+  }
   let token string = http.header(request, "Authorization")
-  if token == "Bearer secret-token" {
-    http.set(request, "userId", "user-42")
-    http.set(request, "role", "admin")
+  let session Session, ok bool = sessions[token]
+  if ok {
+    http.set(request, "userId", session.userId)
+    http.set(request, "role", session.role)
     return 0
   }
   http.setHeader(request, "WWW-Authenticate", "Bearer")

@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	codegenc "github.com/claudioscheer/trux/internal/codegen/c"
 	"github.com/claudioscheer/trux/internal/ir"
@@ -29,6 +32,7 @@ type compileResult struct {
 	RuntimeHeaders    []runtimeHeader
 	UsesCUDA          bool
 	UsesHTTP          bool
+	UsesSQLite        bool
 	Debug             bool
 }
 
@@ -38,9 +42,10 @@ type runtimeHeader struct {
 }
 
 type generatedCompileOptions struct {
-	UsesCUDA bool
-	UsesHTTP bool
-	Debug    bool
+	UsesCUDA   bool
+	UsesHTTP   bool
+	UsesSQLite bool
+	Debug      bool
 }
 
 func compileFile(path string, opts compileOptions) (*compileResult, error) {
@@ -122,6 +127,10 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 	if typedIR.UsesHTTP {
 		headers = append(headers, runtimeHeader{Name: runtimec.HTTPHeaderName, Source: runtimec.HTTPSource})
 	}
+	if typedIR.UsesSQLite {
+		headers = append(headers, runtimeHeader{Name: runtimec.SQLiteHeaderName, Source: runtimec.SQLiteHeaderSource})
+		headers = append(headers, runtimeHeader{Name: "sqlite3.h", Source: runtimec.SQLite3HeaderSource})
+	}
 
 	return &compileResult{
 		CSource:           cSource,
@@ -130,6 +139,7 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 		RuntimeHeaders:    headers,
 		UsesCUDA:          len(typedIR.Kernels) > 0,
 		UsesHTTP:          typedIR.UsesHTTP,
+		UsesSQLite:        typedIR.UsesSQLite,
 		Debug:             opts.Debug,
 	}, nil
 }
@@ -151,7 +161,12 @@ func buildFile(sourcePath string, outputPath string) error {
 		return err
 	}
 
-	return compileGenerated(cPath, outputPath, generatedCompileOptions{UsesCUDA: result.UsesCUDA, UsesHTTP: result.UsesHTTP, Debug: result.Debug})
+	return compileGenerated(cPath, outputPath, generatedCompileOptions{
+		UsesCUDA:   result.UsesCUDA,
+		UsesHTTP:   result.UsesHTTP,
+		UsesSQLite: result.UsesSQLite,
+		Debug:      result.Debug,
+	})
 }
 
 func compileC(sourcePath string, outputPath string) error {
@@ -160,7 +175,8 @@ func compileC(sourcePath string, outputPath string) error {
 		return fmt.Errorf("read generated source: %w", err)
 	}
 	return compileGenerated(sourcePath, outputPath, generatedCompileOptions{
-		UsesHTTP: strings.Contains(string(content), runtimec.HTTPHeaderName),
+		UsesHTTP:   strings.Contains(string(content), runtimec.HTTPHeaderName),
+		UsesSQLite: strings.Contains(string(content), runtimec.SQLiteHeaderName),
 	})
 }
 
@@ -210,8 +226,17 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 			compiler = "nvcc"
 		}
 		args = []string{"-x", "cu", sourcePath, "-o", outputPath}
-	} else if opts.UsesHTTP {
-		args = append(args, "-D_GNU_SOURCE", "-pthread", "-luring")
+	} else {
+		if opts.UsesHTTP {
+			args = append(args, "-D_GNU_SOURCE", "-pthread", "-luring")
+		}
+		if opts.UsesSQLite {
+			sqliteObj, err := ensureSQLiteObjectCached(compiler)
+			if err != nil {
+				return err
+			}
+			args = append(args, sqliteObj, "-pthread", "-lm")
+		}
 	}
 
 	cmd := exec.Command(compiler, args...)
@@ -246,4 +271,76 @@ func runExecutable(out io.Writer, in io.Reader, executablePath string) error {
 	}
 
 	return nil
+}
+
+var sqliteCacheMu sync.Mutex
+
+func ensureSQLiteObjectCached(compiler string) (string, error) {
+	sqliteCacheMu.Lock()
+	defer sqliteCacheMu.Unlock()
+
+	baseDir, err := os.UserCacheDir()
+	if err != nil || baseDir == "" {
+		baseDir = os.TempDir()
+	}
+	cacheDir := filepath.Join(baseDir, "trux", "sqlite")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return "", fmt.Errorf("create sqlite cache dir: %w", err)
+	}
+
+	h := sha256.New()
+	h.Write([]byte(compiler))
+	h.Write([]byte(runtimec.SQLite3CSource))
+	sum := hex.EncodeToString(h.Sum(nil))[:16]
+	objName := fmt.Sprintf("sqlite3-3.47.2-%s.o", sum)
+	objPath := filepath.Join(cacheDir, objName)
+
+	if info, err := os.Stat(objPath); err == nil && info.Size() > 0 {
+		return objPath, nil
+	}
+
+	cPath := filepath.Join(cacheDir, fmt.Sprintf("sqlite3-%s.c", sum))
+	hPath := filepath.Join(cacheDir, "sqlite3.h")
+	if err := os.WriteFile(hPath, []byte(runtimec.SQLite3HeaderSource), 0o644); err != nil {
+		return "", fmt.Errorf("write sqlite3.h: %w", err)
+	}
+	if err := os.WriteFile(cPath, []byte(runtimec.SQLite3CSource), 0o644); err != nil {
+		return "", fmt.Errorf("write sqlite3.c: %w", err)
+	}
+
+	tmpObjPath := filepath.Join(cacheDir, fmt.Sprintf("sqlite3-%s.tmp-%d.o", sum, os.Getpid()))
+	args := []string{
+		"-c",
+		"-O2",
+		"-DSQLITE_THREADSAFE=1",
+		"-DSQLITE_ENABLE_FTS5",
+		"-DSQLITE_ENABLE_RTREE",
+		"-DSQLITE_OMIT_LOAD_EXTENSION",
+		cPath,
+		"-o",
+		tmpObjPath,
+	}
+
+	cmd := exec.Command(compiler, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		_ = os.Remove(tmpObjPath)
+		msg := strings.TrimSpace(string(output))
+		if msg == "" {
+			return "", fmt.Errorf("precompile sqlite3.c failed: %w", err)
+		}
+		return "", fmt.Errorf("precompile sqlite3.c failed: %w\n%s", err, msg)
+	}
+
+	_ = os.Remove(objPath)
+	if err := os.Rename(tmpObjPath, objPath); err != nil {
+		if info, statErr := os.Stat(objPath); statErr == nil && info.Size() > 0 {
+			_ = os.Remove(tmpObjPath)
+			return objPath, nil
+		}
+		return "", fmt.Errorf("cache sqlite object: %w", err)
+	}
+	_ = os.Remove(cPath)
+
+	return objPath, nil
 }

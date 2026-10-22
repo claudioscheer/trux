@@ -28,6 +28,12 @@ data, use [`csv`](/docs/stdlib/csv/).
 | `io.readBool()` | `bool` | Reads one line, which must be exactly `true` or `false` after surrounding whitespace is removed. |
 | `io.readFile(path string)` | `(string, error)` | Returns the entire contents of a file, byte for byte, along with an error if reading failed. |
 | `io.writeFile(path string, contents string)` | `error` | Creates or overwrites a file with exactly `contents`; no newline is added. Returns an error if writing failed. |
+| `io.createDir(path string)` | `error` | Creates a new directory. Returns an error if the directory already exists or cannot be created. |
+| `io.remove(path string)` | `error` | Deletes a single file or empty directory. Returns an error if target is missing or if directory is non-empty. |
+| `io.readDir(path string)` | `(list[string], error)` | Returns directory entry base names sorted lexicographically (omitting `.` and `..`), or an empty list and an error on failure. |
+| `io.exists(path string)` | `bool` | Returns `true` if a file or directory exists at `path`. |
+| `io.isFile(path string)` | `bool` | Returns `true` if `path` exists and is a regular file. |
+| `io.isDir(path string)` | `bool` | Returns `true` if `path` exists and is a directory. |
 
 ## Reading stdin
 

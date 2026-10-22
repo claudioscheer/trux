@@ -18,17 +18,22 @@ const Source = `#ifndef TRUX_RUNTIME_H
 #include <time.h>
 
 #ifdef _WIN32
-#include <fcntl.h>
-#include <io.h>
-#endif
-#if !defined(__CUDA_ARCH__) && (defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__)))
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#if !defined(__CUDA_ARCH__)
 #include <windows.h>
+#endif
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <unistd.h>
 #endif
 
 #ifdef TRUX_RUNTIME_CUDA
@@ -1634,6 +1639,197 @@ static RT_UNUSED rt_error rt_write_csv(rt_arena* arena, rt_string path, rt_list_
     }
     free(c_path);
     return NULL;
+}
+
+static RT_UNUSED rt_string rt_string_from_c(rt_arena* arena, const char* s) {
+    if (s == NULL) {
+        return RT_LIT(rt_string, NULL, 0);
+    }
+    size_t len = strlen(s);
+    if (len == 0) {
+        return RT_LIT(rt_string, NULL, 0);
+    }
+    uint8_t* data = (uint8_t*)rt_arena_alloc(arena, len);
+    memcpy(data, s, len);
+    return RT_LIT(rt_string, data, len);
+}
+
+static int rt_compare_strings(const void* a, const void* b) {
+    const rt_string* sa = (const rt_string*)a;
+    const rt_string* sb = (const rt_string*)b;
+    size_t min_len = sa->len < sb->len ? sa->len : sb->len;
+    if (min_len > 0) {
+        int cmp = memcmp(sa->data, sb->data, min_len);
+        if (cmp != 0) {
+            return cmp;
+        }
+    }
+    if (sa->len < sb->len) return -1;
+    if (sa->len > sb->len) return 1;
+    return 0;
+}
+
+static RT_UNUSED rt_error rt_create_dir(rt_arena* arena, rt_string path) {
+    char* c_path = rt_string_to_c_string(path, "dir path");
+#if defined(_WIN32)
+    BOOL ok = CreateDirectoryA(c_path, NULL);
+    free(c_path);
+    if (!ok) {
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to create directory", 26));
+    }
+    return NULL;
+#else
+    int res = mkdir(c_path, 0777);
+    free(c_path);
+    if (res != 0) {
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to create directory", 26));
+    }
+    return NULL;
+#endif
+}
+
+static RT_UNUSED rt_error rt_remove(rt_arena* arena, rt_string path) {
+    char* c_path = rt_string_to_c_string(path, "path");
+#if defined(_WIN32)
+    DWORD attr = GetFileAttributesA(c_path);
+    if (attr == INVALID_FILE_ATTRIBUTES) {
+        free(c_path);
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to remove: path does not exist", 37));
+    }
+    BOOL ok = false;
+    if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+        ok = RemoveDirectoryA(c_path);
+    } else {
+        ok = DeleteFileA(c_path);
+    }
+    free(c_path);
+    if (!ok) {
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to remove", 16));
+    }
+    return NULL;
+#else
+    int res = remove(c_path);
+    free(c_path);
+    if (res != 0) {
+        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to remove", 16));
+    }
+    return NULL;
+#endif
+}
+
+static RT_UNUSED bool rt_exists(rt_string path) {
+    char* c_path = rt_string_to_c_string(path, "path");
+#if defined(_WIN32)
+    DWORD attr = GetFileAttributesA(c_path);
+    free(c_path);
+    return attr != INVALID_FILE_ATTRIBUTES;
+#else
+    struct stat st;
+    int res = stat(c_path, &st);
+    free(c_path);
+    return res == 0;
+#endif
+}
+
+static RT_UNUSED bool rt_is_file(rt_string path) {
+    char* c_path = rt_string_to_c_string(path, "path");
+#if defined(_WIN32)
+    DWORD attr = GetFileAttributesA(c_path);
+    free(c_path);
+    if (attr == INVALID_FILE_ATTRIBUTES) {
+        return false;
+    }
+    return !(attr & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    struct stat st;
+    int res = stat(c_path, &st);
+    free(c_path);
+    return res == 0 && S_ISREG(st.st_mode);
+#endif
+}
+
+static RT_UNUSED bool rt_is_dir(rt_string path) {
+    char* c_path = rt_string_to_c_string(path, "path");
+#if defined(_WIN32)
+    DWORD attr = GetFileAttributesA(c_path);
+    free(c_path);
+    if (attr == INVALID_FILE_ATTRIBUTES) {
+        return false;
+    }
+    return (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
+    struct stat st;
+    int res = stat(c_path, &st);
+    free(c_path);
+    return res == 0 && S_ISDIR(st.st_mode);
+#endif
+}
+
+static RT_UNUSED trux_tuple_list_string_error rt_read_dir(rt_arena* arena, rt_string path) {
+    rt_list_string* entries = rt_list_string_new(arena, 0);
+    char* c_path = rt_string_to_c_string(path, "dir path");
+#if defined(_WIN32)
+    DWORD attr = GetFileAttributesA(c_path);
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        free(c_path);
+        return RT_LIT(trux_tuple_list_string_error, entries, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to open directory", 25)));
+    }
+    size_t path_len = strlen(c_path);
+    char* search_pattern = (char*)malloc(path_len + 3);
+    if (search_pattern == NULL) {
+        free(c_path);
+        return RT_LIT(trux_tuple_list_string_error, entries, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"out of memory", 13)));
+    }
+    memcpy(search_pattern, c_path, path_len);
+    if (path_len > 0 && (search_pattern[path_len - 1] == '/' || search_pattern[path_len - 1] == '\\')) {
+        search_pattern[path_len] = '*';
+        search_pattern[path_len + 1] = '\0';
+    } else {
+        search_pattern[path_len] = '\\';
+        search_pattern[path_len + 1] = '*';
+        search_pattern[path_len + 2] = '\0';
+    }
+    WIN32_FIND_DATAA find_data;
+    HANDLE hFind = FindFirstFileA(search_pattern, &find_data);
+    free(search_pattern);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        free(c_path);
+        return RT_LIT(trux_tuple_list_string_error, entries, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to read directory", 24)));
+    }
+    do {
+        if (strcmp(find_data.cFileName, ".") == 0 || strcmp(find_data.cFileName, "..") == 0) {
+            continue;
+        }
+        rt_string name = rt_string_from_c(arena, find_data.cFileName);
+        rt_list_string_append(entries, name);
+    } while (FindNextFileA(hFind, &find_data) != 0);
+    FindClose(hFind);
+    free(c_path);
+    if (entries->len > 1) {
+        qsort(entries->data, entries->len, sizeof(rt_string), rt_compare_strings);
+    }
+    return RT_LIT(trux_tuple_list_string_error, entries, NULL);
+#else
+    DIR* dir = opendir(c_path);
+    if (dir == NULL) {
+        free(c_path);
+        return RT_LIT(trux_tuple_list_string_error, entries, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to open directory", 25)));
+    }
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        rt_string name = rt_string_from_c(arena, entry->d_name);
+        rt_list_string_append(entries, name);
+    }
+    closedir(dir);
+    free(c_path);
+    if (entries->len > 1) {
+        qsort(entries->data, entries->len, sizeof(rt_string), rt_compare_strings);
+    }
+    return RT_LIT(trux_tuple_list_string_error, entries, NULL);
+#endif
 }
 
 #endif

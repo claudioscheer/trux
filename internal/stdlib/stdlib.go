@@ -16,6 +16,12 @@ const (
 	CallReadBool           CallKind = "readBool"
 	CallReadFile           CallKind = "readFile"
 	CallWriteFile          CallKind = "writeFile"
+	CallCreateDir          CallKind = "createDir"
+	CallRemove             CallKind = "remove"
+	CallReadDir            CallKind = "readDir"
+	CallExists             CallKind = "exists"
+	CallIsFile             CallKind = "isFile"
+	CallIsDir              CallKind = "isDir"
 	CallReadCSV            CallKind = "readCsv"
 	CallWriteCSV           CallKind = "writeCsv"
 	CallImageWidth         CallKind = "imageWidth"
@@ -172,6 +178,72 @@ var packages = []Package{
 				ResultOrigin:  ResultFrameOwned,
 				StatementOnly: false,
 				Detail:        "write a string to a file",
+			},
+			{
+				Package: "io",
+				Name:    "createDir",
+				Kind:    CallCreateDir,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultFrameOwned,
+				Detail:       "create a directory",
+			},
+			{
+				Package: "io",
+				Name:    "remove",
+				Kind:    CallRemove,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   ast.ErrorType,
+				ResultOrigin: ResultFrameOwned,
+				Detail:       "remove a file or empty directory",
+			},
+			{
+				Package: "io",
+				Name:    "readDir",
+				Kind:    CallReadDir,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   &ast.TupleType{Types: []ast.Type{&ast.ListType{Elem: ast.StringType}, ast.ErrorType}},
+				ResultOrigin: ResultFrameOwned,
+				Detail:       "read directory entries sorted lexicographically",
+			},
+			{
+				Package: "io",
+				Name:    "exists",
+				Kind:    CallExists,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   ast.BoolType,
+				ResultOrigin: ResultOwned,
+				Detail:       "check if a file or directory exists",
+			},
+			{
+				Package: "io",
+				Name:    "isFile",
+				Kind:    CallIsFile,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   ast.BoolType,
+				ResultOrigin: ResultOwned,
+				Detail:       "check if path is a regular file",
+			},
+			{
+				Package: "io",
+				Name:    "isDir",
+				Kind:    CallIsDir,
+				Params: []Param{
+					{Name: "path", Type: ast.StringType},
+				},
+				ReturnType:   ast.BoolType,
+				ResultOrigin: ResultOwned,
+				Detail:       "check if path is a directory",
 			},
 		},
 	},

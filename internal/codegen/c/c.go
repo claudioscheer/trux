@@ -129,7 +129,9 @@ func exprNeedsFrame(expr ir.Expr) bool {
 		return true
 	case *ir.ImageDimensionExpr:
 		return exprNeedsFrame(expr.Path)
-	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr:
+	case *ir.PathQueryExpr:
+		return exprNeedsFrame(expr.Path)
+	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr:
 		return true
 	case *ir.CallExpr:
 		if isDynamicType(expr.Type()) {
@@ -386,7 +388,7 @@ func exprPublishesFrame(expr ir.Expr, declared map[string]bool, tainted map[stri
 			}
 		}
 		return false
-	case *ir.ReadFileExpr, *ir.ImageDimensionExpr:
+	case *ir.ReadFileExpr, *ir.ImageDimensionExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.PathQueryExpr:
 		return exprPublishesFrame(exprPath(expr), declared, tainted)
 	case *ir.ReadCSVExpr:
 		return exprPublishesFrame(expr.Path, declared, tainted) || exprPublishesFrame(expr.Columns, declared, tainted)
@@ -406,6 +408,14 @@ func exprPublishesFrame(expr ir.Expr, declared map[string]bool, tainted map[stri
 func exprPath(expr ir.Expr) ir.Expr {
 	switch expr := expr.(type) {
 	case *ir.ReadFileExpr:
+		return expr.Path
+	case *ir.CreateDirExpr:
+		return expr.Path
+	case *ir.RemoveExpr:
+		return expr.Path
+	case *ir.ReadDirExpr:
+		return expr.Path
+	case *ir.PathQueryExpr:
 		return expr.Path
 	case *ir.ImageDimensionExpr:
 		return expr.Path
@@ -428,9 +438,9 @@ func valueReferencesFrame(expr ir.Expr, tainted map[string]bool) bool {
 			return true
 		}
 		return false
-	case *ir.UnaryExpr, *ir.LenExpr:
+	case *ir.UnaryExpr, *ir.LenExpr, *ir.PathQueryExpr:
 		return false
-	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr:
+	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr:
 		return true
 	case *ir.CallExpr:
 		return isDynamicType(expr.Type())
@@ -1469,6 +1479,39 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 			return emittedExpr{}, err
 		}
 		return emittedExpr{prelude: path.prelude, value: fmt.Sprintf("rt_read_file(%s, %s)", targetArena, path.value)}, nil
+	case *ir.CreateDirExpr:
+		path, err := e.emitOrderedOperand(expr.Path, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		return emittedExpr{prelude: path.prelude, value: fmt.Sprintf("rt_create_dir(%s, %s)", targetArena, path.value)}, nil
+	case *ir.RemoveExpr:
+		path, err := e.emitOrderedOperand(expr.Path, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		return emittedExpr{prelude: path.prelude, value: fmt.Sprintf("rt_remove(%s, %s)", targetArena, path.value)}, nil
+	case *ir.ReadDirExpr:
+		path, err := e.emitOrderedOperand(expr.Path, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		return emittedExpr{prelude: path.prelude, value: fmt.Sprintf("rt_read_dir(%s, %s)", targetArena, path.value)}, nil
+	case *ir.PathQueryExpr:
+		path, err := e.emitOrderedOperand(expr.Path, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		switch expr.Kind {
+		case semtypes.IOCallExists:
+			return emittedExpr{prelude: path.prelude, value: fmt.Sprintf("rt_exists(%s)", path.value)}, nil
+		case semtypes.IOCallIsFile:
+			return emittedExpr{prelude: path.prelude, value: fmt.Sprintf("rt_is_file(%s)", path.value)}, nil
+		case semtypes.IOCallIsDir:
+			return emittedExpr{prelude: path.prelude, value: fmt.Sprintf("rt_is_dir(%s)", path.value)}, nil
+		default:
+			return emittedExpr{}, fmt.Errorf("unsupported path query expression %s", expr.Kind)
+		}
 	case *ir.ErrorsNewExpr:
 		msg, err := e.emitOrderedOperand(expr.Message, e.scratch)
 		if err != nil {
@@ -1827,7 +1870,8 @@ func exprHasSideEffect(expr ir.Expr) bool {
 	case *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr,
 		*ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ImageDimensionExpr, *ir.ReadPPMExpr,
 		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CallExpr,
-		*ir.ErrorsNewExpr, *ir.WriteFileExpr, *ir.WriteCSVExpr, *ir.WritePPMExpr:
+		*ir.ErrorsNewExpr, *ir.WriteFileExpr, *ir.WriteCSVExpr, *ir.WritePPMExpr,
+		*ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.PathQueryExpr:
 		return true
 	case *ir.ArrayLiteral:
 		for _, elem := range expr.Elements {
@@ -1934,6 +1978,39 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("rt_read_file(%s, %s)", targetArena, path), nil
+	case *ir.CreateDirExpr:
+		path, err := emitExpr(expr.Path, frameArena)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("rt_create_dir(%s, %s)", targetArena, path), nil
+	case *ir.RemoveExpr:
+		path, err := emitExpr(expr.Path, frameArena)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("rt_remove(%s, %s)", targetArena, path), nil
+	case *ir.ReadDirExpr:
+		path, err := emitExpr(expr.Path, frameArena)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("rt_read_dir(%s, %s)", targetArena, path), nil
+	case *ir.PathQueryExpr:
+		path, err := emitExpr(expr.Path, frameArena)
+		if err != nil {
+			return "", err
+		}
+		switch expr.Kind {
+		case semtypes.IOCallExists:
+			return fmt.Sprintf("rt_exists(%s)", path), nil
+		case semtypes.IOCallIsFile:
+			return fmt.Sprintf("rt_is_file(%s)", path), nil
+		case semtypes.IOCallIsDir:
+			return fmt.Sprintf("rt_is_dir(%s)", path), nil
+		default:
+			return "", fmt.Errorf("unsupported path query expression %s", expr.Kind)
+		}
 	case *ir.ErrorsNewExpr:
 		msg, err := emitExpr(expr.Message, targetArena)
 		if err != nil {

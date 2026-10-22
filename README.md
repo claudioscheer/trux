@@ -52,7 +52,7 @@ Highlights:
 - arena-based memory with simple ownership rules (`mut` parameters, `clone`) instead of a garbage collector
 - multi-file programs with relative imports and `pub func`
 - built-in unit tests: `.test.tx` files run by `trux test`
-- standard packages for stdin and files (`io`), CSV (`csv`), PPM images (`image`), errors (`errors`), clocks (`time`), and HTTP servers (`http`)
+- standard packages for stdin, files, and directories (`io`), CSV (`csv`), PPM images (`image`), errors (`errors`), clocks (`time`), and HTTP servers (`http`)
 - GPU kernels written in Trux with `kernel func`, compiled as CUDA
 
 ## Install and build

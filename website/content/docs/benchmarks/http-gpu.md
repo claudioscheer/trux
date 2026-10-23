@@ -26,8 +26,8 @@ That runs `go run ./benchmarks/digits/`. Linux, liburing, and CUDA. It is not pa
 
 | Concurrency | Requests | Throughput (req/s) | p50 | p99 |
 | :---: | :---: | :---: | :---: | :---: |
-| 1 | 6,312 | **1,052.0** | 0.369 ms | 1.884 ms |
-| 8 | 41,579 | **6,364.6** | 0.425 ms | 2.221 ms |
-| 32 | 57,233 | **8,230.5** | 0.576 ms | 3.196 ms |
+| 1 | 4,279 | **713.1** | 0.362 ms | 2.042 ms |
+| 8 | 43,666 | **6,439.2** | 0.377 ms | 2.281 ms |
+| 32 | 62,664 | **8,961.5** | 0.509 ms | 3.359 ms |
 
 From 1 to 8 connections, throughput follows the extra in-flight kernels. At 32 connections there are still 24 workers, so some requests wait for a worker before they launch.

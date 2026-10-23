@@ -13,7 +13,7 @@ Trux features a high-performance HTTP engine engineered specifically for Linux s
 - **Kernel Buffer Rings (`io_uring_register_buf_ring`)**: The Linux kernel dynamically selects pre-registered buffers upon incoming network packets (`IOSQE_BUFFER_SELECT`), eliminating user-space memory allocations and read system calls.
 - **Multishot Operations & Async Response Queuing**: A single Submission Queue Entry (SQE) establishes continuous connection acceptance (`io_uring_prep_multishot_accept`) and streaming receive (`io_uring_prep_recv_multishot`), while outgoing HTTP responses are queued asynchronously via `io_uring_prep_send` and flushed in batched ring submissions.
 - **CPU Affinity Worker Sizing (`sched_getaffinity`)**: Worker threads automatically match the container or host CPU affinity mask (`CPU_COUNT`), maintaining a strict 1:1 thread-per-core mapping without over-spawning threads inside cgroup-constrained containers.
-- **Predictable Memory Footprint**: Bounded buffer rings and request-scoped arenas keep memory consumption between **7.4 MiB and 55.9 MiB** regardless of concurrent connection counts.
+- **Predictable Memory Footprint**: Bounded buffer rings and request-scoped arenas keep memory consumption between **6.0 MiB and 51.8 MiB** regardless of concurrent connection counts.
 
 ```mermaid
 flowchart TD
@@ -30,8 +30,8 @@ flowchart TD
 
 Benchmarks were conducted using the standard HTTP benchmarking utility [`wrk`](https://github.com/wg/wrk) against containerized Trux servers run under strict Linux cgroup hardware limits:
 
-- **Host OS & Kernel**: Ubuntu 24.04 LTS on Linux 6.18 (`x86_64`)
-- **Container Runtime**: Docker Engine 29.1 (cgroup v2, `--security-opt seccomp=unconfined`, `--ulimit memlock=-1:-1`)
+- **Host OS & Kernel**: Linux Mint 22.3, kernel 7.0.0-38-generic (`x86_64`)
+- **Container Runtime**: Docker Engine 29.9.0 (cgroup v2, `--security-opt seccomp=unconfined`, `--ulimit memlock=-1:-1`)
 - **Libraries**: `liburing2` v2.5
 - **Connections**: 100 and 1,000 persistent HTTP/1.1 keep-alive connections
 - **Duration**: 6 seconds per scenario
@@ -54,16 +54,16 @@ Simulates constrained edge environments, micro instances, or single-core serverl
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext Baseline** (`/plaintext`) | 100 | **150,124** | 14.75 MB/s | 697 µs | 610 µs | 763 µs | 1.44 ms | 7.4 MiB |
-| **Plaintext Baseline** (`/plaintext`) | 1,000 | **114,305** | 11.23 MB/s | 8.73 ms | 8.41 ms | 9.83 ms | 12.58 ms | 15.1 MiB |
-| **JSON Serialization** (`/json/serialize`) | 100 | **149,968** | 22.17 MB/s | 633 µs | 608 µs | 775 µs | 1.21 ms | 14.8 MiB |
-| **JSON Serialization** (`/json/serialize`) | 1,000 | **121,905** | 18.02 MB/s | 8.13 ms | 8.06 ms | 8.92 ms | 10.50 ms | 14.9 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **63,155** | 10.06 MB/s | 3.08 ms | 1.24 ms | 8.32 ms | 24.22 ms | 31.1 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **57,662** | 9.18 MB/s | 17.39 ms | 15.21 ms | 23.37 ms | 42.12 ms | 33.3 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **126,580** | 16.78 MB/s | 753 µs | 724 µs | 910 µs | 1.35 ms | 34.3 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **100,104** | 13.27 MB/s | 9.87 ms | 9.63 ms | 10.96 ms | 13.72 ms | 34.2 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **66,870** | 8.80 MB/s | 2.84 ms | 1.16 ms | 8.18 ms | 22.14 ms | 34.2 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **61,824** | 8.14 MB/s | 16.55 ms | 13.74 ms | 25.86 ms | 43.35 ms | 34.1 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 100 | **140,731** | 13.82 MB/s | 694 µs | 655 µs | 805 µs | 1.11 ms | 6.0 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 1,000 | **118,127** | 11.60 MB/s | 8.45 ms | 8.19 ms | 9.72 ms | 12.72 ms | 14.0 MiB |
+| **JSON Serialization** (`/json/serialize`) | 100 | **137,110** | 20.27 MB/s | 698 µs | 684 µs | 787 µs | 1.04 ms | 13.8 MiB |
+| **JSON Serialization** (`/json/serialize`) | 1,000 | **120,816** | 17.86 MB/s | 8.20 ms | 7.99 ms | 9.70 ms | 12.51 ms | 13.6 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **42,425** | 6.76 MB/s | 3.87 ms | 1.92 ms | 8.32 ms | 29.93 ms | 24.6 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **39,821** | 6.34 MB/s | 24.91 ms | 21.66 ms | 40.37 ms | 52.57 ms | 31.2 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **105,662** | 14.01 MB/s | 900 µs | 900 µs | 990 µs | 1.19 ms | 31.3 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **85,923** | 11.39 MB/s | 11.53 ms | 11.35 ms | 13.13 ms | 16.78 ms | 31.4 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **44,721** | 5.89 MB/s | 3.83 ms | 1.81 ms | 9.27 ms | 29.61 ms | 31.8 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **40,099** | 5.28 MB/s | 24.92 ms | 21.46 ms | 48.27 ms | 54.93 ms | 32.6 MiB |
 
 ---
 
@@ -73,16 +73,16 @@ Simulates standard dual-core virtual machines (`--cpuset-cpus="0,1" --cpus="2.0"
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext Baseline** (`/plaintext`) | 100 | **278,853** | 27.39 MB/s | 388 µs | 317 µs | 480 µs | 1.05 ms | 12.1 MiB |
-| **Plaintext Baseline** (`/plaintext`) | 1,000 | **228,951** | 22.49 MB/s | 4.36 ms | 4.15 ms | 5.27 ms | 6.71 ms | 20.3 MiB |
-| **JSON Serialization** (`/json/serialize`) | 100 | **266,365** | 39.37 MB/s | 368 µs | 330 µs | 506 µs | 1.00 ms | 20.7 MiB |
-| **JSON Serialization** (`/json/serialize`) | 1,000 | **226,984** | 33.55 MB/s | 4.37 ms | 4.22 ms | 5.22 ms | 6.41 ms | 24.9 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **85,280** | 13.58 MB/s | 4.50 ms | 900 µs | 15.59 ms | 47.50 ms | 27.3 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **76,184** | 12.13 MB/s | 18.38 ms | 10.27 ms | 50.26 ms | 89.85 ms | 31.9 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **193,071** | 25.59 MB/s | 498 µs | 463 µs | 690 µs | 1.24 ms | 32.0 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **180,777** | 23.96 MB/s | 5.49 ms | 5.25 ms | 6.69 ms | 8.49 ms | 32.9 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **90,254** | 11.88 MB/s | 4.79 ms | 827 µs | 17.95 ms | 48.56 ms | 33.6 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **87,907** | 11.57 MB/s | 14.28 ms | 9.27 ms | 34.37 ms | 69.39 ms | 33.9 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 100 | **252,505** | 24.80 MB/s | 410 µs | 371 µs | 445 µs | 558 µs | 10.3 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 1,000 | **247,527** | 24.31 MB/s | 4.06 ms | 3.92 ms | 4.73 ms | 6.10 ms | 18.8 MiB |
+| **JSON Serialization** (`/json/serialize`) | 100 | **246,800** | 36.48 MB/s | 386 µs | 374 µs | 456 µs | 579 µs | 18.8 MiB |
+| **JSON Serialization** (`/json/serialize`) | 1,000 | **240,009** | 35.48 MB/s | 4.14 ms | 4.06 ms | 4.78 ms | 6.03 ms | 23.2 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **50,121** | 7.98 MB/s | 4.89 ms | 1.57 ms | 8.46 ms | 53.90 ms | 26.2 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **47,623** | 7.58 MB/s | 24.59 ms | 17.92 ms | 51.95 ms | 101.11 ms | 28.7 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **170,164** | 22.56 MB/s | 571 µs | 559 µs | 757 µs | 1.05 ms | 28.7 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **162,594** | 21.55 MB/s | 6.10 ms | 5.95 ms | 7.16 ms | 9.14 ms | 28.9 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **50,665** | 6.67 MB/s | 6.35 ms | 1.51 ms | 19.34 ms | 70.40 ms | 29.1 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **51,285** | 6.75 MB/s | 21.45 ms | 16.75 ms | 36.53 ms | 76.06 ms | 30.9 MiB |
 
 ---
 
@@ -92,16 +92,16 @@ Simulates multi-core production server nodes (`--cpuset-cpus="0,1,2,3" --cpus="4
 
 | Endpoint | Concurrency | Throughput (req/s) | Transfer | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Plaintext Baseline** (`/plaintext`) | 100 | **690,048** | 67.78 MB/s | 207 µs | 106 µs | 226 µs | 538 µs | 20.0 MiB |
-| **Plaintext Baseline** (`/plaintext`) | 1,000 | **703,956** | 69.15 MB/s | 1.39 ms | 1.26 ms | 2.08 ms | 3.66 ms | 29.3 MiB |
-| **JSON Serialization** (`/json/serialize`) | 100 | **675,776** | 99.89 MB/s | 143 µs | 111 µs | 221 µs | 467 µs | 29.8 MiB |
-| **JSON Serialization** (`/json/serialize`) | 1,000 | **695,237** | 102.77 MB/s | 1.39 ms | 1.28 ms | 2.04 ms | 3.30 ms | 36.1 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **59,584** | 9.49 MB/s | 3.75 ms | 1.36 ms | 4.56 ms | 43.06 ms | 38.0 MiB |
-| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **70,082** | 11.16 MB/s | 16.00 ms | 12.30 ms | 28.60 ms | 63.43 ms | 45.7 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **250,387** | 33.19 MB/s | 378 µs | 330 µs | 642 µs | 1.01 ms | 45.3 MiB |
-| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **254,878** | 33.79 MB/s | 3.89 ms | 3.71 ms | 5.52 ms | 7.92 ms | 48.3 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **59,644** | 7.85 MB/s | 3.88 ms | 1.36 ms | 4.74 ms | 44.85 ms | 49.1 MiB |
-| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **76,429** | 10.06 MB/s | 15.08 ms | 11.09 ms | 30.38 ms | 60.99 ms | 55.9 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 100 | **469,148** | 46.08 MB/s | 215 µs | 195 µs | 263 µs | 342 µs | 18.9 MiB |
+| **Plaintext Baseline** (`/plaintext`) | 1,000 | **466,623** | 45.84 MB/s | 2.12 ms | 2.06 ms | 2.58 ms | 3.18 ms | 27.5 MiB |
+| **JSON Serialization** (`/json/serialize`) | 100 | **463,319** | 68.49 MB/s | 207 µs | 199 µs | 270 µs | 342 µs | 28.6 MiB |
+| **JSON Serialization** (`/json/serialize`) | 1,000 | **456,498** | 67.48 MB/s | 2.17 ms | 2.15 ms | 2.61 ms | 3.08 ms | 34.0 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 100 | **44,199** | 7.04 MB/s | 5.73 ms | 1.85 ms | 8.69 ms | 63.92 ms | 37.4 MiB |
+| **SQLite File Insert & Query** (`/sqlite/insert-and-query`) | 1,000 | **46,802** | 7.45 MB/s | 23.93 ms | 18.61 ms | 42.61 ms | 92.56 ms | 43.5 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 100 | **271,051** | 35.93 MB/s | 370 µs | 340 µs | 436 µs | 1.45 ms | 42.9 MiB |
+| **SQLite File Prepared Query** (`/sqlite/query-by-id/1024`) | 1,000 | **267,936** | 35.52 MB/s | 3.70 ms | 3.61 ms | 4.60 ms | 7.88 ms | 46.4 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 100 | **46,239** | 6.09 MB/s | 6.75 ms | 1.75 ms | 19.49 ms | 73.64 ms | 47.5 MiB |
+| **Middleware & SQLite File Audit** (`/api/authenticated-audit`) | 1,000 | **50,856** | 6.69 MB/s | 21.81 ms | 17.16 ms | 38.31 ms | 81.20 ms | 51.8 MiB |
 
 ---
 
@@ -117,12 +117,12 @@ Handlers utilize thread-local connection caching (`sqlite.openThreadLocal`) pair
 - **Single-Roundtrip Write+Read (`INSERT ... RETURNING`)**: `/sqlite/insert-and-query` inserts and retrieves the new row in a single VDBE execution without a secondary B-tree lookup.
 
 ### Concurrent Readers vs. High-Throughput WAL Writes
-- **High-Throughput Reads (`/sqlite/query-by-id/1024`)**: Parameterized prepared queries scale up to **254,878 req/s** on disk with a **7.92 ms** p99 latency at 1,000 concurrency across 4 cores (**250,387 req/s** with **1.01 ms** p99 at 100 concurrency).
-- **High-Throughput WAL Writes (`/sqlite/insert-and-query`, `/api/authenticated-audit`)**: Combining `PRAGMA synchronous=NORMAL`, persistent statement caching, CPU-affinity worker sizing (`sched_getaffinity`), and memory-scaled (2,000–20,000 frame) `SQLITE_CHECKPOINT_TRUNCATE` checkpoints sustains **59,584 to 90,254 writes/sec** with **827 µs–1.36 ms** median latency at 100 concurrency and zero lock errors.
+- **High-Throughput Reads (`/sqlite/query-by-id/1024`)**: Parameterized prepared queries reach **271,051 req/s** on disk with a **1.45 ms** p99 latency at 100 concurrency across 4 cores (**267,936 req/s** with a **7.88 ms** p99 at 1,000 concurrency).
+- **High-Throughput WAL Writes (`/sqlite/insert-and-query`, `/api/authenticated-audit`)**: Combining `PRAGMA synchronous=NORMAL`, persistent statement caching, CPU-affinity worker sizing (`sched_getaffinity`), and memory-scaled (2,000–20,000 frame) `SQLITE_CHECKPOINT_TRUNCATE` checkpoints sustains **42,425 to 50,665 writes/sec** with **1.51 ms–1.92 ms** median latency at 100 concurrency and zero lock errors.
 - **Async `io_uring_prep_send` & Batched CQE Draining**: Worker threads drain all ready completion queue entries (`io_uring_for_each_cqe`) and queue HTTP responses via `io_uring_prep_send`, coalescing network I/O into batched ring submissions.
 
 ### Low Memory Footprint Under Continuous I/O
-Matching worker threads to container CPU affinity (`1`, `2`, and `4` workers) and bounding `/tmp/bench.db-wal` via truncating checkpoints keeps total container memory between **7.4 MiB and 55.9 MiB** across millions of database reads and writes.
+Matching worker threads to container CPU affinity (`1`, `2`, and `4` workers) and bounding `/tmp/bench.db-wal` via truncating checkpoints keeps total container memory between **6.0 MiB and 51.8 MiB** across millions of database reads and writes.
 
 ---
 

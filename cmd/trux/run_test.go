@@ -2640,6 +2640,54 @@ func main() int {
 	}
 }
 
+func TestCompileGeneratedUsesO0ForDebugCUDA(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+
+kernel func fill(out gpu.Buffer[int], n int) {
+    let i int = gpu.globalX()
+    if i < n {
+        out[i] = 1
+    }
+}
+
+func main() int {
+    let out gpu.Buffer[int] = gpu.alloc(1)
+    gpu.launch(fill, 1, 1, 1, 1, 1, 1, out, 1)
+    gpu.free(out)
+    return 0
+}`)
+	result, err := compileFile(path, compileOptions{Debug: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.UsesCUDA {
+		t.Fatal("expected a CUDA program")
+	}
+
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "nvcc.log")
+	fakeNVCC := writeFakeCompiler(t, filepath.Join(dir, "fake-nvcc"), logPath)
+	t.Setenv("NVCC", fakeNVCC)
+	cPath, err := writeGeneratedFiles(dir, "main", result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := compileGenerated(cPath, outputPath, generatedCompileOptions{Debug: result.Debug, UsesCUDA: result.UsesCUDA}); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	if !strings.Contains(log, "-O0") {
+		t.Fatalf("compiler args = %q, want debug build flag", log)
+	}
+	if strings.Contains(log, "-O2") {
+		t.Fatalf("compiler args = %q, did not expect optimized debug build", log)
+	}
+}
+
 func TestCompileGeneratedUsesPthreadForHTTP(t *testing.T) {
 	path := writeTempSource(t, `package main
 import "http"
@@ -2819,6 +2867,9 @@ func main() int {
 	}
 	if strings.Contains(log, "-std=c11") {
 		t.Fatalf("compiler args = %q, did not expect C11 flag for nvcc", log)
+	}
+	if !strings.Contains(log, "-O2") {
+		t.Fatalf("compiler args = %q, want optimized host build flag", log)
 	}
 	if !strings.Contains(log, "-o "+outputPath) {
 		t.Fatalf("compiler args = %q, want output path", log)

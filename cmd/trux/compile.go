@@ -245,6 +245,13 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 		// would also force later inputs, such as the yyjson object, to be compiled
 		// as source.
 		args = []string{sourcePath, "-o", outputPath}
+		// nvcc leaves host code at -O0 unless asked. Match the C path so host
+		// loops (argmax, comparisons, CPU reference kernels) are optimized too.
+		if opts.Debug {
+			args = append(args, "-O0")
+		} else {
+			args = append(args, "-O2")
+		}
 		if opts.UsesHTTP {
 			// nvcc rejects -pthread ("Unknown option '-pthread'" on CUDA 12).
 			// The host compiler accepts it through -Xcompiler.

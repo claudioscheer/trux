@@ -41,7 +41,7 @@ compiles everything into one program.
 
 {{< include "website/outputs/errors/modules_bare_import.txt" "text" >}}
 
-Write `import "math.tx"` for a source file. Import cycles are rejected with the full chain:
+Write `import "calc.tx"` for a source file. Import cycles are rejected with the full chain:
 
 {{< include "website/outputs/errors/modules_cycle.txt" "text" >}}
 

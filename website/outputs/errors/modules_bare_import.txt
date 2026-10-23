@@ -1,7 +1,7 @@
-examples/errors/modules_bare_import.tx:3:1: unknown standard package "math"
+examples/errors/modules_bare_import.tx:3:1: unknown standard package "calc"
 1 | package main
 2 | 
-3 | import "math"
+3 | import "calc"
   | ^
 4 | 
 5 | func main() int {

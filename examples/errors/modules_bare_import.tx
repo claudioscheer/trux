@@ -1,8 +1,8 @@
 package main
 
-import "math"
+import "calc"
 
 func main() int {
-  print(math.add(1, 2))
+  print(calc.add(1, 2))
   return 0
 }

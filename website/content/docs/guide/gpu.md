@@ -347,6 +347,8 @@ Inside a kernel, `exp(x)` is the one call you can make. It takes a `float` and r
 
 A request handler copies the input into the borrowed workspace, launches, then calls `gpu.finish(request, continuation)`. The continuation is `func(request int) int`. The worker goes back to the `io_uring` loop while the kernel runs, so other sockets on that worker still accept and receive. One request is in flight per worker. The continuation runs when the kernel finishes, reads `gpu.ready`, and sends the response. `examples/projects/digits_server` is the handwritten-digits SVM on that path. `benchmarks/digits` times it (`make bench-digits` on Linux with liburing and CUDA). The measured run is on the [HTTP + GPU](/docs/benchmarks/http-gpu/) page.
 
+The same mount path without HTTP is `examples/projects/mnist_mlp`. It classifies the whole MNIST test set in three launches and compares every last-layer value and predicted class with the numbers the exporter computed. `python/txm.py` writes that file and enforces the layout rules before `gpu.mount` ever sees it.
+
 `gpu.to` outside an HTTP worker is still a blocking copy. Existing GPU examples keep using it.
 
 ## Restrictions
@@ -360,6 +362,7 @@ A request handler copies the input into the borrowed workspace, launches, then c
 | `examples/gpu_matrix_multiply.tx` | square matrix multiply on CPU and with `gpu.launch2d`, then compares results |
 | `examples/performance_stencil.tx` | repeated Jacobi stencil steps on two device buffers |
 | `examples/performance_cnn.tx` | a four-layer float convolution network with `gpu.launch1d` |
+| `examples/projects/mnist_mlp` | a trained scikit-learn MLP over the MNIST test set, with a last-layer and prediction check |
 | `examples/projects/rotate_image` | rotates a PPM image on CPU and GPU |
 
 Each prints CPU and GPU checksums, a mismatch count, and timings. See the [`gpu` reference](/docs/stdlib/gpu/) for every

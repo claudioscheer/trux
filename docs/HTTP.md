@@ -90,7 +90,7 @@ The generated C includes `trux_http_runtime.h` when HTTP calls are used. On Linu
 
 ## Limits
 
-- Linux server environment required for `io_uring` networking. Windows/macOS stubs fail gracefully at runtime.
+- Linux is required. The HTTP runtime uses `io_uring`. Other systems stop with `http is supported on Linux only`.
 - In Docker containers, require `--security-opt seccomp=unconfined --ulimit memlock=-1:-1` for kernel buffer ring allocation.
 - Plain HTTP only. TLS should sit in front of the process (e.g. reverse proxy).
 - `port` must be between `1` and `65535`.

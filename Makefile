@@ -5,11 +5,7 @@
 GO := go
 BINARY := trux
 CMD := ./cmd/trux
-ifeq ($(OS),Windows_NT)
-RUN_BIN := bin/$(BINARY).exe
-else
 RUN_BIN := ./bin/$(BINARY)
-endif
 
 .PHONY: build run test bench bench-digits fmt emit-c lsp clean
 
@@ -40,7 +36,6 @@ test:
 	$(GO) test $(if $(filter 1,$(VERBOSE)),-v )$(GO_TEST_FLAGS) ./...
 
 # Integer workload, GPU matrix multiply, Jacobi stencil, and a four-layer conv net.
-# On Windows, run `vs` in this shell first so nvcc can find cl.exe.
 bench: build
 	@echo ===== examples/performance_integer.tx =====
 	$(RUN_BIN) run examples/performance_integer.tx

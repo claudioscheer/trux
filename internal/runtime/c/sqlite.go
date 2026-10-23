@@ -15,10 +15,8 @@ const SQLiteHeaderSource = `
 #define TRUX_SQLITE_RUNTIME_H
 
 #include "sqlite3.h"
-#ifndef _WIN32
 #include <sched.h>
 #include <unistd.h>
-#endif
 
 #define RT_SQLITE_STMT_CACHE_SIZE 32
 
@@ -59,15 +57,9 @@ typedef struct {
     trux_sqlite_db* db;
 } rt_sqlite_tls_entry;
 
-#if defined(_MSC_VER)
-static __declspec(thread) rt_sqlite_tls_entry g_trux_sqlite_tls_cache[RT_SQLITE_TLS_CACHE_SIZE];
-static __declspec(thread) size_t g_trux_sqlite_tls_count = 0;
-#else
 static __thread rt_sqlite_tls_entry g_trux_sqlite_tls_cache[RT_SQLITE_TLS_CACHE_SIZE];
 static __thread size_t g_trux_sqlite_tls_count = 0;
-#endif
 
-#if !defined(_WIN32)
 /* usleep is not declared under _POSIX_C_SOURCE 200809L, which the runtime sets. */
 static void rt_sqlite_sleep_us(long usec) {
     struct timespec ts;
@@ -75,32 +67,19 @@ static void rt_sqlite_sleep_us(long usec) {
     ts.tv_nsec = (long)(usec % 1000000L) * 1000L;
     nanosleep(&ts, NULL);
 }
-#endif
 
 static int rt_sqlite_busy_handler(void* ptr, int count) {
     (void)ptr;
     if (count < 5) {
-#if defined(_WIN32)
-        Sleep(0);
-#else
         sched_yield();
-#endif
         return 1;
     }
     if (count < 500) {
-#if defined(_WIN32)
-        Sleep(1);
-#else
         rt_sqlite_sleep_us(25);
-#endif
         return 1;
     }
     if (count < 25000) {
-#if defined(_WIN32)
-        Sleep(1);
-#else
         rt_sqlite_sleep_us(100);
-#endif
         return 1;
     }
     return 0;
@@ -116,7 +95,6 @@ static int rt_sqlite_busy_handler(void* ptr, int count) {
 #define RT_SQLITE_CHECKPOINT_FRAMES_MAX 20000
 #define RT_SQLITE_CHECKPOINT_COMMITS 500
 
-#if !defined(_WIN32)
 static long long rt_sqlite_read_limit_file(const char* path) {
     FILE* f = fopen(path, "r");
     if (f == NULL) return 0;
@@ -128,12 +106,8 @@ static long long rt_sqlite_read_limit_file(const char* path) {
     fclose(f);
     return limit;
 }
-#endif
 
 static int rt_sqlite_default_checkpoint_frames(void) {
-#if defined(_WIN32)
-    return RT_SQLITE_CHECKPOINT_FRAMES_MAX;
-#else
     long long limit = rt_sqlite_read_limit_file("/sys/fs/cgroup/memory.max");
     if (limit <= 0) {
         limit = rt_sqlite_read_limit_file("/sys/fs/cgroup/memory/memory.limit_in_bytes");
@@ -150,7 +124,6 @@ static int rt_sqlite_default_checkpoint_frames(void) {
     if (frames < RT_SQLITE_CHECKPOINT_FRAMES_MIN) frames = RT_SQLITE_CHECKPOINT_FRAMES_MIN;
     if (frames > RT_SQLITE_CHECKPOINT_FRAMES_MAX) frames = RT_SQLITE_CHECKPOINT_FRAMES_MAX;
     return (int)frames;
-#endif
 }
 
 static int rt_sqlite_wal_hook(void* arg, sqlite3* db, const char* zDb, int nEntry) {

@@ -18,24 +18,10 @@ const Source = `#ifndef TRUX_RUNTIME_H
 #include <inttypes.h>
 #include <time.h>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#if !defined(__CUDA_ARCH__)
-#include <windows.h>
-#endif
-#include <fcntl.h>
-#include <io.h>
-#else
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
-#endif
 
 #ifdef TRUX_RUNTIME_CUDA
 #include <cuda_runtime.h>
@@ -67,12 +53,7 @@ struct rt_c_array {
 
 #define RT_ARENA_DEFAULT_CHUNK_SIZE ((size_t)4096)
 
-/* Windows text-mode stdout turns \n into \r\n. Trux programs and tests use \n. */
 static RT_UNUSED void rt_stdio_binary(void) {
-#if defined(_WIN32) && !defined(__CUDA_ARCH__)
-    _setmode(_fileno(stdout), _O_BINARY);
-    _setmode(_fileno(stderr), _O_BINARY);
-#endif
 }
 
 typedef struct {
@@ -795,8 +776,6 @@ static RT_UNUSED int rt_clock_realtime(struct timespec* ts) {
 #if defined(__CUDA_ARCH__)
     (void)ts;
     return -1;
-#elif defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__))
-    return timespec_get(ts, TIME_UTC) == TIME_UTC ? 0 : -1;
 #else
     return clock_gettime(CLOCK_REALTIME, ts);
 #endif
@@ -806,18 +785,6 @@ static RT_UNUSED int rt_clock_monotonic(struct timespec* ts) {
 #if defined(__CUDA_ARCH__)
     (void)ts;
     return -1;
-#elif defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__))
-    static LARGE_INTEGER frequency;
-    LARGE_INTEGER counter;
-    if (frequency.QuadPart == 0 && !QueryPerformanceFrequency(&frequency)) {
-        return -1;
-    }
-    if (!QueryPerformanceCounter(&counter)) {
-        return -1;
-    }
-    ts->tv_sec = (time_t)(counter.QuadPart / frequency.QuadPart);
-    ts->tv_nsec = (long)((counter.QuadPart % frequency.QuadPart) * 1000000000 / frequency.QuadPart);
-    return 0;
 #else
     return clock_gettime(CLOCK_MONOTONIC, ts);
 #endif
@@ -843,8 +810,6 @@ static RT_UNUSED void rt_time_sleep_millis(int64_t millis) {
     size_t checked = rt_checked_count(millis, "sleep milliseconds");
 #if defined(__CUDA_ARCH__)
     (void)checked;
-#elif defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__))
-    Sleep(checked > 0xffffffffu ? 0xffffffffu : (DWORD)checked);
 #else
     struct timespec remaining;
     remaining.tv_sec = (time_t)(checked / 1000);
@@ -2491,145 +2456,51 @@ static int rt_compare_strings(const void* a, const void* b) {
 
 static RT_UNUSED rt_error rt_create_dir(rt_arena* arena, rt_string path) {
     char* c_path = rt_string_to_c_string(path, "dir path");
-#if defined(_WIN32)
-    BOOL ok = CreateDirectoryA(c_path, NULL);
-    free(c_path);
-    if (!ok) {
-        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to create directory", 26));
-    }
-    return NULL;
-#else
     int res = mkdir(c_path, 0777);
     free(c_path);
     if (res != 0) {
         return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to create directory", 26));
     }
     return NULL;
-#endif
 }
 
 static RT_UNUSED rt_error rt_remove(rt_arena* arena, rt_string path) {
     char* c_path = rt_string_to_c_string(path, "path");
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(c_path);
-    if (attr == INVALID_FILE_ATTRIBUTES) {
-        free(c_path);
-        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to remove: path does not exist", 37));
-    }
-    BOOL ok = false;
-    if (attr & FILE_ATTRIBUTE_DIRECTORY) {
-        ok = RemoveDirectoryA(c_path);
-    } else {
-        ok = DeleteFileA(c_path);
-    }
-    free(c_path);
-    if (!ok) {
-        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to remove", 16));
-    }
-    return NULL;
-#else
     int res = remove(c_path);
     free(c_path);
     if (res != 0) {
         return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to remove", 16));
     }
     return NULL;
-#endif
 }
 
 static RT_UNUSED bool rt_exists(rt_string path) {
     char* c_path = rt_string_to_c_string(path, "path");
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(c_path);
-    free(c_path);
-    return attr != INVALID_FILE_ATTRIBUTES;
-#else
     struct stat st;
     int res = stat(c_path, &st);
     free(c_path);
     return res == 0;
-#endif
 }
 
 static RT_UNUSED bool rt_is_file(rt_string path) {
     char* c_path = rt_string_to_c_string(path, "path");
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(c_path);
-    free(c_path);
-    if (attr == INVALID_FILE_ATTRIBUTES) {
-        return false;
-    }
-    return !(attr & FILE_ATTRIBUTE_DIRECTORY);
-#else
     struct stat st;
     int res = stat(c_path, &st);
     free(c_path);
     return res == 0 && S_ISREG(st.st_mode);
-#endif
 }
 
 static RT_UNUSED bool rt_is_dir(rt_string path) {
     char* c_path = rt_string_to_c_string(path, "path");
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(c_path);
-    free(c_path);
-    if (attr == INVALID_FILE_ATTRIBUTES) {
-        return false;
-    }
-    return (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
-#else
     struct stat st;
     int res = stat(c_path, &st);
     free(c_path);
     return res == 0 && S_ISDIR(st.st_mode);
-#endif
 }
 
 static RT_UNUSED trux_tuple_list_string_error rt_read_dir(rt_arena* arena, rt_string path) {
     rt_list_string* entries = rt_list_string_new(arena, 0);
     char* c_path = rt_string_to_c_string(path, "dir path");
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(c_path);
-    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        free(c_path);
-        return RT_LIT(trux_tuple_list_string_error, entries, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to open directory", 25)));
-    }
-    size_t path_len = strlen(c_path);
-    char* search_pattern = (char*)malloc(path_len + 3);
-    if (search_pattern == NULL) {
-        free(c_path);
-        return RT_LIT(trux_tuple_list_string_error, entries, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"out of memory", 13)));
-    }
-    memcpy(search_pattern, c_path, path_len);
-    if (path_len > 0 && (search_pattern[path_len - 1] == '/' || search_pattern[path_len - 1] == '\\')) {
-        search_pattern[path_len] = '*';
-        search_pattern[path_len + 1] = '\0';
-    } else {
-        search_pattern[path_len] = '\\';
-        search_pattern[path_len + 1] = '*';
-        search_pattern[path_len + 2] = '\0';
-    }
-    WIN32_FIND_DATAA find_data;
-    HANDLE hFind = FindFirstFileA(search_pattern, &find_data);
-    free(search_pattern);
-    if (hFind == INVALID_HANDLE_VALUE) {
-        free(c_path);
-        return RT_LIT(trux_tuple_list_string_error, entries, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to read directory", 24)));
-    }
-    do {
-        if (strcmp(find_data.cFileName, ".") == 0 || strcmp(find_data.cFileName, "..") == 0) {
-            continue;
-        }
-        rt_string name = rt_string_from_c(arena, find_data.cFileName);
-        rt_list_string_append(entries, name);
-    } while (FindNextFileA(hFind, &find_data) != 0);
-    FindClose(hFind);
-    free(c_path);
-    if (entries->len > 1) {
-        qsort(entries->data, entries->len, sizeof(rt_string), rt_compare_strings);
-    }
-    return RT_LIT(trux_tuple_list_string_error, entries, NULL);
-#else
     DIR* dir = opendir(c_path);
     if (dir == NULL) {
         free(c_path);
@@ -2649,7 +2520,6 @@ static RT_UNUSED trux_tuple_list_string_error rt_read_dir(rt_arena* arena, rt_st
         qsort(entries->data, entries->len, sizeof(rt_string), rt_compare_strings);
     }
     return RT_LIT(trux_tuple_list_string_error, entries, NULL);
-#endif
 }
 
 #if defined(__CUDA_ARCH__)
@@ -2746,19 +2616,6 @@ static RT_UNUSED void rt_env_add_entry(rt_arena* arena, const char* entry, size_
 }
 
 static RT_UNUSED void rt_env_load_process(rt_arena* arena) {
-#if defined(_WIN32)
-    char* block = GetEnvironmentStringsA();
-    if (block == NULL) {
-        rt_env_fail("cannot read environment");
-    }
-    char* cursor = block;
-    while (*cursor != '\0') {
-        size_t len = strlen(cursor);
-        rt_env_add_entry(arena, cursor, len);
-        cursor += len + 1;
-    }
-    FreeEnvironmentStringsA(block);
-#else
     extern char** environ;
     if (environ == NULL) {
         return;
@@ -2766,7 +2623,6 @@ static RT_UNUSED void rt_env_load_process(rt_arena* arena) {
     for (char** cursor = environ; *cursor != NULL; cursor++) {
         rt_env_add_entry(arena, *cursor, strlen(*cursor));
     }
-#endif
 }
 
 static RT_UNUSED bool rt_env_space(unsigned char c) {
@@ -2837,19 +2693,6 @@ static RT_UNUSED void rt_env_parse(rt_arena* arena, const uint8_t* data, size_t 
 
 static RT_UNUSED void rt_env_load_file(rt_arena* arena) {
     const char* path = ".env";
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(path);
-    if (attr == INVALID_FILE_ATTRIBUTES) {
-        DWORD err = GetLastError();
-        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) {
-            return;
-        }
-        rt_env_fail(".env: cannot open");
-    }
-    if ((attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-        rt_env_fail(".env: not a regular file");
-    }
-#else
     struct stat st;
     if (stat(path, &st) != 0) {
         if (errno == ENOENT) {
@@ -2860,7 +2703,6 @@ static RT_UNUSED void rt_env_load_file(rt_arena* arena) {
     if (!S_ISREG(st.st_mode)) {
         rt_env_fail(".env: not a regular file");
     }
-#endif
     FILE* file = fopen(path, "rb");
     if (file == NULL) {
         rt_env_fail(".env: cannot open");

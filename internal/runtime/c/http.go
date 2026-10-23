@@ -6,7 +6,7 @@ const HTTPSource = `
 #ifndef TRUX_HTTP_RUNTIME_H
 #define TRUX_HTTP_RUNTIME_H
 
-#if !defined(_WIN32) && defined(__linux__)
+#if defined(__linux__)
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE

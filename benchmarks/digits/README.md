@@ -21,6 +21,6 @@ go run ./benchmarks/digits/ -duration 10s -concurrency 1,4,16
 go run ./benchmarks/digits/ -model examples/projects/digits_server/digits.txm
 ```
 
-`make bench` does not run this. That target is the in-process integer, matrix, stencil, and conv-net programs, including on Windows. This server needs the Linux HTTP runtime.
+`make bench` does not run this. That target is the in-process integer, matrix, stencil, and conv-net programs. This server needs the Linux HTTP runtime.
 
 The check image is 64 zeros. The harness computes the digit with the same host vote as `server.tx` and requires the response body to be that digit. A trained file can disagree if `exp` on the device and `exp` on the host land on opposite sides of a decision that is almost zero.

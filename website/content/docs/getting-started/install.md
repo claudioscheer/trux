@@ -16,7 +16,7 @@ produce executables.
 | A C11 compiler | Running any Trux program | `trux` runs `cc` by default. Set `CC` to use another compiler, for example `CC=clang`. |
 | `make` (optional) | Convenience targets | Every `make` target is a thin wrapper around `go` or `trux` commands, listed below. |
 | NVIDIA CUDA toolkit (optional) | Programs that declare a `kernel func` | `trux` runs `nvcc` (or `$NVCC`) for these, and they need an NVIDIA GPU and driver to run. |
-| POSIX sockets and pthreads (optional) | Programs that use the `http` package | Linux and macOS. The HTTP runtime is not available on Windows. |
+| POSIX sockets and pthreads (optional) | Programs that use the `http` package | Linux. The HTTP runtime needs `io_uring`. |
 
 ## Build the compiler
 
@@ -76,16 +76,6 @@ The `Makefile` has small convenience wrappers:
 CC=clang trux run examples/hello.tx
 NVCC=/usr/local/cuda/bin/nvcc trux run examples/gpu_matrix_multiply.tx
 ```
-
-{{% alert context="info" %}}
-
-**Windows**
-
-The runtime has Windows-specific code paths (binary stdout, MSVC support for CUDA builds), and the `Makefile` comment
-for `make bench` says to run the Visual Studio `vs` environment first so `nvcc` can find `cl.exe`. The `http` package
-is POSIX-only.
-
-{{% /alert %}}
 
 ## Verify your setup
 

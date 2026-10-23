@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
@@ -548,9 +547,6 @@ func pathFromURI(uri string) string {
 	path, err := url.PathUnescape(parsed.Path)
 	if err != nil {
 		return parsed.Path
-	}
-	if runtime.GOOS == "windows" {
-		path = strings.TrimPrefix(path, "/")
 	}
 	return path
 }

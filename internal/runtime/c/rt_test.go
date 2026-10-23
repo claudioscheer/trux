@@ -1743,12 +1743,6 @@ static int dump_env(void) {
 }
 
 int main(int argc, char** argv) {
-#ifdef _WIN32
-    if (_setmode(_fileno(stdout), _O_BINARY) == -1) {
-        fprintf(stderr, "setmode failed\n");
-        return 1;
-    }
-#endif
     if (argc < 2) {
         fprintf(stderr, "missing fixture\n");
         return 2;

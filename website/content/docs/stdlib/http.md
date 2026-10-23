@@ -119,7 +119,7 @@ func handle(request int) int
 
 ## Limits
 
-- Linux server environment required for `io_uring` networking. Windows/macOS stubs fail gracefully at runtime.
+- Linux is required. The HTTP runtime uses `io_uring`. Other systems stop with `http is supported on Linux only`.
 - In Docker containers, specify `--security-opt seccomp=unconfined --ulimit memlock=-1:-1` so the kernel can allocate buffer rings.
 - Plain HTTP only; place a TLS reverse proxy in front for HTTPS.
 - Request bodies are read using `Content-Length` and are capped at 1 MiB. Chunked request bodies are rejected.

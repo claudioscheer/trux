@@ -166,6 +166,16 @@ func exprNeedsFrame(expr ir.Expr) bool {
 			}
 		}
 		return false
+	case *ir.JSONCallExpr:
+		if isDynamicType(expr.Type()) {
+			return true
+		}
+		for _, arg := range expr.Args {
+			if exprNeedsFrame(arg) {
+				return true
+			}
+		}
+		return false
 	case *ir.BinaryExpr:
 		if expr.Operator == "+" && ast.TypeEqual(expr.Type(), ast.StringType) {
 			return true
@@ -422,6 +432,13 @@ func exprPublishesFrame(expr ir.Expr, declared map[string]bool, tainted map[stri
 			}
 		}
 		return false
+	case *ir.JSONCallExpr:
+		for _, arg := range expr.Args {
+			if valueReferencesFrame(arg, tainted) || exprPublishesFrame(arg, declared, tainted) {
+				return true
+			}
+		}
+		return false
 	case *ir.BinaryExpr:
 		return exprPublishesFrame(expr.Left, declared, tainted) || exprPublishesFrame(expr.Right, declared, tainted)
 	case *ir.UnaryExpr:
@@ -513,7 +530,7 @@ func valueReferencesFrame(expr ir.Expr, tainted map[string]bool) bool {
 		return valueReferencesFrame(expr.Object, tainted)
 	case *ir.MapLookupExpr:
 		return valueReferencesFrame(expr.Map, tainted)
-	case *ir.CallExpr, *ir.SQLiteCallExpr:
+	case *ir.CallExpr, *ir.SQLiteCallExpr, *ir.JSONCallExpr:
 		return isDynamicType(expr.Type())
 	case *ir.IndexExpr, *ir.SliceExpr:
 		return dynamicValueReferencesCollection(expr, tainted)
@@ -581,6 +598,9 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	if program.UsesSQLite {
 		fmt.Fprintf(&out, "#include %s\n", cStringLiteral(runtimec.SQLiteHeaderName))
 	}
+	if program.UsesJSON {
+		fmt.Fprintf(&out, "#include %s\n", cStringLiteral(runtimec.JSONHeaderName))
+	}
 	fmt.Fprintln(&out)
 
 	if err := emitProgramTypes(&out, program); err != nil {
@@ -614,6 +634,9 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 
 	if program.UsesSQLite {
 		fmt.Fprintf(&out, "\n%s\n", runtimec.SQLiteImplSource)
+	}
+	if program.UsesJSON {
+		fmt.Fprintf(&out, "\n%s\n", runtimec.JSONImplSource)
 	}
 
 	for _, fn := range program.Functions {
@@ -2115,6 +2138,31 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		fnName := sqliteRuntimeFnName(expr.Kind)
 		return emittedExpr{prelude: prelude, value: fmt.Sprintf("%s(%s)", fnName, strings.Join(values, ", "))}, nil
+	case *ir.JSONCallExpr:
+		callResultArena := e.scratch
+		if isDynamicType(expr.Type()) {
+			callResultArena = targetArena
+		}
+		var args []emittedExpr
+		for _, arg := range expr.Args {
+			argArena := e.scratch
+			if isDynamicType(expr.Type()) && isDynamicType(arg.Type()) {
+				argArena = callResultArena
+			}
+			emitArg, err := e.emitOrderedOperand(arg, argArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			args = append(args, emitArg)
+		}
+		values := []string{callResultArena}
+		var prelude []string
+		for _, arg := range args {
+			prelude = append(prelude, arg.prelude...)
+			values = append(values, arg.value)
+		}
+		fnName := jsonRuntimeFnName(expr.Kind)
+		return emittedExpr{prelude: prelude, value: fmt.Sprintf("%s(%s)", fnName, strings.Join(values, ", "))}, nil
 	case *ir.UnaryExpr:
 		if expr.Operator == "&" {
 			if _, ok := expr.Operand.(*ir.StructLiteral); ok {
@@ -2425,7 +2473,7 @@ func exprHasSideEffect(expr ir.Expr) bool {
 	switch expr := expr.(type) {
 	case *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr,
 		*ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ImageDimensionExpr, *ir.ReadPPMExpr,
-		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CallExpr, *ir.SQLiteCallExpr,
+		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CallExpr, *ir.SQLiteCallExpr, *ir.JSONCallExpr,
 		*ir.ErrorsNewExpr, *ir.WriteFileExpr, *ir.WriteCSVExpr, *ir.WritePPMExpr,
 		*ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.PathQueryExpr,
 		*ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.MapLookupExpr, *ir.KeysExpr, *ir.ValuesExpr:
@@ -2756,6 +2804,25 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 		}
 		fnName := sqliteRuntimeFnName(expr.Kind)
 		return fmt.Sprintf("%s(%s)", fnName, strings.Join(args, ", ")), nil
+	case *ir.JSONCallExpr:
+		callResultArena := frameArena
+		if isDynamicType(expr.Type()) {
+			callResultArena = targetArena
+		}
+		args := []string{callResultArena}
+		for _, arg := range expr.Args {
+			argArena := frameArena
+			if isDynamicType(expr.Type()) && isDynamicType(arg.Type()) {
+				argArena = callResultArena
+			}
+			emitArg, err := emitExpr(arg, argArena)
+			if err != nil {
+				return "", err
+			}
+			args = append(args, emitArg)
+		}
+		fnName := jsonRuntimeFnName(expr.Kind)
+		return fmt.Sprintf("%s(%s)", fnName, strings.Join(args, ", ")), nil
 	case *ir.UnaryExpr:
 		operand, err := emitExpr(expr.Operand, targetArena)
 		if err != nil {
@@ -2888,6 +2955,9 @@ func emitType(typ ast.Type) (string, error) {
 		}
 		if typ.TargetName() == "trux_sqlite_stmt" {
 			return "trux_sqlite_stmt", nil
+		}
+		if isJSONOpaqueStruct(typ.TargetName()) {
+			return typ.TargetName(), nil
 		}
 		return mangleStruct(typ.TargetName()), nil
 	case *ast.PointerType:
@@ -3478,7 +3548,7 @@ func emitCloneValueExpr(typ ast.Type, arenaExpr string, valueExpr string) (strin
 	case *ast.GPUBufferType:
 		return valueExpr, nil
 	case *ast.StructType:
-		if t.TargetName() == "trux_sqlite_db" || t.TargetName() == "trux_sqlite_stmt" {
+		if t.TargetName() == "trux_sqlite_db" || t.TargetName() == "trux_sqlite_stmt" || isJSONOpaqueStruct(t.TargetName()) {
 			return valueExpr, nil
 		}
 	}
@@ -3532,7 +3602,7 @@ func emitProgramTypes(out *bytes.Buffer, program *ir.Program) error {
 	}
 
 	visitStruct := func(name string) error {
-		if name == "trux_sqlite_db" || name == "trux_sqlite_stmt" {
+		if name == "trux_sqlite_db" || name == "trux_sqlite_stmt" || isJSONOpaqueStruct(name) {
 			return nil
 		}
 		if seenStructs[name] {
@@ -4197,5 +4267,88 @@ func sqliteRuntimeFnName(kind semtypes.SQLiteCallKind) string {
 		return "rt_sqlite_column_is_null"
 	default:
 		panic("unknown sqlite call kind: " + string(kind))
+	}
+}
+
+func isJSONOpaqueStruct(name string) bool {
+	return name == "trux_json_doc" || name == "trux_json_val" || name == "trux_json_mut_doc" || name == "trux_json_mut_val"
+}
+
+func jsonRuntimeFnName(kind semtypes.JSONCallKind) string {
+	switch kind {
+	case semtypes.JSONCallParse:
+		return "rt_json_parse"
+	case semtypes.JSONCallRoot:
+		return "rt_json_root"
+	case semtypes.JSONCallGet:
+		return "rt_json_get"
+	case semtypes.JSONCallAt:
+		return "rt_json_at"
+	case semtypes.JSONCallLen:
+		return "rt_json_len"
+	case semtypes.JSONCallIsObject:
+		return "rt_json_is_object"
+	case semtypes.JSONCallIsArray:
+		return "rt_json_is_array"
+	case semtypes.JSONCallIsString:
+		return "rt_json_is_string"
+	case semtypes.JSONCallIsInt:
+		return "rt_json_is_int"
+	case semtypes.JSONCallIsFloat:
+		return "rt_json_is_float"
+	case semtypes.JSONCallIsBool:
+		return "rt_json_is_bool"
+	case semtypes.JSONCallIsNull:
+		return "rt_json_is_null"
+	case semtypes.JSONCallGetString:
+		return "rt_json_get_string"
+	case semtypes.JSONCallGetInt:
+		return "rt_json_get_int"
+	case semtypes.JSONCallGetFloat:
+		return "rt_json_get_float"
+	case semtypes.JSONCallGetBool:
+		return "rt_json_get_bool"
+	case semtypes.JSONCallFieldString:
+		return "rt_json_field_string"
+	case semtypes.JSONCallFieldInt:
+		return "rt_json_field_int"
+	case semtypes.JSONCallFieldFloat:
+		return "rt_json_field_float"
+	case semtypes.JSONCallFieldBool:
+		return "rt_json_field_bool"
+	case semtypes.JSONCallDecodeMap:
+		return "rt_json_decode_map"
+	case semtypes.JSONCallEncodeMap:
+		return "rt_json_encode_map"
+	case semtypes.JSONCallStringify:
+		return "rt_json_stringify"
+	case semtypes.JSONCallValid:
+		return "rt_json_valid"
+	case semtypes.JSONCallNewDoc:
+		return "rt_json_new_doc"
+	case semtypes.JSONCallNewObject:
+		return "rt_json_new_object"
+	case semtypes.JSONCallNewArray:
+		return "rt_json_new_array"
+	case semtypes.JSONCallSetRoot:
+		return "rt_json_set_root"
+	case semtypes.JSONCallAddString:
+		return "rt_json_add_string"
+	case semtypes.JSONCallAddInt:
+		return "rt_json_add_int"
+	case semtypes.JSONCallAddFloat:
+		return "rt_json_add_float"
+	case semtypes.JSONCallAddBool:
+		return "rt_json_add_bool"
+	case semtypes.JSONCallAddNull:
+		return "rt_json_add_null"
+	case semtypes.JSONCallAddVal:
+		return "rt_json_add_val"
+	case semtypes.JSONCallAppendVal:
+		return "rt_json_append_val"
+	case semtypes.JSONCallWrite:
+		return "rt_json_write"
+	default:
+		panic("unknown json call kind: " + string(kind))
 	}
 }

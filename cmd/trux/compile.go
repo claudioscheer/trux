@@ -33,6 +33,7 @@ type compileResult struct {
 	UsesCUDA          bool
 	UsesHTTP          bool
 	UsesSQLite        bool
+	UsesJSON          bool
 	Debug             bool
 }
 
@@ -45,6 +46,7 @@ type generatedCompileOptions struct {
 	UsesCUDA   bool
 	UsesHTTP   bool
 	UsesSQLite bool
+	UsesJSON   bool
 	Debug      bool
 }
 
@@ -131,6 +133,10 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 		headers = append(headers, runtimeHeader{Name: runtimec.SQLiteHeaderName, Source: runtimec.SQLiteHeaderSource})
 		headers = append(headers, runtimeHeader{Name: "sqlite3.h", Source: runtimec.SQLite3HeaderSource})
 	}
+	if typedIR.UsesJSON {
+		headers = append(headers, runtimeHeader{Name: runtimec.JSONHeaderName, Source: runtimec.JSONHeaderSource})
+		headers = append(headers, runtimeHeader{Name: "yyjson.h", Source: runtimec.YYJSONHeaderSource})
+	}
 
 	return &compileResult{
 		CSource:           cSource,
@@ -140,6 +146,7 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 		UsesCUDA:          len(typedIR.Kernels) > 0,
 		UsesHTTP:          typedIR.UsesHTTP,
 		UsesSQLite:        typedIR.UsesSQLite,
+		UsesJSON:          typedIR.UsesJSON,
 		Debug:             opts.Debug,
 	}, nil
 }
@@ -165,6 +172,7 @@ func buildFile(sourcePath string, outputPath string) error {
 		UsesCUDA:   result.UsesCUDA,
 		UsesHTTP:   result.UsesHTTP,
 		UsesSQLite: result.UsesSQLite,
+		UsesJSON:   result.UsesJSON,
 		Debug:      result.Debug,
 	})
 }
@@ -177,6 +185,7 @@ func compileC(sourcePath string, outputPath string) error {
 	return compileGenerated(sourcePath, outputPath, generatedCompileOptions{
 		UsesHTTP:   strings.Contains(string(content), runtimec.HTTPHeaderName),
 		UsesSQLite: strings.Contains(string(content), runtimec.SQLiteHeaderName),
+		UsesJSON:   strings.Contains(string(content), runtimec.JSONHeaderName),
 	})
 }
 
@@ -236,6 +245,13 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 				return err
 			}
 			args = append(args, sqliteObj, "-pthread", "-lm")
+		}
+		if opts.UsesJSON {
+			yyjsonObj, err := ensureYYJSONObjectCached(compiler)
+			if err != nil {
+				return err
+			}
+			args = append(args, yyjsonObj)
 		}
 	}
 
@@ -349,6 +365,75 @@ func ensureSQLiteObjectCached(compiler string) (string, error) {
 			return objPath, nil
 		}
 		return "", fmt.Errorf("cache sqlite object: %w", err)
+	}
+	_ = os.Remove(cPath)
+
+	return objPath, nil
+}
+
+var yyjsonCacheMu sync.Mutex
+
+func ensureYYJSONObjectCached(compiler string) (string, error) {
+	yyjsonCacheMu.Lock()
+	defer yyjsonCacheMu.Unlock()
+
+	baseDir, err := os.UserCacheDir()
+	if err != nil || baseDir == "" {
+		baseDir = os.TempDir()
+	}
+	cacheDir := filepath.Join(baseDir, "trux", "yyjson")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return "", fmt.Errorf("create yyjson cache dir: %w", err)
+	}
+
+	compileFlags := []string{
+		"-c",
+		"-O3",
+		"-DNDEBUG",
+	}
+
+	h := sha256.New()
+	h.Write([]byte(compiler))
+	h.Write([]byte(strings.Join(compileFlags, " ")))
+	h.Write([]byte(runtimec.YYJSONCSource))
+	sum := hex.EncodeToString(h.Sum(nil))[:16]
+	objName := fmt.Sprintf("yyjson-0.11.1-%s.o", sum)
+	objPath := filepath.Join(cacheDir, objName)
+
+	if info, err := os.Stat(objPath); err == nil && info.Size() > 0 {
+		return objPath, nil
+	}
+
+	cPath := filepath.Join(cacheDir, fmt.Sprintf("yyjson-%s.c", sum))
+	hPath := filepath.Join(cacheDir, "yyjson.h")
+	if err := os.WriteFile(hPath, []byte(runtimec.YYJSONHeaderSource), 0o644); err != nil {
+		return "", fmt.Errorf("write yyjson.h: %w", err)
+	}
+	if err := os.WriteFile(cPath, []byte(runtimec.YYJSONCSource), 0o644); err != nil {
+		return "", fmt.Errorf("write yyjson.c: %w", err)
+	}
+
+	tmpObjPath := filepath.Join(cacheDir, fmt.Sprintf("yyjson-%s.tmp-%d.o", sum, os.Getpid()))
+	args := append(append([]string(nil), compileFlags...), cPath, "-o", tmpObjPath)
+
+	cmd := exec.Command(compiler, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		_ = os.Remove(tmpObjPath)
+		msg := strings.TrimSpace(string(output))
+		if msg == "" {
+			return "", fmt.Errorf("precompile yyjson.c failed: %w", err)
+		}
+		return "", fmt.Errorf("precompile yyjson.c failed: %w\n%s", err, msg)
+	}
+
+	_ = os.Remove(objPath)
+	if err := os.Rename(tmpObjPath, objPath); err != nil {
+		if info, statErr := os.Stat(objPath); statErr == nil && info.Size() > 0 {
+			_ = os.Remove(tmpObjPath)
+			return objPath, nil
+		}
+		return "", fmt.Errorf("cache yyjson object: %w", err)
 	}
 	_ = os.Remove(cPath)
 

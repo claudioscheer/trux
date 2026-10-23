@@ -69,6 +69,7 @@ func runCompiledResult(out io.Writer, in io.Reader, result *compileResult) error
 		UsesCUDA:   result.UsesCUDA,
 		UsesHTTP:   result.UsesHTTP,
 		UsesSQLite: result.UsesSQLite,
+		UsesJSON:   result.UsesJSON,
 		Debug:      result.Debug,
 	}); err != nil {
 		return err

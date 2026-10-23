@@ -17,6 +17,7 @@ type Program struct {
 	Structs     map[string]types.StructSig
 	UsesHTTP    bool
 	UsesSQLite  bool
+	UsesJSON    bool
 	UsedTypes   []ast.Type
 }
 
@@ -784,6 +785,19 @@ func (e *SQLiteCallExpr) Ownership() types.Origin { return e.Origin }
 
 func (*SQLiteCallExpr) exprNode() {}
 
+type JSONCallExpr struct {
+	Kind   types.JSONCallKind
+	Args   []Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *JSONCallExpr) Type() ast.Type { return e.Typ }
+
+func (e *JSONCallExpr) Ownership() types.Origin { return e.Origin }
+
+func (*JSONCallExpr) exprNode() {}
+
 type ReadPPMExpr struct {
 	Path   Expr
 	Typ    ast.Type
@@ -940,6 +954,15 @@ func Build(program *ast.Program, info *types.Info) (*Program, error) {
 		builder.used.note(&ast.TupleType{Types: []ast.Type{ast.BoolType, ast.ErrorType}})
 		builder.used.note(&ast.TupleType{Types: []ast.Type{stdlib.SQLiteRowListType, ast.ErrorType}})
 	}
+	if out.UsesJSON {
+		builder.used.note(stdlib.JSONDocType)
+		builder.used.note(stdlib.JSONValType)
+		builder.used.note(stdlib.JSONMutDocType)
+		builder.used.note(stdlib.JSONMutValType)
+		builder.used.note(stdlib.JSONMapType)
+		builder.used.note(&ast.TupleType{Types: []ast.Type{stdlib.JSONDocType, ast.ErrorType}})
+		builder.used.note(&ast.TupleType{Types: []ast.Type{stdlib.JSONMapType, ast.ErrorType}})
+	}
 	out.UsedTypes = builder.used.list
 	return out, nil
 }
@@ -1028,7 +1051,7 @@ func (b builder) buildProgram(program *ast.Program) (*Program, error) {
 	for k, v := range b.info.Structs {
 		structs[k] = v
 	}
-	out := &Program{PackageName: program.PackageName, Structs: structs, UsesHTTP: len(b.info.HTTPCalls) > 0, UsesSQLite: b.info.UsesSQLite}
+	out := &Program{PackageName: program.PackageName, Structs: structs, UsesHTTP: len(b.info.HTTPCalls) > 0, UsesSQLite: b.info.UsesSQLite, UsesJSON: b.info.UsesJSON}
 	for _, fn := range program.Functions {
 		irFn, err := b.buildFunc(fn)
 		if err != nil {
@@ -1495,6 +1518,13 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 				return nil, err
 			}
 			return &SQLiteCallExpr{Kind: sqliteSig.Kind, Args: args, Typ: typ, Origin: origin}, nil
+		}
+		if jsonSig, ok := b.info.JSONCalls[expr]; ok {
+			args, err := b.buildExprs(expr.Args)
+			if err != nil {
+				return nil, err
+			}
+			return &JSONCallExpr{Kind: jsonSig.Kind, Args: args, Typ: typ, Origin: origin}, nil
 		}
 		if httpSig, ok := b.info.HTTPCalls[expr]; ok {
 			return b.buildHTTPExpr(expr, httpSig, typ, origin)

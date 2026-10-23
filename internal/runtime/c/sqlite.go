@@ -67,6 +67,16 @@ static __thread rt_sqlite_tls_entry g_trux_sqlite_tls_cache[RT_SQLITE_TLS_CACHE_
 static __thread size_t g_trux_sqlite_tls_count = 0;
 #endif
 
+#if !defined(_WIN32)
+/* usleep is not declared under _POSIX_C_SOURCE 200809L, which the runtime sets. */
+static void rt_sqlite_sleep_us(long usec) {
+    struct timespec ts;
+    ts.tv_sec = (time_t)(usec / 1000000L);
+    ts.tv_nsec = (long)(usec % 1000000L) * 1000L;
+    nanosleep(&ts, NULL);
+}
+#endif
+
 static int rt_sqlite_busy_handler(void* ptr, int count) {
     (void)ptr;
     if (count < 5) {
@@ -81,7 +91,7 @@ static int rt_sqlite_busy_handler(void* ptr, int count) {
 #if defined(_WIN32)
         Sleep(1);
 #else
-        usleep(25);
+        rt_sqlite_sleep_us(25);
 #endif
         return 1;
     }
@@ -89,7 +99,7 @@ static int rt_sqlite_busy_handler(void* ptr, int count) {
 #if defined(_WIN32)
         Sleep(1);
 #else
-        usleep(100);
+        rt_sqlite_sleep_us(100);
 #endif
         return 1;
     }

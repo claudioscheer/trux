@@ -9,7 +9,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 public="${1:-$root/public}"
-base_url="https://claudioscheer.github.io/trux/"
+base_url="https://thea1lab.github.io/trux/"
 status=0
 
 mapfile -t files < <(find "$public" -name '*.md' -o -name 'llms*.txt' | sort)

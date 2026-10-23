@@ -1,6 +1,6 @@
 # Trux documentation site
 
-The source of <https://claudioscheer.github.io/trux/>, built with [Hugo](https://gohugo.io) (extended, 0.140 or newer)
+The source of <https://thea1lab.github.io/trux/>, built with [Hugo](https://gohugo.io) (extended, 0.140 or newer)
 and the [Lotus Docs](https://github.com/colinwilson/lotusdocs) theme, which Hugo fetches as a Go module (so Go is needed
 too).
 
@@ -32,14 +32,14 @@ docs pages. `assets/docs/scss/custom/colors/_trux.scss` is the docs palette, sel
 `hugo.toml`: it sets the CSS variables Lotus Docs uses for links, buttons, the sidebar, the table of contents, and search,
 plus the logo color. The landing page has no dark mode in Lotus Docs.
 
-More detail: [Working on the documentation site](https://claudioscheer.github.io/trux/docs/internals/contributing/#working-on-the-documentation-site).
+More detail: [Working on the documentation site](https://thea1lab.github.io/trux/docs/internals/contributing/#working-on-the-documentation-site).
 
 ## Markdown for AI tools
 
 Every docs page is also published as Markdown next to its HTML, at `<page URL>index.md` (for example
-<https://claudioscheer.github.io/trux/docs/guide/types/index.md>). Each page has a **Copy page as Markdown** button that
-copies it, and its `<head>` links it with `rel="alternate" type="text/markdown"`. The site root also has [`llms.txt`](https://claudioscheer.github.io/trux/llms.txt) (an index of all pages) and
-[`llms-full.txt`](https://claudioscheer.github.io/trux/llms-full.txt) (every page in one file).
+<https://thea1lab.github.io/trux/docs/guide/types/index.md>). Each page has a **Copy page as Markdown** button that
+copies it, and its `<head>` links it with `rel="alternate" type="text/markdown"`. The site root also has [`llms.txt`](https://thea1lab.github.io/trux/llms.txt) (an index of all pages) and
+[`llms-full.txt`](https://thea1lab.github.io/trux/llms-full.txt) (every page in one file).
 
 The Markdown is built from each page's source by `layouts/partials/page-markdown.md`, which inlines `include`d files
 (honouring line ranges), turns alerts, tabs, and collapsible blocks into plain Markdown, and rewrites `/docs/...` links

@@ -16,7 +16,7 @@ var rootCmd = &cobra.Command{
 	Long: `trux is a small Go-inspired language that compiles to C.
 The goal is to learn.
 
-See https://github.com/claudioscheer/trux for the spec.`,
+See https://github.com/thea1lab/trux for the spec.`,
 }
 
 func execute() {

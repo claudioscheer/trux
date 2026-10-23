@@ -119,4 +119,4 @@ accepted the program.
 - Known compiler bugs that surface as `cc failed`: [GPU coordinate helpers in host code](/docs/guide/gpu/#coordinate-helpers)
   and [GPU buffers in a program without kernels](/docs/guide/gpu/#device-buffers).
 
-Please [report](https://github.com/claudioscheer/trux/issues) any other `cc failed` error.
+Please [report](https://github.com/thea1lab/trux/issues) any other `cc failed` error.

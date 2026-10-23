@@ -75,7 +75,7 @@ func main() int {
 }
 ```
 
-See [examples/projects/http_server](https://github.com/claudioscheer/trux/tree/main/examples/projects/http_server) and [examples/projects/http_multi_file](https://github.com/claudioscheer/trux/tree/main/examples/projects/http_multi_file) for runnable servers.
+See [examples/projects/http_server](https://github.com/thea1lab/trux/tree/main/examples/projects/http_server) and [examples/projects/http_multi_file](https://github.com/thea1lab/trux/tree/main/examples/projects/http_multi_file) for runnable servers.
 
 ## Runtime Model
 

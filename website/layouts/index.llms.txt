@@ -5,7 +5,7 @@
 {{- end -}}
 # Trux
 
-> Trux is a small, Go-inspired programming language that compiles to C, and to CUDA for GPU kernels. The compiler is written in Go. Source: https://github.com/claudioscheer/trux
+> Trux is a small, Go-inspired programming language that compiles to C, and to CUDA for GPU kernels. The compiler is written in Go. Source: https://github.com/thea1lab/trux
 
 Every page below is the Markdown version of a page on {{ site.BaseURL }}. All pages in one file: {{ (site.Home.OutputFormats.Get "llmsfull").Permalink }}
 

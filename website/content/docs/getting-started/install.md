@@ -21,7 +21,7 @@ produce executables.
 ## Build the compiler
 
 ```bash
-git clone https://github.com/claudioscheer/trux.git
+git clone https://github.com/thea1lab/trux.git
 cd trux
 make build
 ```

@@ -15,7 +15,7 @@ whose generated code they can read. It is a learning project, not a production l
 **Fastest path to a running program** (needs [Go](https://go.dev/dl/) and a C compiler such as `cc`):
 
 ```bash
-git clone https://github.com/claudioscheer/trux.git && cd trux
+git clone https://github.com/thea1lab/trux.git && cd trux
 go build -o bin/trux ./cmd/trux
 ./bin/trux run examples/hello.tx
 ```

@@ -29,7 +29,7 @@ Every feature section uses the same parts, so you can skip to the one you need:
 | **When you don't need it** | when to reach for something simpler, or leave it out |
 | **Related** | links to the features it works with |
 
-The failing programs live in [`examples/errors/`](https://github.com/claudioscheer/trux/tree/main/examples/errors), and
+The failing programs live in [`examples/errors/`](https://github.com/thea1lab/trux/tree/main/examples/errors), and
 their output is recorded by `website/update-example-outputs.sh`. CI re-runs them, so a message shown here is the message
 the current compiler prints. GPU behavior that needs a CUDA device is explained from the generated CUDA code and is
 marked **not executed**.

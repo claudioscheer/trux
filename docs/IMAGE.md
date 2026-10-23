@@ -24,5 +24,5 @@ The current runtime supports uncompressed text P3 PPM with max value `255`.
 This is intentionally small because PPM is easy to parse and works well for
 CPU/GPU pixel examples. General PNG/JPEG decoding is not implemented yet.
 
-See [examples/projects/rotate_image](https://github.com/claudioscheer/trux/tree/main/examples/projects/rotate_image) for a
+See [examples/projects/rotate_image](https://github.com/thea1lab/trux/tree/main/examples/projects/rotate_image) for a
 CPU and GPU image rotation example.

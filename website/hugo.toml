@@ -1,6 +1,6 @@
 # Hugo configuration for the Trux documentation site (theme: Lotus Docs).
 # Build from this directory:  hugo        Preview:  hugo server
-baseURL = "https://claudioscheer.github.io/trux/"
+baseURL = "https://thea1lab.github.io/trux/"
 locale = "en-us"
 title = "Trux"
 enableEmoji = true
@@ -58,10 +58,10 @@ disableKinds = ["taxonomy", "term"]
 [params]
   description = "Trux is a small, Go-inspired programming language that compiles to C, and to CUDA for GPU kernels."
   [params.footer]
-    copyright = "Trux is released under the [MIT license](https://github.com/claudioscheer/trux/blob/main/LICENSE). Site built with [Hugo](https://gohugo.io) and [Lotus Docs](https://lotusdocs.dev)."
+    copyright = "Trux is released under the [MIT license](https://github.com/thea1lab/trux/blob/main/LICENSE). Site built with [Hugo](https://gohugo.io) and [Lotus Docs](https://lotusdocs.dev)."
 
   [params.social]
-    github = "claudioscheer/trux"
+    github = "thea1lab/trux"
 
   [params.docs]
     title = "Trux"
@@ -70,7 +70,7 @@ disableKinds = ["taxonomy", "term"]
     prism = true
     prismTheme = "lotusdocs"
 
-    repoURL = "https://github.com/claudioscheer/trux"
+    repoURL = "https://github.com/thea1lab/trux"
     repoBranch = "main"
     editPage = true
     lastMod = false
@@ -115,7 +115,7 @@ disableKinds = ["taxonomy", "term"]
     weight = 25
   [[menu.primary]]
     name = "GitHub"
-    url = "https://github.com/claudioscheer/trux"
+    url = "https://github.com/thea1lab/trux"
     identifier = "github"
     weight = 30
 

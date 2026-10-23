@@ -17,7 +17,7 @@ This section takes you from a fresh clone to a running Trux program.
 **In a hurry?**
 
 ```bash
-git clone https://github.com/claudioscheer/trux.git
+git clone https://github.com/thea1lab/trux.git
 cd trux
 go build -o bin/trux ./cmd/trux
 ./bin/trux run examples/hello.tx

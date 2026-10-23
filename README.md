@@ -9,7 +9,7 @@ backend. The generated C is compiled with your system's C compiler into an ordin
 learning project for people who want to see how a compiler works end to end; it borrows syntax ideas from Go but is not
 Go-compatible.
 
-📖 **Documentation: <https://claudioscheer.github.io/trux/>**
+📖 **Documentation: <https://thea1lab.github.io/trux/>**
 
 ## A quick look
 
@@ -66,7 +66,7 @@ Requirements:
 - optional: `make` for the convenience targets
 
 ```bash
-git clone https://github.com/claudioscheer/trux.git
+git clone https://github.com/thea1lab/trux.git
 cd trux
 make build              # or: go build -o bin/trux ./cmd/trux
 ./bin/trux --version    # trux version 0.1.0
@@ -95,13 +95,13 @@ The website covers everything from installation to compiler internals:
 
 | Section | |
 | --- | --- |
-| [Getting started](https://claudioscheer.github.io/trux/docs/getting-started/) | install, first program, editor setup |
-| [Language guide](https://claudioscheer.github.io/trux/docs/guide/) | every feature: what it is, how to use it, and the real errors it produces |
-| [Standard library](https://claudioscheer.github.io/trux/docs/stdlib/) | `io`, `csv`, `image`, `time`, `http`, `gpu`, `jwt` |
-| [Examples](https://claudioscheer.github.io/trux/docs/examples/) | every program in `examples/`, with its output |
-| [CLI reference](https://claudioscheer.github.io/trux/docs/cli/) | `run`, `build`, `emit-c`, `fmt`, `test` |
-| [How it works](https://claudioscheer.github.io/trux/docs/internals/) | the compilation pipeline, generated C and CUDA, codebase tour |
-| [FAQ](https://claudioscheer.github.io/trux/docs/faq/) | limitations and common errors |
+| [Getting started](https://thea1lab.github.io/trux/docs/getting-started/) | install, first program, editor setup |
+| [Language guide](https://thea1lab.github.io/trux/docs/guide/) | every feature: what it is, how to use it, and the real errors it produces |
+| [Standard library](https://thea1lab.github.io/trux/docs/stdlib/) | `io`, `csv`, `image`, `time`, `http`, `gpu`, `jwt` |
+| [Examples](https://thea1lab.github.io/trux/docs/examples/) | every program in `examples/`, with its output |
+| [CLI reference](https://thea1lab.github.io/trux/docs/cli/) | `run`, `build`, `emit-c`, `fmt`, `test` |
+| [How it works](https://thea1lab.github.io/trux/docs/internals/) | the compilation pipeline, generated C and CUDA, codebase tour |
+| [FAQ](https://thea1lab.github.io/trux/docs/faq/) | limitations and common errors |
 
 The site is built with [Hugo](https://gohugo.io) and the [Lotus Docs](https://lotusdocs.dev) theme from the pages in
 [`website/`](website/). The compact language specification is [`docs/SPECS.md`](docs/SPECS.md), and the other files in
@@ -124,7 +124,7 @@ website/             documentation site (Hugo + Lotus Docs): config, pages, reco
 make test    # go test ./... (also compiles and runs generated C)
 ```
 
-See the [contributing guide](https://claudioscheer.github.io/trux/docs/internals/contributing/) for how a language change flows
+See the [contributing guide](https://thea1lab.github.io/trux/docs/internals/contributing/) for how a language change flows
 through the compiler, the project conventions, and how to preview the documentation site locally
 (Hugo extended and Go: `cd website && hugo server`, then open <http://localhost:1313/trux/>).
 

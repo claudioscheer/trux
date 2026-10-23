@@ -5,7 +5,7 @@ icon: "code"
 weight: 400
 ---
 
-Every program on this page lives in the [`examples/`](https://github.com/claudioscheer/trux/tree/main/examples) directory
+Every program on this page lives in the [`examples/`](https://github.com/thea1lab/trux/tree/main/examples) directory
 of the repository. The source shown here is included straight from those files, and each output was produced by running
 the program with `trux run` (see `website/update-example-outputs.sh`).
 
@@ -514,6 +514,6 @@ These programs time their work, so their output varies from machine to machine. 
 
 ## Programs that fail on purpose
 
-[`examples/errors/`](https://github.com/claudioscheer/trux/tree/main/examples/errors) holds one small program per common
+[`examples/errors/`](https://github.com/thea1lab/trux/tree/main/examples/errors) holds one small program per common
 mistake: compile errors, runtime errors, and two known compiler bugs. They are shown, with their recorded output, on the
 guide page of the feature they belong to. See [Errors and failures](/docs/guide/errors/).

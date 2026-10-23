@@ -10,7 +10,7 @@ Trux is a learning project, and contributions that keep it small and readable ar
 ## Set up
 
 ```bash
-git clone https://github.com/claudioscheer/trux.git
+git clone https://github.com/thea1lab/trux.git
 cd trux
 make build      # bin/trux
 make test       # go test ./...
@@ -80,4 +80,4 @@ The site is deployed to GitHub Pages by `.github/workflows/docs.yml` on every pu
 
 ## License
 
-Trux is released under the MIT License. See [`LICENSE`](https://github.com/claudioscheer/trux/blob/main/LICENSE).
+Trux is released under the MIT License. See [`LICENSE`](https://github.com/thea1lab/trux/blob/main/LICENSE).

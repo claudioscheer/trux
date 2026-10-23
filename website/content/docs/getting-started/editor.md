@@ -5,7 +5,7 @@ icon: "edit"
 weight: 300
 ---
 
-The repository ships editor tooling under [`tooling/`](https://github.com/claudioscheer/trux/tree/main/tooling).
+The repository ships editor tooling under [`tooling/`](https://github.com/thea1lab/trux/tree/main/tooling).
 
 ## Language server (`trux-lsp`)
 

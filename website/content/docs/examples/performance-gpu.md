@@ -15,8 +15,10 @@ These programs time their work, so their output varies from machine to machine. 
 | `examples/performance_stencil.tx` | yes | 200 Jacobi stencil steps on a 1024 x 1024 grid, swapping two device buffers. |
 | `examples/performance_cnn.tx` | yes | A four-layer float convolutional network using `gpu.launch1d`. |
 | `examples/projects/rotate_image/main.tx` | yes | Rotates a PPM image on CPU and GPU and writes both results. |
+| `examples/projects/mnist_mlp/bench.tx` | yes | The trained MNIST MLP on CPU and GPU at 1 to 10,000 rows, with both outputs checked. |
 
-`make bench` runs the first four in sequence.
+`make bench` runs the first four in sequence. The MNIST comparison is `make mnist-bench` and needs the generated
+`model.txm`; see [MNIST MLP](/docs/examples/mnist-mlp/).
 
 {{< details summary="`examples/gpu_matrix_multiply.tx`" >}}
 

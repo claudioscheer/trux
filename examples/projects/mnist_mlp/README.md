@@ -2,10 +2,13 @@
 
 A 784 → 128 → 64 → 10 ReLU network trained in scikit-learn, exported to a TXM1
 file, and run in Trux. The whole 10,000-row test set is classified in three
-`gpu.launch1d` calls, then argmax runs on the host.
+`gpu.launch1d` calls, then argmax runs on the host. `bench.tx` runs the same
+network with host loops and with the kernels, so the CPU and GPU timings use the
+same weights and the same value check.
 
-Running it needs an NVIDIA GPU and `nvcc`, because the layers are CUDA kernels.
-The export does not need a GPU.
+Running either program needs an NVIDIA GPU and `nvcc`, because `gpu.mount` is
+the only TXM reader. The CPU section of `bench.tx` launches no kernels. The
+export does not need a GPU.
 
 This is the end-to-end model example: real data, real weights, and the last
 layer's ten values for every test row that the program has to reproduce.
@@ -14,10 +17,12 @@ layer's ten values for every test row that the program has to reproduce.
 
 ```console
 $ make mnist                    # from the repository root
+$ make mnist-bench              # CPU vs GPU timings
 ```
 
-That uses the committed `sample.txm` fixture when no `model.txm` exists, so it
-runs without training. To build the real model:
+`make mnist` uses the committed `sample.txm` fixture when no `model.txm` exists,
+so it runs without training. `make mnist-bench` needs the trained file. To build
+the real model:
 
 ```console
 $ cd examples/projects/mnist_mlp
@@ -48,11 +53,11 @@ logits compared 100000
 max logit difference 1.77635683940025e-14
 logits outside 1e-9 0
 accuracy 0.9763
-millis 95
+millis 86
 ```
 
 That run is a 784 → 128 → 64 → 10 network trained for 12 epochs, on a GTX
-1660. The ~100 ms covers the three launches, the sync, and the copy of the
+1660. The ~86 ms covers the three launches, the sync, and the copy of the
 10,000 × 10 logits back to the host. It is the whole test set, not one image.
 
 The last layer is checked value by value. The file stores numpy's ten outputs
@@ -78,6 +83,61 @@ mismatches and the outside count to zero, and the maximum difference to
 `sample.txm` has two rows and one deliberate error, so a run without a trained
 file still exercises both checks. Its logits match exactly, not just within
 1e-9.
+
+## CPU vs GPU
+
+`bench.tx` runs the same three layers twice: once with host loops and once with
+the three launches. It mounts the file once, runs a warm-up, times the forward
+pass only, and checks both results against the same expected arrays.
+
+This is one 10,000-row run:
+
+```text
+rows 10000
+timed runs 3
+cpu nanos 1188463319
+gpu compute nanos 86026937
+gpu total nanos 86367673
+cpu predictions mismatched 0
+cpu logits outside 1e-9 0
+gpu predictions mismatched 0
+gpu logits outside 1e-9 0
+```
+
+The table is the median of three program runs on an AMD Ryzen 9 5900X and a
+GTX 1660 with CUDA 12.0. Each program run reports its best pass after a
+warm-up (3, 4, or 9 timed passes, depending on the row count):
+
+| Rows | CPU | GPU total | CPU / GPU |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.115 ms | 0.153 ms | 0.75x |
+| 10 | 1.15 ms | 0.183 ms | 6.3x |
+| 100 | 11.5 ms | 0.696 ms | 16.6x |
+| 1,000 | 124 ms | 7.31 ms | 17.0x |
+| 10,000 | 1.19 s | 86.4 ms | 13.7x |
+
+The last column is CPU time divided by GPU time, so values above 1 mean the GPU
+is faster. The full test set is about 14x faster on the GPU, and 100 to 1,000
+rows are about 17x faster. One row is the exception: three launches, a sync,
+and a copy cost more than the 109,184 multiply-adds that row needs, so the GPU
+is about 1.3x slower. The crossover is between one and ten rows. Run-to-run
+variation is a few percent, and is largest at the small row counts.
+
+`gpu total` includes the launches, `gpu.sync`, and the copy of the logits back
+to the host. `gpu compute` stops before the copy; at 10,000 rows the copy adds
+about 0.3 ms. The CPU side has no copy because `gpu.hostFloats` already returns
+the host arrays, but its loops are plain, bounds-checked Trux code, not a
+hand-tuned BLAS call. Both outputs pass the same 1e-9 check, so this is the same
+arithmetic.
+
+The `-O2` host build is the same level as a C-only Trux program. The CUDA
+compile path used to leave host code at `-O0`; the full-set CPU pass then took
+about 13 s, which overstated the GPU speedup. Both paths now pass the same
+optimization flag.
+
+The CPU half still needs `gpu.mount`, because it is the only TXM reader in Trux
+today. It therefore needs a CUDA build, but the timed CPU section launches no
+kernels. Mount is outside every timer.
 
 ## Tensor layout
 
@@ -117,6 +177,7 @@ only rescale them and hide absolute differences.
 | File | |
 | --- | --- |
 | `main.tx` | mount, three launches, host argmax, compare every logit and prediction |
+| `bench.tx` | CPU and GPU forward passes at five row counts, with the same checks |
 | `export_mlp.py` | train, check against sklearn, write TXM1 |
 | `sample.txm` | committed fixture: 8/4 hidden, two rows, one known error |
 | `model.txm` | generated by `export_mlp.py`, gitignored |

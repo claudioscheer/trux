@@ -1,0 +1,231 @@
+package main
+
+import "gpu"
+import "time"
+
+// dense is the GPU version of one fully connected layer. It is the same kernel
+// as main.tx, so the two timings below run the same arithmetic.
+kernel func dense(i int, input gpu.Buffer [float], weight gpu.Buffer [float], bias gpu.Buffer [float], out gpu.Buffer [float], inDim int, outDim int, relu int) {
+  let row int = i / outDim
+  let oc int = i - row * outDim
+  let sum float = bias[oc]
+  let base int = row * inDim
+  let weightBase int = oc * inDim
+
+  for let k int = 0; k < inDim; k = k + 1 {
+    sum = sum + weight[weightBase + k] *input[base + k]
+  }
+
+  if relu == 1 && sum < 0.0 {
+    sum = 0.0
+  }
+
+  out[i] = sum
+}
+
+// denseHost is the CPU version. It walks the same [outDim, inDim] weights in the
+// same order as the kernel, so a difference in the outputs points at the GPU
+// path rather than at a different layer.
+func denseHost(input []float, weight []float, bias []float, mut out []float, rows int, inDim int, outDim int, relu int) int {
+  for let row int = 0; row < rows; row = row + 1 {
+    let base int = row * inDim
+    let outBase int = row * outDim
+
+    for let oc int = 0; oc < outDim; oc = oc + 1 {
+      let sum float = bias[oc]
+      let weightBase int = oc * inDim
+
+      for let k int = 0; k < inDim; k = k + 1 {
+        sum = sum + weight[weightBase + k] *input[base + k]
+      }
+
+      if relu == 1 && sum < 0.0 {
+        sum = 0.0
+      }
+
+      out[outBase + oc] = sum
+    }
+  }
+
+  return 0
+}
+
+// check compares one forward pass with the exporter's last layer. It returns 1
+// if any value or prediction differs, so the benchmark cannot report a time for
+// the wrong answer.
+func check(name string, values []float, expected []float, expectedPredictions []int, rows int, classes int) int {
+  let mismatches int = 0
+  let outside int = 0
+  let maxDiff float = 0.0
+
+  for let row int = 0; row < rows; row = row + 1 {
+    let best float = values[row * classes]
+    let digit int = 0
+
+    for let c int = 1; c < classes; c = c + 1 {
+      let value float = values[row * classes + c]
+      if value > best {
+        best = value
+        digit = c
+      }
+    }
+
+    if digit != expectedPredictions[row]{
+      mismatches = mismatches + 1
+    }
+
+    for let c int = 0; c < classes; c = c + 1 {
+      let diff float = values[row * classes + c] - expected[row * classes + c]
+      if diff < 0.0 {
+        diff = 0.0 - diff
+      }
+      if diff > maxDiff {
+        maxDiff = diff
+      }
+      if diff > 0.000000001 {
+        outside = outside + 1
+      }
+    }
+  }
+
+  print(name, " predictions mismatched ", mismatches)
+  print(name, " logits outside 1e-9 ", outside)
+  print(name, " max logit difference ", maxDiff)
+
+  if mismatches != 0 || outside != 0 {
+    return 1
+  }
+
+  return 0
+}
+
+func main() int {
+  gpu.mount("model.txm")
+
+  let maxRows int = gpu.dim("test_images", 0)
+  let features int = gpu.dim("test_images", 1)
+  let hidden1 int = gpu.dim("b1", 0)
+  let hidden2 int = gpu.dim("b2", 0)
+  let classes int = gpu.dim("b3", 0)
+
+  if maxRows < 1 {
+    print("model has no test rows")
+    return 1
+  }
+
+  // The host copy is what the CPU pass reads. The device handles are looked up
+  // once, outside the timed sections.
+  let images []float = gpu.hostFloats("test_images")
+  let w1 []float = gpu.hostFloats("w1")
+  let b1 []float = gpu.hostFloats("b1")
+  let w2 []float = gpu.hostFloats("w2")
+  let b2 []float = gpu.hostFloats("b2")
+  let w3 []float = gpu.hostFloats("w3")
+  let b3 []float = gpu.hostFloats("b3")
+  let expectedLogits []float = gpu.hostFloats("expected_logits")
+  let expectedPredictions []int = gpu.hostInts("expected_predictions")
+
+  let h1 []float = make([]float, maxRows *hidden1)
+  let h2 []float = make([]float, maxRows *hidden2)
+  let cpuLogits []float = make([]float, maxRows *classes)
+  let gpuLogits []float = make([]float, maxRows *classes)
+
+  let dImages gpu.Buffer[float] = gpu.floats("test_images")
+  let dW1 gpu.Buffer[float] = gpu.floats("w1")
+  let dB1 gpu.Buffer[float] = gpu.floats("b1")
+  let dW2 gpu.Buffer[float] = gpu.floats("w2")
+  let dB2 gpu.Buffer[float] = gpu.floats("b2")
+  let dW3 gpu.Buffer[float] = gpu.floats("w3")
+  let dB3 gpu.Buffer[float] = gpu.floats("b3")
+
+  let dH1 gpu.Buffer[float] = gpu.alloc(maxRows *hidden1)
+  let dH2 gpu.Buffer[float] = gpu.alloc(maxRows *hidden2)
+  let dLogits gpu.Buffer[float] = gpu.alloc(maxRows *classes)
+
+  // Prefixes of the test set. One row is dominated by launch overhead; the
+  // larger sizes show how the two paths scale.
+  let sizes [5]int = [5]int{1, 10, 100, 1000, 10000}
+  let failures int = 0
+
+  for let s int = 0; s < 5; s = s + 1 {
+    let rows int = sizes[s]
+
+    if rows <= maxRows {
+      let cpuBest int = 0
+      let gpuBest int = 0
+      let gpuComputeBest int = 0
+      let repeats int = 3
+
+      if rows <= 100 {
+        repeats = 9
+      } else {
+        if rows <= 1000 {
+          repeats = 4
+        }
+      }
+
+      // GPU runs first and back-to-back, so a long CPU pass does not let the
+      // GPU clocks drop before the next timing. The first run is the warm-up.
+      for let run int = 0; run < repeats + 1; run = run + 1 {
+        let gpuStart int = time.monotonicNanos()
+        gpu.launch1d(dense, rows *hidden1, dImages, dW1, dB1, dH1, features, hidden1, 1)
+        gpu.launch1d(dense, rows *hidden2, dH1, dW2, dB2, dH2, hidden1, hidden2, 1)
+        gpu.launch1d(dense, rows *classes, dH2, dW3, dB3, dLogits, hidden2, classes, 0)
+        gpu.sync()
+        let gpuComputeEnd int = time.monotonicNanos()
+        let gpuSlice []float = gpuLogits[0:rows * classes]
+        gpu.to(dLogits, gpuSlice)
+        let gpuEnd int = time.monotonicNanos()
+
+        if run > 0 {
+          let gpuComputeElapsed int = gpuComputeEnd - gpuStart
+          let gpuElapsed int = gpuEnd - gpuStart
+
+          if gpuComputeBest == 0 || gpuComputeElapsed < gpuComputeBest {
+            gpuComputeBest = gpuComputeElapsed
+          }
+          if gpuBest == 0 || gpuElapsed < gpuBest {
+            gpuBest = gpuElapsed
+          }
+        }
+      }
+
+      // Then the CPU runs, also back-to-back. The first run is the warm-up.
+      for let run int = 0; run < repeats + 1; run = run + 1 {
+        let cpuStart int = time.monotonicNanos()
+        denseHost(images, w1, b1, h1, rows, features, hidden1, 1)
+        denseHost(h1, w2, b2, h2, rows, hidden1, hidden2, 1)
+        denseHost(h2, w3, b3, cpuLogits, rows, hidden2, classes, 0)
+        let cpuEnd int = time.monotonicNanos()
+
+        if run > 0 {
+          let cpuElapsed int = cpuEnd - cpuStart
+          if cpuBest == 0 || cpuElapsed < cpuBest {
+            cpuBest = cpuElapsed
+          }
+        }
+      }
+
+      print("")
+      print("rows ", rows)
+      print("timed runs ", repeats)
+      print("cpu nanos ", cpuBest)
+      print("gpu compute nanos ", gpuComputeBest)
+      print("gpu total nanos ", gpuBest)
+
+      failures = failures + check("cpu", cpuLogits, expectedLogits, expectedPredictions, rows, classes)
+      failures = failures + check("gpu", gpuLogits, expectedLogits, expectedPredictions, rows, classes)
+    }
+  }
+
+  gpu.free(dH1)
+  gpu.free(dH2)
+  gpu.free(dLogits)
+
+  if failures != 0 {
+    print("benchmark outputs disagree with the exporter")
+    return 1
+  }
+
+  return 0
+}

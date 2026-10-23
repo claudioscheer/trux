@@ -39,7 +39,7 @@ larger [MNIST MLP](/docs/examples/mnist-mlp/) project.
 | [Projects with IO](/docs/examples/projects-io/) | scorebook, stdin, files, and CSV |
 | [Unit tests](/docs/examples/testing/) | `.test.tx` files and `trux test` |
 | [HTTP server](/docs/examples/http-server/) | three routes on the `http` package |
-| [MNIST MLP](/docs/examples/mnist-mlp/) | a trained model on the GPU, checked value by value against numpy |
+| [MNIST MLP](/docs/examples/mnist-mlp/) | a trained model on the GPU, checked value by value against numpy, with CPU vs GPU timings |
 | [Performance and GPU](/docs/examples/performance-gpu/) | matrix multiply, stencil, CNN, and image rotation |
 | [Programs that fail on purpose](/docs/examples/failures/) | the `errors/` programs and the messages they produce |
 

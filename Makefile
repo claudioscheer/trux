@@ -7,7 +7,7 @@ BINARY := trux
 CMD := ./cmd/trux
 RUN_BIN := ./bin/$(BINARY)
 
-.PHONY: build run test bench bench-digits mnist fmt emit-c lsp clean
+.PHONY: build run test bench bench-digits mnist mnist-bench fmt emit-c lsp clean
 
 build:
 	$(GO) build -o $(RUN_BIN) $(CMD)
@@ -55,6 +55,12 @@ bench-digits:
 mnist: build
 	@cd examples/projects/mnist_mlp && if [ ! -f model.txm ]; then cp sample.txm model.txm; echo "using sample.txm; run export_mlp.py for the trained model"; fi
 	@cd examples/projects/mnist_mlp && ../../../bin/$(BINARY) run main.tx
+
+# CPU vs GPU timing for the MNIST MLP. Needs the generated model.txm; the
+# committed sample fixture is too small to measure throughput.
+mnist-bench: build
+	@cd examples/projects/mnist_mlp && if [ ! -f model.txm ]; then echo "model.txm missing; run python3 export_mlp.py first"; exit 1; fi
+	@cd examples/projects/mnist_mlp && ../../../bin/$(BINARY) run bench.tx
 
 fmt: build
 	./bin/$(BINARY) fmt -r

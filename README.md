@@ -62,7 +62,7 @@ Requirements:
 - [Go](https://go.dev/dl/) to build the compiler (`go.mod` declares Go 1.26.3)
 - a C11 compiler, invoked as `cc` or `$CC`
 - optional: the NVIDIA CUDA toolkit (`nvcc` or `$NVCC`) and an NVIDIA GPU for programs with kernels
-- optional: [libjwt](https://github.com/benmcollins/libjwt) 3 with jansson and OpenSSL for programs that `import "jwt"`. Set `TRUX_LIBJWT_PREFIX` when those libraries are not on the compiler's default search path. HS256 secrets must be at least 32 bytes
+- optional: [libjwt](https://github.com/benmcollins/libjwt) 3 with jansson and OpenSSL for programs that `import "jwt"`. Set `TRUX_LIBJWT_PREFIX` when those libraries are not on the compiler's default search path. An HS256 secret shorter than 32 bytes is zero-padded so it matches the HMAC-SHA256 key OpenSSL uses.
 - optional: `make` for the convenience targets
 
 ```bash

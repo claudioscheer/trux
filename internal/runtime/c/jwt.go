@@ -63,6 +63,31 @@ static RT_UNUSED char *trux_jwt_cstr(rt_string value, char *errbuf, size_t errle
     return out;
 }
 
+/* HMAC-SHA256 pads a short key with zero bytes up to the 64-byte block.
+   libjwt rejects an HS256 key shorter than 32 bytes, so a shorter secret is
+   padded to 32 zero-filled bytes first. That is the same HMAC key. */
+static RT_UNUSED int trux_jwt_hmac_key(const char *secret, unsigned char **out, size_t *out_len, unsigned char **owned, char *errbuf, size_t errlen) {
+    size_t len = strlen(secret);
+    *owned = NULL;
+    if (len >= 32) {
+        *out = (unsigned char *)secret;
+        *out_len = len;
+        return 0;
+    }
+    unsigned char *padded = (unsigned char *)calloc(32, 1);
+    if (padded == NULL) {
+        trux_jwt_keep(errbuf, errlen, "jwt allocation failed");
+        return 1;
+    }
+    if (len > 0) {
+        memcpy(padded, secret, len);
+    }
+    *owned = padded;
+    *out = padded;
+    *out_len = 32;
+    return 0;
+}
+
 static RT_UNUSED char *trux_jwt_b64url(const unsigned char *in, size_t len, char *errbuf, size_t errlen) {
     static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     size_t out_len = (len / 3) * 4;
@@ -123,6 +148,7 @@ static RT_UNUSED trux_tuple_string_error rt_jwt_sign(rt_arena *arena, rt_string 
     char *k = NULL;
     char *jwk_json = NULL;
     char *token = NULL;
+    unsigned char *key_pad = NULL;
     jwk_set_t *set = NULL;
     jwt_builder_t *builder = NULL;
     rt_string signed_token = RT_LIT(rt_string, NULL, 0);
@@ -144,7 +170,14 @@ static RT_UNUSED trux_tuple_string_error rt_jwt_sign(rt_arena *arena, rt_string 
     if (trux_jwt_claims_object(claims_c, errbuf, sizeof(errbuf)) != 0) {
         goto done;
     }
-    k = trux_jwt_b64url((const unsigned char *)secret_c, strlen(secret_c), errbuf, sizeof(errbuf));
+    {
+        unsigned char *key_bytes = NULL;
+        size_t key_len = 0;
+        if (trux_jwt_hmac_key(secret_c, &key_bytes, &key_len, &key_pad, errbuf, sizeof(errbuf)) != 0) {
+            goto done;
+        }
+        k = trux_jwt_b64url(key_bytes, key_len, errbuf, sizeof(errbuf));
+    }
     if (k == NULL) {
         goto done;
     }
@@ -202,6 +235,7 @@ done:
     free(token);
     free(jwk_json);
     free(k);
+    free(key_pad);
     free(secret_c);
     free(claims_c);
     if (!ok) {
@@ -234,6 +268,7 @@ static RT_UNUSED trux_tuple_ptr_struct_15_trux_jwt_claims_error rt_jwt_verify(rt
     char *secret_c = NULL;
     char *k = NULL;
     char *jwk_json = NULL;
+    unsigned char *key_pad = NULL;
     jwk_set_t *set = NULL;
     jwt_checker_t *checker = NULL;
     trux_jwt_cap cap;
@@ -254,7 +289,14 @@ static RT_UNUSED trux_tuple_ptr_struct_15_trux_jwt_claims_error rt_jwt_verify(rt
     if (token_c == NULL || secret_c == NULL) {
         goto done;
     }
-    k = trux_jwt_b64url((const unsigned char *)secret_c, strlen(secret_c), errbuf, sizeof(errbuf));
+    {
+        unsigned char *key_bytes = NULL;
+        size_t key_len = 0;
+        if (trux_jwt_hmac_key(secret_c, &key_bytes, &key_len, &key_pad, errbuf, sizeof(errbuf)) != 0) {
+            goto done;
+        }
+        k = trux_jwt_b64url(key_bytes, key_len, errbuf, sizeof(errbuf));
+    }
     if (k == NULL) {
         goto done;
     }
@@ -326,6 +368,7 @@ done:
     }
     free(jwk_json);
     free(k);
+    free(key_pad);
     free(secret_c);
     free(token_c);
     if (!ok) {

@@ -269,9 +269,33 @@ static RT_UNUSED bool rt_json_valid(rt_arena* arena, rt_string input) {
     return false;
 }
 
+static void rt_json_mut_doc_free(void* ptr) {
+    yyjson_mut_doc_free((yyjson_mut_doc*)ptr);
+}
+
 static RT_UNUSED trux_json_mut_doc* rt_json_new_doc(rt_arena* arena) {
-    yyjson_alc alc = { rt_yyjson_malloc, rt_yyjson_realloc, rt_yyjson_free, arena };
-    return (trux_json_mut_doc*)yyjson_mut_doc_new(&alc);
+    /* The document owns its bytes on the heap. A string added from a called
+       function, or inside a loop that rewinds this frame, stays intact until
+       the arena that created the document is released. */
+    yyjson_mut_doc* doc = yyjson_mut_doc_new(NULL);
+    if (doc == NULL) {
+        rt_runtime_fail("allocation failed");
+    }
+    rt_list_allocation* node = (rt_list_allocation*)malloc(sizeof(*node));
+    if (node == NULL) {
+        yyjson_mut_doc_free(doc);
+        rt_runtime_fail("allocation failed");
+    }
+    rt_arena_track_list(arena, node, doc, rt_json_mut_doc_free);
+    return (trux_json_mut_doc*)doc;
+}
+
+static yyjson_mut_val* rt_json_copy_string(yyjson_mut_doc* doc, rt_string value) {
+    const char* data = (const char*)value.data;
+    if (value.len == 0 || data == NULL) {
+        data = "";
+    }
+    return yyjson_mut_strncpy(doc, data, value.len);
 }
 
 static RT_UNUSED trux_json_mut_val* rt_json_new_object(rt_arena* arena, trux_json_mut_doc* doc) {
@@ -293,15 +317,15 @@ static RT_UNUSED void rt_json_set_root(rt_arena* arena, trux_json_mut_doc* doc, 
 static RT_UNUSED void rt_json_add_string(rt_arena* arena, trux_json_mut_doc* doc, trux_json_mut_val* obj, rt_string key, rt_string val) {
     (void)arena;
     if (!doc || !obj) return;
-    yyjson_mut_val* k = yyjson_mut_strn((yyjson_mut_doc*)doc, (const char*)key.data, key.len);
-    yyjson_mut_val* v = yyjson_mut_strn((yyjson_mut_doc*)doc, (const char*)val.data, val.len);
+    yyjson_mut_val* k = rt_json_copy_string((yyjson_mut_doc*)doc, key);
+    yyjson_mut_val* v = rt_json_copy_string((yyjson_mut_doc*)doc, val);
     yyjson_mut_obj_add((yyjson_mut_val*)obj, k, v);
 }
 
 static RT_UNUSED void rt_json_add_int(rt_arena* arena, trux_json_mut_doc* doc, trux_json_mut_val* obj, rt_string key, int64_t val) {
     (void)arena;
     if (!doc || !obj) return;
-    yyjson_mut_val* k = yyjson_mut_strn((yyjson_mut_doc*)doc, (const char*)key.data, key.len);
+    yyjson_mut_val* k = rt_json_copy_string((yyjson_mut_doc*)doc, key);
     yyjson_mut_val* v = yyjson_mut_sint((yyjson_mut_doc*)doc, val);
     yyjson_mut_obj_add((yyjson_mut_val*)obj, k, v);
 }
@@ -309,7 +333,7 @@ static RT_UNUSED void rt_json_add_int(rt_arena* arena, trux_json_mut_doc* doc, t
 static RT_UNUSED void rt_json_add_float(rt_arena* arena, trux_json_mut_doc* doc, trux_json_mut_val* obj, rt_string key, double val) {
     (void)arena;
     if (!doc || !obj) return;
-    yyjson_mut_val* k = yyjson_mut_strn((yyjson_mut_doc*)doc, (const char*)key.data, key.len);
+    yyjson_mut_val* k = rt_json_copy_string((yyjson_mut_doc*)doc, key);
     yyjson_mut_val* v = yyjson_mut_real((yyjson_mut_doc*)doc, val);
     yyjson_mut_obj_add((yyjson_mut_val*)obj, k, v);
 }
@@ -317,7 +341,7 @@ static RT_UNUSED void rt_json_add_float(rt_arena* arena, trux_json_mut_doc* doc,
 static RT_UNUSED void rt_json_add_bool(rt_arena* arena, trux_json_mut_doc* doc, trux_json_mut_val* obj, rt_string key, bool val) {
     (void)arena;
     if (!doc || !obj) return;
-    yyjson_mut_val* k = yyjson_mut_strn((yyjson_mut_doc*)doc, (const char*)key.data, key.len);
+    yyjson_mut_val* k = rt_json_copy_string((yyjson_mut_doc*)doc, key);
     yyjson_mut_val* v = yyjson_mut_bool((yyjson_mut_doc*)doc, val);
     yyjson_mut_obj_add((yyjson_mut_val*)obj, k, v);
 }
@@ -325,7 +349,7 @@ static RT_UNUSED void rt_json_add_bool(rt_arena* arena, trux_json_mut_doc* doc, 
 static RT_UNUSED void rt_json_add_null(rt_arena* arena, trux_json_mut_doc* doc, trux_json_mut_val* obj, rt_string key) {
     (void)arena;
     if (!doc || !obj) return;
-    yyjson_mut_val* k = yyjson_mut_strn((yyjson_mut_doc*)doc, (const char*)key.data, key.len);
+    yyjson_mut_val* k = rt_json_copy_string((yyjson_mut_doc*)doc, key);
     yyjson_mut_val* v = yyjson_mut_null((yyjson_mut_doc*)doc);
     yyjson_mut_obj_add((yyjson_mut_val*)obj, k, v);
 }
@@ -333,7 +357,7 @@ static RT_UNUSED void rt_json_add_null(rt_arena* arena, trux_json_mut_doc* doc, 
 static RT_UNUSED void rt_json_add_val(rt_arena* arena, trux_json_mut_doc* doc, trux_json_mut_val* obj, rt_string key, trux_json_mut_val* val) {
     (void)arena;
     if (!doc || !obj) return;
-    yyjson_mut_val* k = yyjson_mut_strn((yyjson_mut_doc*)doc, (const char*)key.data, key.len);
+    yyjson_mut_val* k = rt_json_copy_string((yyjson_mut_doc*)doc, key);
     yyjson_mut_obj_add((yyjson_mut_val*)obj, k, (yyjson_mut_val*)val);
 }
 

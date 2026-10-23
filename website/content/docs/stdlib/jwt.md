@@ -27,7 +27,7 @@ import "jwt"
 
 Point `TRUX_LIBJWT_PREFIX` at a directory that contains `include/jwt.h` and `lib/libjwt.a` when those are not on the compiler's default search path. On Windows, shared OpenSSL and jansson DLLs next to that prefix are copied beside the executable.
 
-An HS256 secret must be at least 32 bytes. A shorter secret fails `jwt.sign` and `jwt.verify`.
+An HS256 secret shorter than 32 bytes is accepted. It is zero-padded the way HMAC-SHA256 pads a short key, so a token signed by OpenSSL with that secret verifies.
 
 ---
 

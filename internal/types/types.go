@@ -892,7 +892,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 				}
 				locals.locals[binding.Name] = localInfo{
 					typ:    elemType,
-					origin: OriginOwned,
+					origin: originForUnpackedValue(elemType),
 				}
 			}
 			return nil
@@ -962,7 +962,7 @@ func (c *checker) checkStmt(fn *ast.FuncDecl, locals *scope, stmt ast.Statement)
 				if !ast.TypeEqual(elemType, local.typ) {
 					return typeError(target.Pos, "cannot assign %s to %s", elemType, local.typ)
 				}
-				local.origin = OriginOwned
+				local.origin = originForUnpackedValue(elemType)
 				locals.assign(target.Name, local)
 			}
 			return nil
@@ -2796,6 +2796,17 @@ func originForParam(param ast.Param) Origin {
 	}
 	if dynamicType(param.Type) {
 		return OriginBorrowed
+	}
+	return OriginOwned
+}
+
+// originForUnpackedValue is the origin of one value taken out of a call's
+// tuple. Dynamic values are allocated in this function's frame, so returning
+// them later must copy them into the caller. Marking them owned skipped that
+// copy and left the caller with a pointer into a freed frame.
+func originForUnpackedValue(typ ast.Type) Origin {
+	if dynamicType(typ) {
+		return OriginFrameOwned
 	}
 	return OriginOwned
 }

@@ -15,7 +15,7 @@ jwt.getFloat(claims *jwt.Claims, key string) float
 
 `claims` is a JSON object. `jwt.sign` does not add an `iat` claim unless that field is already in the object. `jwt.verify` accepts only HS256. A token with `alg` `none`, or a signature that does not match `secret`, returns an error and does not return claims.
 
-HS256 secrets must be at least 32 bytes. libjwt rejects shorter HMAC keys.
+A secret shorter than 32 bytes is accepted. HMAC-SHA256 pads it with zero bytes, which is the same key OpenSSL uses for that secret.
 
 The package links libjwt, jansson, and OpenSSL. It does not vendor those libraries. Set `TRUX_LIBJWT_PREFIX` to a prefix that contains `include/jwt.h` and `lib/libjwt.a` when they are not on the default compiler search path. On Windows, `libcrypto`, `libssl`, and `libjansson` DLLs from that prefix are copied next to the executable.
 

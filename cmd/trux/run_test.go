@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -234,6 +235,181 @@ func main() int {
 				t.Fatalf("output = %q, want %q", out.String(), tt.want)
 			}
 		})
+	}
+}
+
+func TestRunFileKeepsJSONStringBytesAfterLoopAndCall(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+import "json"
+
+func putAuthor(doc *json.MutDoc, obj *json.MutVal, name string) int {
+    let owned string = "user-" + name
+    json.addString(doc, obj, "author", owned)
+    return 0
+}
+
+func row(n int) string {
+    if n == 0 {
+        return "row-" + "zero"
+    }
+    if n == 1 {
+        return "row-" + "one"
+    }
+    return "row-" + "two"
+}
+
+func main() int {
+    let doc *json.MutDoc = json.newDoc()
+    let root *json.MutVal = json.newObject(doc)
+    json.setRoot(doc, root)
+    let arr *json.MutVal = json.newArray(doc)
+    json.addVal(doc, root, "posts", arr)
+    let i int = 0
+    for i < 3 {
+        let body string = row(i)
+        let post *json.MutVal = json.newObject(doc)
+        json.addString(doc, post, "body", body)
+        putAuthor(doc, post, body)
+        json.appendVal(arr, post)
+        let junk string = "zzzzzzzzzzzzzzzzzzzz" + "yyyyyyyyyyyyyyyyyyyy"
+        if len(junk) < 0 {
+            return 1
+        }
+        i = i + 1
+    }
+    let tail string = "after-" + "write"
+    print(json.write(doc))
+    print(tail)
+    return 0
+}`)
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"posts":[{"body":"row-zero","author":"user-row-zero"},{"body":"row-one","author":"user-row-one"},{"body":"row-two","author":"user-row-two"}]}` + "\nafter-write\n"
+	if out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestRunFileKeepsNestedMultiReturnStringAlive(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+func inner(n int) (int, string) {
+    return n, "golden" + "_ember_1"
+}
+
+func mid(n int) (int, string, bool) {
+    let id int, name string = inner(n)
+    return id, name, true
+}
+
+func main() int {
+    let id int, name string, ok bool = mid(7)
+    let junk string = "bbbbbbbbbbbbbb" + "bbbbbbbbbbbbbb"
+    if len(junk) < 0 {
+        return 1
+    }
+    if !ok {
+        print("not ok")
+        return 1
+    }
+    print(id)
+    print(name)
+    return 0
+}`)
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "7\ngolden_ember_1\n" {
+		t.Fatalf("output = %q, want 7\\ngolden_ember_1\\n", out.String())
+	}
+}
+
+func opensslHS256Token(t *testing.T, secret string, header string, payload string) string {
+	t.Helper()
+	b64 := func(raw string) string {
+		return strings.TrimRight(base64.RawURLEncoding.EncodeToString([]byte(raw)), "=")
+	}
+	signing := b64(header) + "." + b64(payload)
+	cmd := exec.Command("openssl", "dgst", "-sha256", "-hmac", secret, "-binary")
+	cmd.Stdin = strings.NewReader(signing)
+	sig, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("openssl hmac: %v", err)
+	}
+	return signing + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+func TestRunFileVerifiesOpenSSLShortHS256Secret(t *testing.T) {
+	requireCC(t)
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Fatal(err)
+	}
+
+	secret := "twelve-dollar-challenge"
+	good := opensslHS256Token(t, secret, `{"alg":"HS256","typ":"JWT"}`, `{"sub":"1","username":"golden_ember_1"}`)
+	bad := good[:len(good)-1] + "A"
+	if bad[len(bad)-1] == good[len(good)-1] {
+		bad = good[:len(good)-1] + "B"
+	}
+
+	path := writeTempSource(t, `package main
+import "errors"
+import "jwt"
+
+func check(token string, secret string) string {
+    let claims *jwt.Claims, err error = jwt.verify(token, secret)
+    if err != nil {
+        return "reject " + errors.message(err)
+    }
+    return "accept " + jwt.getString(claims, "username")
+}
+
+func readUser(token string, secret string) (int, string, bool) {
+    let claims *jwt.Claims, err error = jwt.verify(token, secret)
+    if err != nil {
+        return 0, "", false
+    }
+    let username string = jwt.getString(claims, "username")
+    return 1, username, true
+}
+
+func main() int {
+    print(check("`+good+`", "twelve-dollar-challenge"))
+    print(check("`+bad+`", "twelve-dollar-challenge"))
+    let id int, name string, ok bool = readUser("`+good+`", "twelve-dollar-challenge")
+    let junk string = "bbbbbbbbbbbbbb" + "bbbbbbbbbbbbbb"
+    if !ok || id != 1 || len(junk) < 0 {
+        print("read-failed")
+        return 1
+    }
+    print(name)
+    return 0
+}`)
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "accept golden_ember_1\n") {
+		t.Fatalf("output = %q, want the genuine token accepted", got)
+	}
+	if !strings.Contains(got, "\nreject ") {
+		t.Fatalf("output = %q, want the changed signature rejected", got)
+	}
+	if strings.Contains(got, "accept golden_ember_1\naccept ") {
+		t.Fatalf("bad signature was accepted: %q", got)
+	}
+	if !strings.HasSuffix(got, "golden_ember_1\n") {
+		t.Fatalf("output = %q, want the username returned across the call", got)
 	}
 }
 
@@ -3235,9 +3411,16 @@ func main() int {
     if parsed != nil {
         print("claims")
     }
-    let _, shortErr error = jwt.sign(claims, "secret-key")
+    let shortToken string, shortErr error = jwt.sign(claims, "secret-key")
     if shortErr != nil {
-        print("short")
+        print("short-fail")
+    } else {
+        let _, shortVerify error = jwt.verify(shortToken, "secret-key")
+        if shortVerify != nil {
+            print("short-fail")
+        } else {
+            print("short-ok")
+        }
     }
     let _, badErr error = jwt.sign("[]", secret)
     if badErr != nil {
@@ -3251,7 +3434,7 @@ func main() int {
 	if err := runFile(&out, path); err != nil {
 		t.Fatalf("runFile failed: %v", err)
 	}
-	want := "bad\nshort\nnot-object\n"
+	want := "bad\nshort-ok\nnot-object\n"
 	if out.String() != want {
 		t.Fatalf("got output %q, want %q", out.String(), want)
 	}

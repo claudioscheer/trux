@@ -1445,6 +1445,212 @@ func assertEnvPairs(t *testing.T, got []envPair, want []envPair) {
 	}
 }
 
+func appendU32(b []byte, v uint32) []byte {
+	return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
+}
+
+func appendU64(b []byte, v uint64) []byte {
+	var out []byte
+	out = append(b, 0, 0, 0, 0, 0, 0, 0, 0)
+	for i := 0; i < 8; i++ {
+		out[len(b)+i] = byte(v >> (8 * i))
+	}
+	return out
+}
+
+func txmTensor(name string, dtype uint32, dims []uint64, payload []byte) []byte {
+	var b []byte
+	b = appendU32(b, uint32(len(name)))
+	b = append(b, name...)
+	b = appendU32(b, dtype)
+	b = appendU32(b, uint32(len(dims)))
+	for _, dim := range dims {
+		b = appendU64(b, dim)
+	}
+	return append(b, payload...)
+}
+
+func txmFile(tensors ...[]byte) []byte {
+	b := []byte{'T', 'X', 'M', '1'}
+	b = appendU32(b, 1)
+	b = appendU32(b, uint32(len(tensors)))
+	for _, tensor := range tensors {
+		b = append(b, tensor...)
+	}
+	return b
+}
+
+func cByteArray(name string, data []byte) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "static const uint8_t %s[] = {", name)
+	for i, value := range data {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "%d", value)
+	}
+	b.WriteString("};")
+	return b.String()
+}
+
+func TestTXMParseReadsTensors(t *testing.T) {
+	floatOne := []byte{0, 0, 0, 0, 0, 0, 0xf0, 0x3f}
+	ints := []byte{3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0}
+	good := txmFile(
+		txmTensor("gamma", 2, []uint64{1}, floatOne),
+		txmTensor("n", 1, []uint64{2}, ints),
+	)
+	compileAndRunRuntimeC(t, Source+cByteArray("good", good)+`
+int main(void) {
+    const char* err = rt_txm_parse(good, sizeof(good));
+    if (err != NULL) {
+        fprintf(stderr, "%s\n", err);
+        return 1;
+    }
+    if (g_rt_txm.count != 2) return 2;
+    if (g_rt_txm.tensors[0].dtype != 2 || g_rt_txm.tensors[0].rank != 1 || g_rt_txm.tensors[0].count != 1) return 3;
+    if (g_rt_txm.tensors[1].dtype != 1 || g_rt_txm.tensors[1].count != 2) return 4;
+    g_rt_txm.loaded = 1;
+    rt_string gamma = `+cString("gamma")+`;
+    rt_string n = `+cString("n")+`;
+    if (rt_gpu_dim(gamma, 0) != 1) return 5;
+    if (rt_gpu_scalar(gamma) != 1.0) return 6;
+    rt_slice_float host = rt_gpu_host_floats(gamma);
+    if (host.len != 1 || host.data[0] != 1.0) return 7;
+    rt_slice_int counts = rt_gpu_host_ints(n);
+    if (counts.len != 2 || counts.data[0] != 3 || counts.data[1] != 4) return 8;
+    rt_txm_reset();
+    if (g_rt_txm.count != 0) return 9;
+    return 0;
+}
+`)
+}
+
+func TestTXMParseRejectsMalformedFiles(t *testing.T) {
+	floatOne := []byte{0, 0, 0, 0, 0, 0, 0xf0, 0x3f}
+	good := txmFile(txmTensor("gamma", 2, []uint64{1}, floatOne))
+	badMagic := append([]byte{'X', 'X', 'X', 'X'}, good[4:]...)
+	truncated := good[:len(good)-1]
+	duplicate := txmFile(
+		txmTensor("gamma", 2, []uint64{1}, floatOne),
+		txmTensor("gamma", 2, []uint64{1}, floatOne),
+	)
+	overflow := txmFile(txmTensor("wide", 2, []uint64{1 << 62, 4}, nil))
+	zeroDim := txmFile(txmTensor("empty", 2, []uint64{0}, nil))
+	trailing := append(append([]byte{}, good...), 1)
+	badVersion := append([]byte{}, good...)
+	badVersion[4] = 2
+	badRank := txmFile(txmTensor("rank", 2, []uint64{1, 1, 1, 1, 1}, floatOne))
+
+	compileAndRunRuntimeC(t, Source+
+		cByteArray("bad_magic", badMagic)+
+		cByteArray("truncated", truncated)+
+		cByteArray("duplicate", duplicate)+
+		cByteArray("overflow", overflow)+
+		cByteArray("zero_dim", zeroDim)+
+		cByteArray("trailing", trailing)+
+		cByteArray("bad_version", badVersion)+
+		cByteArray("bad_rank", badRank)+`
+static int expect_err(const uint8_t* data, size_t len, const char* want) {
+    const char* err = rt_txm_parse(data, len);
+    if (err == NULL || strcmp(err, want) != 0) {
+        fprintf(stderr, "got %s\nwant %s\n", err == NULL ? "(none)" : err, want);
+        return 0;
+    }
+    rt_txm_reset();
+    return 1;
+}
+
+int main(void) {
+    if (!expect_err(bad_magic, sizeof(bad_magic), "model file has a bad magic")) return 1;
+    if (!expect_err(truncated, sizeof(truncated), "model file is truncated")) return 2;
+    if (!expect_err(duplicate, sizeof(duplicate), "model file has a duplicate tensor name")) return 3;
+    if (!expect_err(overflow, sizeof(overflow), "model tensor dimension product overflows")) return 4;
+    if (!expect_err(zero_dim, sizeof(zero_dim), "model tensor dimension must be at least 1")) return 5;
+    if (!expect_err(trailing, sizeof(trailing), "model file has trailing bytes")) return 6;
+    if (!expect_err(bad_version, sizeof(bad_version), "model file has a bad version")) return 7;
+    if (!expect_err(bad_rank, sizeof(bad_rank), "model tensor rank must be from 1 to 4")) return 8;
+    return 0;
+}
+`)
+}
+
+func TestSampleModelFileParses(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "examples", "projects", "digits_server", "sample.txm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compileAndRunRuntimeC(t, Source+cByteArray("sample_txm", data)+`
+int main(void) {
+    const char* err = rt_txm_parse(sample_txm, sizeof(sample_txm));
+    if (err != NULL) {
+        fprintf(stderr, "%s\n", err);
+        return 1;
+    }
+    if (g_rt_txm.count != 5) return 2;
+    g_rt_txm.loaded = 1;
+    rt_string support = `+cString("support")+`;
+    rt_string dual = `+cString("dual")+`;
+    rt_string intercept = `+cString("intercept")+`;
+    rt_string n_support = `+cString("n_support")+`;
+    rt_string gamma = `+cString("gamma")+`;
+    if (rt_gpu_dim(support, 0) != 2 || rt_gpu_dim(support, 1) != 64) return 3;
+    if (rt_gpu_dim(dual, 0) != 9 || rt_gpu_dim(dual, 1) != 2) return 4;
+    if (rt_gpu_dim(intercept, 0) != 45) return 5;
+    if (rt_gpu_dim(n_support, 0) != 10) return 6;
+    if (!(rt_gpu_scalar(gamma) > 0.0009 && rt_gpu_scalar(gamma) < 0.0011)) return 7;
+    rt_slice_int counts = rt_gpu_host_ints(n_support);
+    if (counts.len != 10 || counts.data[0] != 1 || counts.data[1] != 1 || counts.data[2] != 0) return 8;
+    rt_txm_reset();
+    return 0;
+}
+`)
+}
+
+func TestGPUFreeRefusesProtectedPointer(t *testing.T) {
+	compileAndRunRuntimeC(t, Source+`
+int main(void) {
+    int dummy = 0;
+    int other = 0;
+    rt_gpu_mark_owned(&dummy);
+    if (!rt_gpu_is_owned(&dummy)) return 1;
+    if (rt_gpu_is_owned(&other)) return 2;
+    return 0;
+}
+`)
+	compileAndRunRuntimeCExpectFailure(t, Source+`
+int main(void) {
+    int dummy = 0;
+    rt_gpu_mark_owned(&dummy);
+    rt_gpu_refuse_owned(&dummy);
+    return 0;
+}
+`, "gpu.free cannot free a mounted tensor or workspace")
+}
+
+func TestParkedRequestArenaIsFreedOnce(t *testing.T) {
+	compileAndRunRuntimeC(t, Source+`
+int main(void) {
+    rt_arena arena;
+    rt_arena_init(&arena);
+    rt_context ctx = {&arena, NULL};
+    char* kept = (char*)rt_arena_alloc(&arena, 8);
+    memcpy(kept, "parked!", 8);
+    rt_http_park_slot slot;
+    memset(&slot, 0, sizeof(slot));
+    if (!rt_http_park_begin(&slot, &arena, &ctx)) return 1;
+    if (arena.chunks != NULL) return 2;
+    rt_arena_deinit(&arena);
+    if (memcmp(kept, "parked!", 8) != 0) return 3;
+    if (!rt_http_park_complete(&slot, 1)) return 4;
+    if (slot.live || slot.completions != 1 || slot.sends != 1) return 5;
+    if (rt_http_park_complete(&slot, 1)) return 6;
+    if (slot.completions != 1 || slot.sends != 1) return 7;
+    return 0;
+}
+`)
+}
+
 func formatEnvPairs(entries []envPair) string {
 	var b strings.Builder
 	for _, entry := range entries {

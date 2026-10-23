@@ -17,7 +17,14 @@ const HTTPSource = `
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#if defined(__cplusplus)
+extern "C" {
+#endif
 #include <liburing.h>
+#if defined(__cplusplus)
+}
+#endif
+#include <poll.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
@@ -54,6 +61,8 @@ const HTTPSource = `
 #define RT_MAX_CONNS 65536
 #define RT_HTTP_UDATA_ACCEPT ((uint64_t)-1)
 #define RT_HTTP_UDATA_SEND (1ULL << 32)
+#define RT_HTTP_UDATA_GPU (2ULL << 32)
+#define RT_HTTP_UDATA_GPU_TIMEOUT (3ULL << 32)
 
 typedef int64_t (*rt_http_handler_fn)(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t request);
 
@@ -130,7 +139,20 @@ typedef struct {
 
     bool responded;
     bool close_after_response;
+    bool parked;
+    rt_http_handler_fn park_cont;
 } rt_http_request;
+
+typedef struct {
+    rt_http_request* req;
+    rt_http_handler_fn cont;
+    rt_http_park_slot slot;
+} rt_http_gpu_park;
+
+static __thread rt_http_gpu_park* g_rt_http_parked;
+static __thread int g_rt_http_in_continuation;
+static __thread uint32_t g_rt_http_gpu_gen;
+static __thread struct __kernel_timespec g_rt_http_gpu_ts[8];
 
 static RT_UNUSED const char* rt_http_reason(int64_t status) {
     switch (status) {
@@ -591,6 +613,104 @@ static RT_UNUSED bool rt_http_parse_request_headers(uint8_t* buf, size_t len, si
     return true;
 }
 
+static RT_UNUSED const uint8_t* rt_http_dup_bytes(rt_arena* arena, const uint8_t* data, size_t len) {
+    if (data == NULL || len == 0) return NULL;
+    uint8_t* out = (uint8_t*)rt_arena_alloc(arena, len);
+    memcpy(out, data, len);
+    return out;
+}
+
+static RT_UNUSED void rt_http_arm_gpu_poll(struct io_uring* ring, bool* need_submit) {
+    int fd = rt_gpu_event_fd();
+    if (fd < 0 || ring == NULL) return;
+    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+    if (sqe == NULL) {
+        io_uring_submit(ring);
+        sqe = io_uring_get_sqe(ring);
+    }
+    if (sqe == NULL) return;
+    io_uring_prep_poll_add(sqe, fd, POLLIN);
+    sqe->user_data = RT_HTTP_UDATA_GPU;
+    if (need_submit != NULL) *need_submit = true;
+}
+
+static RT_UNUSED void rt_http_arm_gpu_timeout(struct io_uring* ring, bool* need_submit) {
+    if (rt_gpu_event_fd() < 0 || ring == NULL) return;
+    struct __kernel_timespec* ts = &g_rt_http_gpu_ts[g_rt_http_gpu_gen & 7u];
+    ts->tv_sec = 1;
+    ts->tv_nsec = 0;
+    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+    if (sqe == NULL) {
+        io_uring_submit(ring);
+        sqe = io_uring_get_sqe(ring);
+    }
+    if (sqe == NULL) return;
+    io_uring_prep_timeout(sqe, ts, 0, 0);
+    sqe->user_data = RT_HTTP_UDATA_GPU_TIMEOUT | (uint64_t)g_rt_http_gpu_gen;
+    if (need_submit != NULL) *need_submit = true;
+}
+
+static RT_UNUSED void rt_http_gpu_finish(int64_t handle, rt_http_handler_fn continuation) {
+    if (g_rt_http_in_continuation) rt_runtime_fail("gpu.finish cannot be called from a GPU continuation");
+    rt_http_request* req = rt_http_request_from_handle(handle);
+    if (req->responded) rt_runtime_fail("gpu.finish cannot run after the handler responded");
+    if (req->parked) rt_runtime_fail("gpu.finish can only be called once");
+    if (continuation == NULL) rt_runtime_fail("gpu.finish continuation is missing");
+    req->parked = true;
+    req->park_cont = continuation;
+    rt_gpu_submit_signal();
+}
+
+static RT_UNUSED void rt_http_retain_parked(rt_http_request* stack_req, rt_arena* stack_arena, rt_context* stack_ctx) {
+    rt_http_gpu_park* park = (rt_http_gpu_park*)malloc(sizeof(rt_http_gpu_park));
+    if (park == NULL) rt_runtime_fail("allocation failed");
+    memset(park, 0, sizeof(*park));
+    if (!rt_http_park_begin(&park->slot, stack_arena, stack_ctx)) {
+        free(park);
+        rt_runtime_fail("a GPU request is already in flight on this worker");
+    }
+    rt_arena* arena = park->slot.arena;
+    rt_http_request* req = (rt_http_request*)malloc(sizeof(rt_http_request));
+    if (req == NULL) rt_runtime_fail("allocation failed");
+    *req = *stack_req;
+    req->method = rt_http_dup_bytes(arena, stack_req->method, stack_req->method_len);
+    req->path = rt_http_dup_bytes(arena, stack_req->path, stack_req->path_len);
+    req->query = rt_http_dup_bytes(arena, stack_req->query, stack_req->query_len);
+    req->body = rt_http_dup_bytes(arena, stack_req->body, stack_req->body_len);
+    for (size_t i = 0; i < stack_req->header_count && i < RT_HTTP_MAX_HEADERS; i++) {
+        rt_http_header_pair header = stack_req->headers[i];
+        req->headers[i].name = rt_http_dup_bytes(arena, header.name, header.name_len);
+        req->headers[i].name_len = header.name_len;
+        req->headers[i].value = rt_http_dup_bytes(arena, header.value, header.value_len);
+        req->headers[i].value_len = header.value_len;
+    }
+    for (size_t i = 0; i < stack_req->param_count && i < RT_HTTP_MAX_PARAMS; i++) {
+        rt_http_kv kv = stack_req->params[i];
+        req->params[i].key.data = rt_http_dup_bytes(arena, kv.key.data, kv.key.len);
+        req->params[i].key.len = kv.key.len;
+        req->params[i].val.data = rt_http_dup_bytes(arena, kv.val.data, kv.val.len);
+        req->params[i].val.len = kv.val.len;
+    }
+    for (size_t i = 0; i < stack_req->context_count && i < RT_HTTP_MAX_CONTEXT; i++) {
+        rt_http_kv kv = stack_req->context[i];
+        req->context[i].key.data = rt_http_dup_bytes(arena, kv.key.data, kv.key.len);
+        req->context[i].key.len = kv.key.len;
+        req->context[i].val.data = rt_http_dup_bytes(arena, kv.val.data, kv.val.len);
+        req->context[i].val.len = kv.val.len;
+    }
+    for (size_t i = 0; i < stack_req->resp_header_count && i < RT_HTTP_MAX_RESP_HEADERS; i++) {
+        rt_http_kv kv = stack_req->resp_headers[i];
+        req->resp_headers[i].key.data = rt_http_dup_bytes(arena, kv.key.data, kv.key.len);
+        req->resp_headers[i].key.len = kv.key.len;
+        req->resp_headers[i].val.data = rt_http_dup_bytes(arena, kv.val.data, kv.val.len);
+        req->resp_headers[i].val.len = kv.val.len;
+    }
+    park->req = req;
+    park->cont = stack_req->park_cont;
+    g_rt_http_parked = park;
+    rt_http_arm_gpu_timeout(stack_req->ring, stack_req->need_submit);
+}
+
 static RT_UNUSED void rt_http_dispatch(rt_http_request* req) {
     rt_arena arena;
     rt_arena_init(&arena);
@@ -631,6 +751,12 @@ static RT_UNUSED void rt_http_dispatch(rt_http_request* req) {
         }
     }
 
+    if (req->parked) {
+        if (req->responded) rt_runtime_fail("gpu.finish and a response cannot both happen in the same handler");
+        rt_http_retain_parked(req, &arena, &ctx);
+        return;
+    }
+
     if (!req->responded) {
         rt_http_send_simple(req->fd, 500, "handler did not respond\n", req->close_after_response);
         req->responded = true;
@@ -644,6 +770,129 @@ typedef struct {
     char host[128];
     int port;
 } rt_http_thread_args;
+
+static RT_UNUSED void rt_http_drain_conn(rt_http_conn* c, int client_fd, struct io_uring* ring, bool* need_submit) {
+    if (c == NULL || !c->in_use) return;
+    for (;;) {
+        if (g_rt_http_parked != NULL) return;
+        ssize_t hdr_end = rt_http_find_header_end(c->buffer, c->len, c->header_scan_start);
+        if (hdr_end < 0) {
+            if (c->len > 3) c->header_scan_start = c->len - 3;
+            return;
+        }
+
+        rt_http_request req;
+        memset(&req, 0, sizeof(req));
+        req.fd = client_fd;
+        req.ring = ring;
+        req.need_submit = need_submit;
+        req.conn = c;
+
+        size_t content_length = 0;
+        if (!rt_http_parse_request_headers(c->buffer, c->len, (size_t)hdr_end, &req, &content_length)) {
+            rt_http_send_simple(client_fd, 400, "bad request\n", true);
+            shutdown(client_fd, SHUT_RDWR);
+            close(client_fd);
+            c->in_use = false;
+            c->len = 0;
+            return;
+        }
+
+        if (content_length > RT_HTTP_MAX_BODY_BYTES) {
+            rt_http_send_simple(client_fd, 413, "payload too large\n", true);
+            shutdown(client_fd, SHUT_RDWR);
+            close(client_fd);
+            c->in_use = false;
+            c->len = 0;
+            return;
+        }
+
+        if (c->len < (size_t)hdr_end + content_length) return;
+
+        req.body = c->buffer + hdr_end;
+        req.body_len = content_length;
+        rt_http_dispatch(&req);
+
+        size_t consumed = (size_t)hdr_end + content_length;
+        if (consumed < c->len) {
+            memmove(c->buffer, c->buffer + consumed, c->len - consumed);
+            c->len -= consumed;
+            c->header_scan_start = 0;
+        } else {
+            c->len = 0;
+            c->header_scan_start = 0;
+        }
+
+        if (req.parked) return;
+
+        if (req.close_after_response) {
+            if (c->tx_in_flight) {
+                c->close_after_tx = true;
+                return;
+            }
+            shutdown(client_fd, SHUT_RDWR);
+            close(client_fd);
+            c->in_use = false;
+            c->len = 0;
+            return;
+        }
+
+        if (c->len == 0) return;
+    }
+}
+
+static RT_UNUSED void rt_http_drain_ready(rt_http_conn* conns, struct io_uring* ring, bool* need_submit) {
+    for (int fd = 0; fd < RT_MAX_CONNS; fd++) {
+        if (g_rt_http_parked != NULL) return;
+        if (!conns[fd].in_use || conns[fd].len == 0) continue;
+        rt_http_drain_conn(&conns[fd], fd, ring, need_submit);
+    }
+}
+
+static RT_UNUSED void rt_http_gpu_release(struct io_uring* ring, rt_http_conn* conns, bool* need_submit, int failed) {
+    rt_http_gpu_park* park = g_rt_http_parked;
+    if (park == NULL) {
+        rt_http_arm_gpu_poll(ring, need_submit);
+        return;
+    }
+    g_rt_http_parked = NULL;
+    g_rt_http_gpu_gen++;
+    rt_gpu_clear_busy();
+    rt_http_request* req = park->req;
+    int fd = req->fd;
+    int alive = fd >= 0 && fd < RT_MAX_CONNS && conns[fd].in_use;
+    if (alive) {
+        req->ring = ring;
+        req->need_submit = need_submit;
+        req->conn = &conns[fd];
+        if (!failed && park->cont != NULL) {
+            g_rt_http_in_continuation = 1;
+            park->cont(park->slot.ctx, park->slot.arena, (int64_t)(intptr_t)req);
+            g_rt_http_in_continuation = 0;
+        }
+        if (!req->responded) {
+            const char* body = failed ? "gpu request failed\n" : "handler did not respond\n";
+            rt_http_send_simple(fd, 500, body, req->close_after_response);
+            req->responded = true;
+        }
+        if (req->close_after_response) {
+            rt_http_conn* c = &conns[fd];
+            if (c->tx_in_flight) {
+                c->close_after_tx = true;
+            } else if (c->in_use) {
+                shutdown(fd, SHUT_RDWR);
+                close(fd);
+                c->in_use = false;
+                c->len = 0;
+            }
+        }
+    }
+    rt_http_park_complete(&park->slot, 1);
+    free(req);
+    free(park);
+    rt_http_arm_gpu_poll(ring, need_submit);
+    rt_http_drain_ready(conns, ring, need_submit);
+}
 
 static RT_UNUSED void* rt_http_worker_thread(void* arg) {
     rt_http_thread_args* targs = (rt_http_thread_args*)arg;
@@ -697,6 +946,13 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
     rt_http_conn* conns = (rt_http_conn*)calloc(RT_MAX_CONNS, sizeof(rt_http_conn));
     if (!conns) rt_runtime_fail("failed to allocate connection pool");
 
+    rt_gpu_worker_init();
+    {
+        bool arm_gpu = false;
+        rt_http_arm_gpu_poll(&ring, &arm_gpu);
+        if (arm_gpu) io_uring_submit(&ring);
+    }
+
     for (;;) {
         struct io_uring_cqe* cqe;
         ret = io_uring_wait_cqe(&ring, &cqe);
@@ -710,7 +966,36 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
 
         io_uring_for_each_cqe(&ring, head, cqe) {
             uint64_t udata = cqe->user_data;
-            if (udata == RT_HTTP_UDATA_ACCEPT) {
+            if (udata == RT_HTTP_UDATA_GPU) {
+                io_uring_cq_advance(&ring, 1);
+                rt_gpu_drain_eventfd();
+                int query = rt_gpu_query_job();
+                if (g_rt_http_parked == NULL) {
+                    if (query == 1) rt_gpu_reset_stream();
+                    rt_http_arm_gpu_poll(&ring, &need_submit);
+                } else if (query == 0) {
+                    rt_http_arm_gpu_poll(&ring, &need_submit);
+                } else if (query == 1) {
+                    rt_gpu_reset_stream();
+                    rt_http_gpu_release(&ring, conns, &need_submit, 1);
+                } else {
+                    rt_http_gpu_release(&ring, conns, &need_submit, 0);
+                }
+            } else if ((udata & 0xFFFFFFFF00000000ULL) == RT_HTTP_UDATA_GPU_TIMEOUT) {
+                io_uring_cq_advance(&ring, 1);
+                uint32_t gen = (uint32_t)udata;
+                if (g_rt_http_parked != NULL && gen == g_rt_http_gpu_gen) {
+                    int query = rt_gpu_query_job();
+                    if (query == 0) {
+                        rt_http_arm_gpu_timeout(&ring, &need_submit);
+                    } else if (query == 1) {
+                        rt_gpu_reset_stream();
+                        rt_http_gpu_release(&ring, conns, &need_submit, 1);
+                    } else {
+                        rt_http_gpu_release(&ring, conns, &need_submit, 0);
+                    }
+                }
+            } else if (udata == RT_HTTP_UDATA_ACCEPT) {
                 int client_fd = cqe->res;
                 io_uring_cq_advance(&ring, 1);
                 if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
@@ -796,72 +1081,7 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
                         io_uring_buf_ring_advance(br, 1);
                         io_uring_cq_advance(&ring, 1);
 
-                        for (;;) {
-                            ssize_t hdr_end = rt_http_find_header_end(c->buffer, c->len, c->header_scan_start);
-                            if (hdr_end < 0) {
-                                if (c->len > 3) c->header_scan_start = c->len - 3;
-                                break;
-                            }
-
-                            rt_http_request req;
-                            memset(&req, 0, sizeof(req));
-                            req.fd = client_fd;
-                            req.ring = &ring;
-                            req.need_submit = &need_submit;
-                            req.conn = c;
-
-                            size_t content_length = 0;
-                            if (!rt_http_parse_request_headers(c->buffer, c->len, (size_t)hdr_end, &req, &content_length)) {
-                                rt_http_send_simple(client_fd, 400, "bad request\n", true);
-                                shutdown(client_fd, SHUT_RDWR);
-                                close(client_fd);
-                                c->in_use = false;
-                                c->len = 0;
-                                break;
-                            }
-
-                            if (content_length > RT_HTTP_MAX_BODY_BYTES) {
-                                rt_http_send_simple(client_fd, 413, "payload too large\n", true);
-                                shutdown(client_fd, SHUT_RDWR);
-                                close(client_fd);
-                                c->in_use = false;
-                                c->len = 0;
-                                break;
-                            }
-
-                            if (c->len < (size_t)hdr_end + content_length) {
-                                break;
-                            }
-
-                            req.body = c->buffer + hdr_end;
-                            req.body_len = content_length;
-
-                            rt_http_dispatch(&req);
-
-                            size_t consumed = (size_t)hdr_end + content_length;
-                            if (consumed < c->len) {
-                                memmove(c->buffer, c->buffer + consumed, c->len - consumed);
-                                c->len -= consumed;
-                                c->header_scan_start = 0;
-                            } else {
-                                c->len = 0;
-                                c->header_scan_start = 0;
-                            }
-
-                            if (req.close_after_response) {
-                                if (c->tx_in_flight) {
-                                    c->close_after_tx = true;
-                                    break;
-                                }
-                                shutdown(client_fd, SHUT_RDWR);
-                                close(client_fd);
-                                c->in_use = false;
-                                c->len = 0;
-                                break;
-                            }
-
-                            if (c->len == 0) break;
-                        }
+                        rt_http_drain_conn(c, client_fd, &ring, &need_submit);
 
                         if (c->in_use && !(flags & IORING_CQE_F_MORE)) {
                             struct io_uring_sqe* rsqe = io_uring_get_sqe(&ring);
@@ -929,6 +1149,7 @@ static RT_UNUSED void rt_http_serve(rt_string host, int64_t port, int64_t worker
     pthread_t* threads = (pthread_t*)malloc((size_t)workers * sizeof(pthread_t));
     if (!threads) rt_runtime_fail("allocation failed for worker threads");
 
+    rt_gpu_publish_workers();
     for (int64_t i = 0; i < workers; i++) {
         if (pthread_create(&threads[i], NULL, rt_http_worker_thread, &args) != 0) {
             rt_runtime_fail("failed to spawn worker thread");
@@ -953,6 +1174,7 @@ static RT_UNUSED void rt_http_register_route(rt_string method, rt_string path, r
 static RT_UNUSED void rt_http_register_middleware(rt_string prefix, rt_http_handler_fn handler) { (void)prefix; (void)handler; rt_runtime_fail("http is supported on Linux only"); }
 static RT_UNUSED void rt_http_register_not_found(rt_http_handler_fn handler) { (void)handler; rt_runtime_fail("http is supported on Linux only"); }
 static RT_UNUSED void rt_http_listen(int64_t port) { (void)port; rt_runtime_fail("http is supported on Linux only"); }
+static RT_UNUSED void rt_http_gpu_finish(int64_t handle, rt_http_handler_fn handler) { (void)handle; (void)handler; rt_runtime_fail("http is supported on Linux only"); }
 static RT_UNUSED void rt_http_serve(rt_string host, int64_t port, int64_t workers) { (void)host; (void)port; (void)workers; rt_runtime_fail("http is supported on Linux only"); }
 static RT_UNUSED rt_string rt_http_param(rt_arena* arena, int64_t handle, rt_string name) { (void)arena; (void)handle; (void)name; rt_runtime_fail("http is supported on Linux only"); return RT_LIT(rt_string, NULL, 0); }
 static RT_UNUSED void rt_http_set_context(int64_t handle, rt_string key, rt_string val) { (void)handle; (void)key; (void)val; rt_runtime_fail("http is supported on Linux only"); }

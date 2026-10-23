@@ -333,11 +333,23 @@ point.
   for the GPU: `gpu.sync` (`CUDA sync failed: …`) or a copy back (`CUDA copyToHost failed: …`). Put a `gpu.sync` right
   after a launch to find out which kernel failed.
 
+## Models {#models}
+
+**What it is.** A way to load a numeric model once, keep it on the device, and answer HTTP requests without blocking the worker on the GPU.
+
+**Why it matters.** Copying weights on every request costs more than the arithmetic for a small model. The weights should move to the GPU at startup. Each request only copies its own input.
+
+**How it works.** `gpu.mount` reads a TXM1 file. The byte layout is `docs/TXM.md` in the repository. The file is a list of named tensors, `int` or `float`, rank 1 to 4. The reader does not know what the names mean. The program does. `gpu.floats` and `gpu.ints` return the device memory. `gpu.dim` and `gpu.scalar` read the shape and a one-element float. `gpu.hostFloats` and `gpu.hostInts` are the host copy that stayed behind after the upload.
+
+`gpu.workspaceFloat` and `gpu.workspaceInt` allocate a buffer for each worker, once, before `http.listen`. `gpu.borrowFloat` and `gpu.borrowInt` return that worker's buffer. A later request reuses it. `gpu.free` on a mounted tensor or a workspace fails.
+
+Inside a kernel, `exp(x)` is the one call you can make. It takes a `float` and returns a `float`.
+
+A request handler copies the input into the borrowed workspace, launches, then calls `gpu.finish(request, continuation)`. The continuation is `func(request int) int`. The worker goes back to the `io_uring` loop while the kernel runs, so other sockets on that worker still accept and receive. One request is in flight per worker. The continuation runs when the kernel finishes, reads `gpu.ready`, and sends the response. `examples/projects/digits_server` is the handwritten-digits SVM on that path. `benchmarks/digits` times it (`make bench-digits` on Linux with liburing and CUDA).
+
+`gpu.to` outside an HTTP worker is still a blocking copy. Existing GPU examples keep using it.
+
 ## Restrictions
-
-- A program cannot use both `http` and GPU kernels yet:
-
-    {{< include "website/outputs/errors/gpu_with_http.txt" "text" >}}
 
 - Kernels must be written in Trux; there is no way to load precompiled CUDA code.
 

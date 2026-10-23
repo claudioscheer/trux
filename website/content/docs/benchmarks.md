@@ -136,3 +136,13 @@ python3 benchmarks/http/benchmark.py
 ```
 
 The script compiles the Trux HTTP server, builds the runtime Docker container, executes `wrk` across all hardware profiles, and generates `BENCHMARK_RESULTS.md` and `results.json`.
+
+## Handwritten digits on the GPU
+
+`benchmarks/digits` times `POST /predict` for the handwritten-digits SVM. The server mounts a TXM1 file once, then each request launches one RBF kernel and reuses that device memory. The default file has the notebook shape: 519 support vectors, 64 features, gamma 0.001.
+
+```bash
+make bench-digits
+```
+
+The target needs Linux, liburing, and CUDA. It is separate from `make bench` and from the cgroup matrix above. The harness prints throughput and latency for that machine. Those numbers are not checked in.

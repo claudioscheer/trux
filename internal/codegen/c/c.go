@@ -1364,6 +1364,36 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		fmt.Fprintf(out, "%srt_gpu_free_%s(%s);\n", indent, name, buffer.value)
 	case *ir.GPUSyncStmt:
 		fmt.Fprintf(out, "%srt_gpu_sync();\n", indent)
+	case *ir.GPUMountStmt:
+		path, err := e.emitOrderedOperand(stmt.Path, e.scratch)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, path.prelude)
+		fmt.Fprintf(out, "%srt_gpu_mount(%s);\n", indent, path.value)
+	case *ir.GPUWorkspaceStmt:
+		name, err := e.emitOrderedOperand(stmt.Name, e.scratch)
+		if err != nil {
+			return err
+		}
+		count, err := e.emitOrderedOperand(stmt.Count, e.scratch)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, name.prelude)
+		e.writePrelude(out, indent, count.prelude)
+		fn := "rt_gpu_workspace_float"
+		if stmt.Kind == semtypes.GPUCallWorkspaceInt {
+			fn = "rt_gpu_workspace_int"
+		}
+		fmt.Fprintf(out, "%s%s(%s, %s);\n", indent, fn, name.value, count.value)
+	case *ir.GPUFinishStmt:
+		request, err := e.emitOrderedOperand(stmt.Request, e.scratch)
+		if err != nil {
+			return err
+		}
+		e.writePrelude(out, indent, request.prelude)
+		fmt.Fprintf(out, "%srt_http_gpu_finish(%s, %s);\n", indent, request.value, mangleFunc(stmt.HandlerName))
 	case *ir.GPULaunchStmt:
 		dims := make([]emittedExpr, 0, len(stmt.Dims))
 		for _, dim := range stmt.Dims {
@@ -1394,11 +1424,11 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		var launch string
 		switch stmt.Axes {
 		case 1:
-			launch = fmt.Sprintf("%s<<<dim3((unsigned int)(((%s) + 255) / 256), 1u, 1u), dim3(256u, 1u, 1u)>>>(%s)", mangleKernel(stmt.KernelName), dimValues[0], strings.Join(append([]string{dimValues[0]}, argValues...), ", "))
+			launch = fmt.Sprintf("%s<<<dim3((unsigned int)(((%s) + 255) / 256), 1u, 1u), dim3(256u, 1u, 1u), 0, rt_gpu_launch_stream()>>>(%s)", mangleKernel(stmt.KernelName), dimValues[0], strings.Join(append([]string{dimValues[0]}, argValues...), ", "))
 		case 2:
-			launch = fmt.Sprintf("%s<<<dim3((unsigned int)(((%s) + 15) / 16), (unsigned int)(((%s) + 15) / 16), 1u), dim3(16u, 16u, 1u)>>>(%s)", mangleKernel(stmt.KernelName), dimValues[0], dimValues[1], strings.Join(append([]string{dimValues[0], dimValues[1]}, argValues...), ", "))
+			launch = fmt.Sprintf("%s<<<dim3((unsigned int)(((%s) + 15) / 16), (unsigned int)(((%s) + 15) / 16), 1u), dim3(16u, 16u, 1u), 0, rt_gpu_launch_stream()>>>(%s)", mangleKernel(stmt.KernelName), dimValues[0], dimValues[1], strings.Join(append([]string{dimValues[0], dimValues[1]}, argValues...), ", "))
 		default:
-			launch = fmt.Sprintf("%s<<<dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s), dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s)>>>(%s)", mangleKernel(stmt.KernelName), dimValues[0], dimValues[1], dimValues[2], dimValues[3], dimValues[4], dimValues[5], strings.Join(argValues, ", "))
+			launch = fmt.Sprintf("%s<<<dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s), dim3((unsigned int)%s, (unsigned int)%s, (unsigned int)%s), 0, rt_gpu_launch_stream()>>>(%s)", mangleKernel(stmt.KernelName), dimValues[0], dimValues[1], dimValues[2], dimValues[3], dimValues[4], dimValues[5], strings.Join(argValues, ", "))
 		}
 		fmt.Fprintf(out, "%s%s;\n", indent, launch)
 		fmt.Fprintf(out, "%srt_cuda_check(cudaGetLastError(), \"launch\");\n", indent)
@@ -2112,6 +2142,8 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 			return emittedExpr{}, err
 		}
 		return emittedExpr{prelude: length.prelude, value: fmt.Sprintf("rt_gpu_alloc_%s(%s)", name, length.value)}, nil
+	case *ir.GPUNameExpr:
+		return e.emitGPUName(expr)
 	case *ir.GPUFromExpr:
 		host, err := e.emitOrderedOperand(expr.Host, e.scratch)
 		if err != nil {
@@ -2832,6 +2864,19 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("rt_gpu_alloc_%s(%s)", name, length), nil
+	case *ir.GPUNameExpr:
+		name, err := emitExpr(expr.Name, frameArena)
+		if err != nil {
+			return "", err
+		}
+		axis := ""
+		if expr.Axis != nil {
+			axis, err = emitExpr(expr.Axis, frameArena)
+			if err != nil {
+				return "", err
+			}
+		}
+		return gpuNameCall(expr.Kind, name, axis)
 	case *ir.GPUFromExpr:
 		return "", fmt.Errorf("gpu.from must be emitted in statement order")
 	case *ir.GPUCoordExpr:
@@ -3297,6 +3342,12 @@ func emitKernelExpr(expr ir.Expr) (string, error) {
 		return emitKernelIndex(expr)
 	case *ir.GPUCoordExpr:
 		return emitGPUCoord(expr.Kind)
+	case *ir.GPUExpExpr:
+		arg, err := emitKernelExpr(expr.Arg)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("exp(%s)", arg), nil
 	default:
 		return "", fmt.Errorf("unsupported kernel expression %T", expr)
 	}
@@ -3323,6 +3374,50 @@ func emitKernelLaunchArg(expr ir.Expr) (string, error) {
 		return value + ".data", nil
 	}
 	return value, nil
+}
+
+func gpuNameCall(kind semtypes.GPUCallKind, name string, axis string) (string, error) {
+	switch kind {
+	case semtypes.GPUCallFloats:
+		return fmt.Sprintf("rt_gpu_floats(%s)", name), nil
+	case semtypes.GPUCallInts:
+		return fmt.Sprintf("rt_gpu_ints(%s)", name), nil
+	case semtypes.GPUCallBorrowFloat:
+		return fmt.Sprintf("rt_gpu_borrow_float(%s)", name), nil
+	case semtypes.GPUCallBorrowInt:
+		return fmt.Sprintf("rt_gpu_borrow_int(%s)", name), nil
+	case semtypes.GPUCallHostFloats:
+		return fmt.Sprintf("rt_gpu_host_floats(%s)", name), nil
+	case semtypes.GPUCallHostInts:
+		return fmt.Sprintf("rt_gpu_host_ints(%s)", name), nil
+	case semtypes.GPUCallScalar:
+		return fmt.Sprintf("rt_gpu_scalar(%s)", name), nil
+	case semtypes.GPUCallReady:
+		return fmt.Sprintf("rt_gpu_ready(%s)", name), nil
+	case semtypes.GPUCallDim:
+		return fmt.Sprintf("rt_gpu_dim(%s, %s)", name, axis), nil
+	default:
+		return "", fmt.Errorf("unsupported GPU name expression %s", kind)
+	}
+}
+
+func (e *funcEmitter) emitGPUName(expr *ir.GPUNameExpr) (emittedExpr, error) {
+	name, err := e.emitOrderedOperand(expr.Name, e.scratch)
+	if err != nil {
+		return emittedExpr{}, err
+	}
+	axis := emittedExpr{}
+	if expr.Axis != nil {
+		axis, err = e.emitOrderedOperand(expr.Axis, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+	}
+	call, err := gpuNameCall(expr.Kind, name.value, axis.value)
+	if err != nil {
+		return emittedExpr{}, err
+	}
+	return emittedExpr{prelude: joinPreludes(name, axis), value: call}, nil
 }
 
 func emitGPUCoord(kind semtypes.GPUCallKind) (string, error) {
@@ -4138,6 +4233,12 @@ func stmtPos(stmt ir.Stmt) token.Position {
 	case *ir.GPUFreeStmt:
 		return stmt.Pos
 	case *ir.GPUSyncStmt:
+		return stmt.Pos
+	case *ir.GPUMountStmt:
+		return stmt.Pos
+	case *ir.GPUWorkspaceStmt:
+		return stmt.Pos
+	case *ir.GPUFinishStmt:
 		return stmt.Pos
 	case *ir.GPULaunchStmt:
 		return stmt.Pos

@@ -86,6 +86,7 @@ The generated C includes `trux_http_runtime.h` when HTTP calls are used. On Linu
 3. **Kernel Buffer Rings (`io_uring_register_buf_ring`)**: The kernel selects receive buffers on packet arrival (`IOSQE_BUFFER_SELECT`), eliminating user-space memory allocations and read system calls.
 4. **Multishot Operations**: Single SQEs handle continuous `accept` and `recv` operations across connections.
 5. **Memory Isolation**: Each request receives its own arena and `rt_context`, isolating allocations between requests and worker threads.
+6. **GPU requests**: A handler may call `gpu.finish` instead of responding. The arena stays alive until the continuation copies the response into the connection buffer. The worker keeps polling the ring while that kernel runs. See [GPU.md](GPU.md) and [TXM.md](TXM.md).
 
 ## Limits
 

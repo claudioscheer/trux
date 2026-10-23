@@ -123,6 +123,4 @@ func handle(request int) int
 - In Docker containers, specify `--security-opt seccomp=unconfined --ulimit memlock=-1:-1` so the kernel can allocate buffer rings.
 - Plain HTTP only; place a TLS reverse proxy in front for HTTPS.
 - Request bodies are read using `Content-Length` and are capped at 1 MiB. Chunked request bodies are rejected.
-- A program cannot use `http` together with GPU kernels yet:
-
-    {{< include "website/outputs/errors/gpu_with_http.txt" "text" >}}
+- A handler may call `gpu.finish` after launching a kernel. The worker keeps accepting and reading other sockets while that kernel runs. The continuation sends the response. See [GPU programming](/docs/guide/gpu/#models).

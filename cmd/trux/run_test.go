@@ -2425,6 +2425,53 @@ func main() int {
 	}
 }
 
+func TestBuildFileLinksLiburingWhenHTTPUsesGPU(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+import "http"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    out[i] = 1
+}
+
+func handle(request int) int {
+    http.text(request, 200, "ok")
+    return 0
+}
+
+func main() int {
+    http.get("/", handle)
+    http.listen(8080)
+    return 0
+}`)
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "nvcc.log")
+	fakeNVCC := writeFakeCompiler(t, filepath.Join(dir, "fake-nvcc"), logPath)
+	t.Setenv("NVCC", fakeNVCC)
+
+	if err := buildFile(path, outputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	for _, part := range []string{"-x cu", "-D_GNU_SOURCE", "-pthread", "-luring"} {
+		if !strings.Contains(log, part) {
+			t.Fatalf("compiler args = %q, want %s", log, part)
+		}
+	}
+}
+
+func TestDigitsHTTPBenchmarkProgramUsesHTTPAndGPU(t *testing.T) {
+	result, err := compileFile("../../benchmarks/digits/server.tx", compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.UsesCUDA || !result.UsesHTTP {
+		t.Fatalf("UsesCUDA=%v UsesHTTP=%v, want both", result.UsesCUDA, result.UsesHTTP)
+	}
+}
+
 func exampleEntrypoints(t *testing.T) []string {
 	t.Helper()
 

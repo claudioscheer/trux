@@ -221,6 +221,30 @@ type GPUSyncStmt struct {
 
 func (*GPUSyncStmt) stmtNode() {}
 
+type GPUMountStmt struct {
+	Pos  token.Position
+	Path Expr
+}
+
+func (*GPUMountStmt) stmtNode() {}
+
+type GPUWorkspaceStmt struct {
+	Pos   token.Position
+	Kind  types.GPUCallKind
+	Name  Expr
+	Count Expr
+}
+
+func (*GPUWorkspaceStmt) stmtNode() {}
+
+type GPUFinishStmt struct {
+	Pos         token.Position
+	Request     Expr
+	HandlerName string
+}
+
+func (*GPUFinishStmt) stmtNode() {}
+
 type GPULaunchStmt struct {
 	Pos        token.Position
 	KernelName string
@@ -872,6 +896,32 @@ func (e *GPUCoordExpr) Ownership() types.Origin { return e.Origin }
 
 func (*GPUCoordExpr) exprNode() {}
 
+type GPUNameExpr struct {
+	Kind   types.GPUCallKind
+	Name   Expr
+	Axis   Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *GPUNameExpr) Type() ast.Type { return e.Typ }
+
+func (e *GPUNameExpr) Ownership() types.Origin { return e.Origin }
+
+func (*GPUNameExpr) exprNode() {}
+
+type GPUExpExpr struct {
+	Arg    Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *GPUExpExpr) Type() ast.Type { return e.Typ }
+
+func (e *GPUExpExpr) Ownership() types.Origin { return e.Origin }
+
+func (*GPUExpExpr) exprNode() {}
+
 type TimeNowExpr struct {
 	Kind   types.IOCallKind
 	Typ    ast.Type
@@ -1423,6 +1473,13 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 					}
 					return &GPULaunchStmt{Pos: stmt.Pos(), KernelName: gpuSig.KernelName, Axes: axes, Dims: dims, Args: kernelArgs}, nil
 				}
+				if gpuSig.Kind == types.GPUCallFinish {
+					request, err := b.buildExpr(call.Args[0])
+					if err != nil {
+						return nil, err
+					}
+					return &GPUFinishStmt{Pos: stmt.Pos(), Request: request, HandlerName: gpuSig.HandlerName}, nil
+				}
 				args, err := b.buildExprs(call.Args)
 				if err != nil {
 					return nil, err
@@ -1434,6 +1491,10 @@ func (b builder) buildStmt(stmt ast.Statement) (Stmt, error) {
 					return &GPUFreeStmt{Pos: stmt.Pos(), Buffer: args[0]}, nil
 				case types.GPUCallSync:
 					return &GPUSyncStmt{Pos: stmt.Pos()}, nil
+				case types.GPUCallMount:
+					return &GPUMountStmt{Pos: stmt.Pos(), Path: args[0]}, nil
+				case types.GPUCallWorkspaceFloat, types.GPUCallWorkspaceInt:
+					return &GPUWorkspaceStmt{Pos: stmt.Pos(), Kind: gpuSig.Kind, Name: args[0], Count: args[1]}, nil
 				}
 			}
 		}
@@ -1538,6 +1599,28 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 				return &GPUFromExpr{Host: host, Typ: typ, Origin: origin}, nil
 			case types.GPUCallGlobalX, types.GPUCallGlobalY, types.GPUCallGlobalZ, types.GPUCallThreadX, types.GPUCallThreadY, types.GPUCallThreadZ, types.GPUCallBlockX, types.GPUCallBlockY, types.GPUCallBlockZ, types.GPUCallBlockDimX, types.GPUCallBlockDimY, types.GPUCallBlockDimZ:
 				return &GPUCoordExpr{Kind: gpuSig.Kind, Typ: typ, Origin: origin}, nil
+			case types.GPUCallExp:
+				arg, err := b.buildExpr(expr.Args[0])
+				if err != nil {
+					return nil, err
+				}
+				return &GPUExpExpr{Arg: arg, Typ: typ, Origin: origin}, nil
+			case types.GPUCallFloats, types.GPUCallInts, types.GPUCallBorrowFloat, types.GPUCallBorrowInt, types.GPUCallHostFloats, types.GPUCallHostInts, types.GPUCallScalar, types.GPUCallReady:
+				name, err := b.buildExpr(expr.Args[0])
+				if err != nil {
+					return nil, err
+				}
+				return &GPUNameExpr{Kind: gpuSig.Kind, Name: name, Typ: typ, Origin: origin}, nil
+			case types.GPUCallDim:
+				name, err := b.buildExpr(expr.Args[0])
+				if err != nil {
+					return nil, err
+				}
+				axis, err := b.buildExpr(expr.Args[1])
+				if err != nil {
+					return nil, err
+				}
+				return &GPUNameExpr{Kind: gpuSig.Kind, Name: name, Axis: axis, Typ: typ, Origin: origin}, nil
 			}
 		}
 		if ioSig, ok := b.info.IOCalls[expr]; ok {

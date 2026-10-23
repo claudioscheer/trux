@@ -107,9 +107,6 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 	if err != nil {
 		return nil, err
 	}
-	if typedIR.UsesHTTP && len(typedIR.Kernels) > 0 {
-		return nil, fmt.Errorf("http and gpu cannot be used in the same program yet")
-	}
 	if typedIR.UsesJWT && len(typedIR.Kernels) > 0 {
 		return nil, fmt.Errorf("jwt and gpu cannot be used in the same program yet")
 	}
@@ -249,6 +246,9 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 			compiler = "nvcc"
 		}
 		args = []string{"-x", "cu", sourcePath, "-o", outputPath}
+		if opts.UsesHTTP {
+			args = append(args, "-D_GNU_SOURCE", "-pthread", "-luring")
+		}
 	} else {
 		if opts.UsesHTTP {
 			args = append(args, "-D_GNU_SOURCE", "-pthread", "-luring")

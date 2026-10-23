@@ -11,7 +11,7 @@ else
 RUN_BIN := ./bin/$(BINARY)
 endif
 
-.PHONY: build run test bench fmt emit-c lsp clean
+.PHONY: build run test bench bench-digits fmt emit-c lsp clean
 
 build:
 	$(GO) build -o $(RUN_BIN) $(CMD)
@@ -50,6 +50,10 @@ bench: build
 	$(RUN_BIN) run examples/performance_stencil.tx
 	@echo ===== examples/performance_cnn.tx =====
 	$(RUN_BIN) run examples/performance_cnn.tx
+
+# Handwritten-digits HTTP+GPU. Linux, liburing, and CUDA. Not part of `bench`.
+bench-digits:
+	$(GO) run ./benchmarks/digits/
 
 fmt: build
 	./bin/$(BINARY) fmt -r

@@ -139,7 +139,6 @@ errors=(
   "gpu_launch_two_shapes||run examples/errors/gpu_launch_two_shapes.tx|"
   "gpu_coordinate_on_host||run examples/errors/gpu_coordinate_on_host.tx|cc"
   "gpu_buffers_without_kernel||run examples/errors/gpu_buffers_without_kernel.tx|cc"
-  "gpu_with_http||run examples/errors/gpu_with_http.tx|"
   "io_read_int|abc\n|run examples/errors/io_read_int.tx|"
   "io_missing_file||run examples/errors/io_missing_file.tx|"
   "io_not_imported||run examples/errors/io_not_imported.tx|"

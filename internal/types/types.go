@@ -248,6 +248,20 @@ const (
 	GPUCallLaunch1D     GPUCallKind = "launch1d"
 	GPUCallLaunch2D     GPUCallKind = "launch2d"
 	GPUCallFrom         GPUCallKind = "from"
+	GPUCallMount        GPUCallKind = "mount"
+	GPUCallWorkspaceFloat GPUCallKind = "workspaceFloat"
+	GPUCallWorkspaceInt GPUCallKind = "workspaceInt"
+	GPUCallFloats       GPUCallKind = "floats"
+	GPUCallInts         GPUCallKind = "ints"
+	GPUCallDim          GPUCallKind = "dim"
+	GPUCallScalar       GPUCallKind = "scalar"
+	GPUCallHostFloats   GPUCallKind = "hostFloats"
+	GPUCallHostInts     GPUCallKind = "hostInts"
+	GPUCallBorrowFloat  GPUCallKind = "borrowFloat"
+	GPUCallBorrowInt    GPUCallKind = "borrowInt"
+	GPUCallReady        GPUCallKind = "ready"
+	GPUCallFinish       GPUCallKind = "finish"
+	GPUCallExp          GPUCallKind = "exp"
 	GPUCallGlobalX      GPUCallKind = "globalX"
 	GPUCallGlobalY      GPUCallKind = "globalY"
 	GPUCallGlobalZ      GPUCallKind = "globalZ"
@@ -263,10 +277,11 @@ const (
 )
 
 type GPUCallSig struct {
-	Kind       GPUCallKind
-	BufferType ast.Type
-	KernelName string
-	KernelSig  FuncSig
+	Kind        GPUCallKind
+	BufferType  ast.Type
+	KernelName  string
+	KernelSig   FuncSig
+	HandlerName string
 }
 
 type Origin string
@@ -1454,6 +1469,21 @@ func (c *checker) checkKernelExpr(locals *scope, expr ast.Expression) (ast.Type,
 		c.setExpr(expr, buf.Elem, OriginOwned)
 		return buf.Elem, nil
 	case *ast.CallExpr:
+		if expr.Package == "" && expr.Callee == "exp" {
+			if len(expr.Args) != 1 {
+				return nil, typeError(expr.Start, "exp expects 1 argument, got %d", len(expr.Args))
+			}
+			argType, err := c.checkKernelExpr(locals, expr.Args[0])
+			if err != nil {
+				return nil, err
+			}
+			if !ast.TypeEqual(argType, ast.FloatType) {
+				return nil, typeError(expr.Args[0].Pos(), "exp argument has type %s, want float", argType)
+			}
+			c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallExp}
+			c.setExpr(expr, ast.FloatType, OriginOwned)
+			return ast.FloatType, nil
+		}
 		if expr.Package != "gpu" {
 			return nil, typeError(expr.Start, "kernel cannot call %q", expr.SourceName())
 		}
@@ -2475,6 +2505,14 @@ func (c *checker) checkGPUCall(locals *scope, expr *ast.CallExpr, allowStatement
 		}
 		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallFree}
 		return ast.StringType, OriginUnknown, nil
+	case "mount":
+		return c.checkGPUMount(locals, expr, allowStatementOnly)
+	case "workspaceFloat", "workspaceInt":
+		return c.checkGPUWorkspace(locals, expr, allowStatementOnly)
+	case "floats", "ints", "borrowFloat", "borrowInt", "hostFloats", "hostInts", "scalar", "dim", "ready":
+		return c.checkGPUTensor(locals, expr)
+	case "finish":
+		return c.checkGPUFinish(locals, expr, allowStatementOnly)
 	case "launch":
 		return c.checkGPULaunch(locals, expr, allowStatementOnly, 0)
 	case "launch1d":
@@ -2490,6 +2528,147 @@ func (c *checker) checkGPUCall(locals *scope, expr *ast.CallExpr, allowStatement
 	default:
 		return nil, "", typeError(expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
 	}
+}
+
+func (c *checker) checkGPUStringArg(locals *scope, expr *ast.CallExpr, index int) error {
+	argType, err := c.checkExpr(locals, expr.Args[index], false)
+	if err != nil {
+		return err
+	}
+	if !ast.TypeEqual(argType, ast.StringType) {
+		return typeError(expr.Args[index].Pos(), "gpu.%s name has type %s, want string", expr.Callee, argType)
+	}
+	return nil
+}
+
+func (c *checker) checkGPUMount(locals *scope, expr *ast.CallExpr, allowStatementOnly bool) (ast.Type, Origin, error) {
+	if !allowStatementOnly {
+		return nil, "", typeError(expr.Start, "gpu.mount can only be used as a statement")
+	}
+	if len(expr.Args) != 1 {
+		return nil, "", typeError(expr.Start, "gpu.mount expects 1 argument, got %d", len(expr.Args))
+	}
+	if err := c.checkGPUStringArg(locals, expr, 0); err != nil {
+		return nil, "", err
+	}
+	c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallMount}
+	return ast.StringType, OriginUnknown, nil
+}
+
+func (c *checker) checkGPUWorkspace(locals *scope, expr *ast.CallExpr, allowStatementOnly bool) (ast.Type, Origin, error) {
+	if !allowStatementOnly {
+		return nil, "", typeError(expr.Start, "gpu.%s can only be used as a statement", expr.Callee)
+	}
+	if len(expr.Args) != 2 {
+		return nil, "", typeError(expr.Start, "gpu.%s expects 2 arguments, got %d", expr.Callee, len(expr.Args))
+	}
+	if err := c.checkGPUStringArg(locals, expr, 0); err != nil {
+		return nil, "", err
+	}
+	countType, err := c.checkExpr(locals, expr.Args[1], false)
+	if err != nil {
+		return nil, "", err
+	}
+	if !ast.TypeEqual(countType, ast.IntType) {
+		return nil, "", typeError(expr.Args[1].Pos(), "gpu.%s length has type %s, want int", expr.Callee, countType)
+	}
+	kind := GPUCallWorkspaceFloat
+	if expr.Callee == "workspaceInt" {
+		kind = GPUCallWorkspaceInt
+	}
+	c.info.GPUCalls[expr] = GPUCallSig{Kind: kind}
+	return ast.StringType, OriginUnknown, nil
+}
+
+func (c *checker) checkGPUTensor(locals *scope, expr *ast.CallExpr) (ast.Type, Origin, error) {
+	switch expr.Callee {
+	case "dim":
+		if len(expr.Args) != 2 {
+			return nil, "", typeError(expr.Start, "gpu.dim expects 2 arguments, got %d", len(expr.Args))
+		}
+		if err := c.checkGPUStringArg(locals, expr, 0); err != nil {
+			return nil, "", err
+		}
+		axisType, err := c.checkExpr(locals, expr.Args[1], false)
+		if err != nil {
+			return nil, "", err
+		}
+		if !ast.TypeEqual(axisType, ast.IntType) {
+			return nil, "", typeError(expr.Args[1].Pos(), "gpu.dim axis has type %s, want int", axisType)
+		}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallDim}
+		return ast.IntType, OriginOwned, nil
+	case "scalar":
+		if len(expr.Args) != 1 {
+			return nil, "", typeError(expr.Start, "gpu.scalar expects 1 argument, got %d", len(expr.Args))
+		}
+		if err := c.checkGPUStringArg(locals, expr, 0); err != nil {
+			return nil, "", err
+		}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallScalar}
+		return ast.FloatType, OriginOwned, nil
+	case "ready", "hostFloats", "hostInts", "floats", "ints", "borrowFloat", "borrowInt":
+		if len(expr.Args) != 1 {
+			return nil, "", typeError(expr.Start, "gpu.%s expects 1 argument, got %d", expr.Callee, len(expr.Args))
+		}
+		if err := c.checkGPUStringArg(locals, expr, 0); err != nil {
+			return nil, "", err
+		}
+	default:
+		return nil, "", typeError(expr.Start, "package %q has no function %q", expr.Package, expr.Callee)
+	}
+	switch expr.Callee {
+	case "floats":
+		typ := &ast.GPUBufferType{Elem: ast.FloatType}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallFloats, BufferType: typ}
+		return typ, OriginBorrowed, nil
+	case "ints":
+		typ := &ast.GPUBufferType{Elem: ast.IntType}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallInts, BufferType: typ}
+		return typ, OriginBorrowed, nil
+	case "borrowFloat":
+		typ := &ast.GPUBufferType{Elem: ast.FloatType}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallBorrowFloat, BufferType: typ}
+		return typ, OriginBorrowed, nil
+	case "borrowInt":
+		typ := &ast.GPUBufferType{Elem: ast.IntType}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallBorrowInt, BufferType: typ}
+		return typ, OriginBorrowed, nil
+	case "hostFloats", "ready":
+		typ := &ast.SliceType{Elem: ast.FloatType}
+		kind := GPUCallHostFloats
+		if expr.Callee == "ready" {
+			kind = GPUCallReady
+		}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: kind}
+		return typ, OriginBorrowed, nil
+	default:
+		typ := &ast.SliceType{Elem: ast.IntType}
+		c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallHostInts}
+		return typ, OriginBorrowed, nil
+	}
+}
+
+func (c *checker) checkGPUFinish(locals *scope, expr *ast.CallExpr, allowStatementOnly bool) (ast.Type, Origin, error) {
+	if !allowStatementOnly {
+		return nil, "", typeError(expr.Start, "gpu.finish can only be used as a statement")
+	}
+	if len(expr.Args) != 2 {
+		return nil, "", typeError(expr.Start, "gpu.finish expects 2 arguments, got %d", len(expr.Args))
+	}
+	requestType, err := c.checkExpr(locals, expr.Args[0], false)
+	if err != nil {
+		return nil, "", err
+	}
+	if !ast.TypeEqual(requestType, ast.IntType) {
+		return nil, "", typeError(expr.Args[0].Pos(), "gpu.finish request has type %s, want int", requestType)
+	}
+	handler, err := c.checkHTTPHandlerArg(expr.Args[1], "gpu.finish")
+	if err != nil {
+		return nil, "", err
+	}
+	c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallFinish, HandlerName: handler.Name}
+	return ast.StringType, OriginUnknown, nil
 }
 
 func (c *checker) checkGPUFrom(locals *scope, expr *ast.CallExpr) (ast.Type, Origin, error) {

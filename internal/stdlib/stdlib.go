@@ -65,6 +65,19 @@ const (
 	CallGPULaunch1D           CallKind = "gpuLaunch1d"
 	CallGPULaunch2D           CallKind = "gpuLaunch2d"
 	CallGPUFrom               CallKind = "gpuFrom"
+	CallGPUMount              CallKind = "gpuMount"
+	CallGPUWorkspaceFloat     CallKind = "gpuWorkspaceFloat"
+	CallGPUWorkspaceInt       CallKind = "gpuWorkspaceInt"
+	CallGPUFloats             CallKind = "gpuFloats"
+	CallGPUInts               CallKind = "gpuInts"
+	CallGPUDim                CallKind = "gpuDim"
+	CallGPUScalar             CallKind = "gpuScalar"
+	CallGPUHostFloats         CallKind = "gpuHostFloats"
+	CallGPUHostInts           CallKind = "gpuHostInts"
+	CallGPUBorrowFloat        CallKind = "gpuBorrowFloat"
+	CallGPUBorrowInt          CallKind = "gpuBorrowInt"
+	CallGPUReady              CallKind = "gpuReady"
+	CallGPUFinish             CallKind = "gpuFinish"
 	CallGPUTo                 CallKind = "gpuTo"
 	CallGPUCoord              CallKind = "gpuCoord"
 	CallErrorsNew             CallKind = "errorsNew"
@@ -499,6 +512,19 @@ var packages = []Package{
 			{Package: "gpu", Name: "free", Kind: CallGPUFree, Detail: "free a device buffer", StatementOnly: true, SignatureText: "gpu.free(device gpu.Buffer[T])"},
 			{Package: "gpu", Name: "sync", Kind: CallGPUSync, Detail: "synchronize the CUDA device", StatementOnly: true},
 			{Package: "gpu", Name: "from", Kind: CallGPUFrom, Detail: "allocate a device buffer and copy a host slice into it", SignatureText: "gpu.from(host []T) gpu.Buffer[T]"},
+			{Package: "gpu", Name: "mount", Kind: CallGPUMount, Detail: "load a TXM1 model once and keep it on the device", StatementOnly: true, SignatureText: "gpu.mount(path string)"},
+			{Package: "gpu", Name: "workspaceFloat", Kind: CallGPUWorkspaceFloat, Detail: "declare a reused float workspace", StatementOnly: true, SignatureText: "gpu.workspaceFloat(name string, n int)"},
+			{Package: "gpu", Name: "workspaceInt", Kind: CallGPUWorkspaceInt, Detail: "declare a reused int workspace", StatementOnly: true, SignatureText: "gpu.workspaceInt(name string, n int)"},
+			{Package: "gpu", Name: "floats", Kind: CallGPUFloats, Detail: "return a mounted float tensor", SignatureText: "gpu.floats(name string) gpu.Buffer[float]"},
+			{Package: "gpu", Name: "ints", Kind: CallGPUInts, Detail: "return a mounted int tensor", SignatureText: "gpu.ints(name string) gpu.Buffer[int]"},
+			{Package: "gpu", Name: "dim", Kind: CallGPUDim, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "return one dimension of a mounted tensor", SignatureText: "gpu.dim(name string, axis int) int"},
+			{Package: "gpu", Name: "scalar", Kind: CallGPUScalar, ReturnType: ast.FloatType, ResultOrigin: ResultOwned, Detail: "return a one-element float tensor", SignatureText: "gpu.scalar(name string) float"},
+			{Package: "gpu", Name: "hostFloats", Kind: CallGPUHostFloats, Detail: "return the host copy of a mounted float tensor", SignatureText: "gpu.hostFloats(name string) []float"},
+			{Package: "gpu", Name: "hostInts", Kind: CallGPUHostInts, Detail: "return the host copy of a mounted int tensor", SignatureText: "gpu.hostInts(name string) []int"},
+			{Package: "gpu", Name: "borrowFloat", Kind: CallGPUBorrowFloat, Detail: "return this worker's float workspace", SignatureText: "gpu.borrowFloat(name string) gpu.Buffer[float]"},
+			{Package: "gpu", Name: "borrowInt", Kind: CallGPUBorrowInt, Detail: "return this worker's int workspace", SignatureText: "gpu.borrowInt(name string) gpu.Buffer[int]"},
+			{Package: "gpu", Name: "ready", Kind: CallGPUReady, Detail: "return the pinned host mirror of a float workspace after the GPU finishes", SignatureText: "gpu.ready(name string) []float"},
+			{Package: "gpu", Name: "finish", Kind: CallGPUFinish, Detail: "submit the GPU work and continue on the io_uring loop", StatementOnly: true, SignatureText: "gpu.finish(request int, continuation)"},
 			{Package: "gpu", Name: "to", Kind: CallGPUTo, Detail: "copy a device buffer into a host slice", StatementOnly: true, SignatureText: "gpu.to(device gpu.Buffer[T], host []T)"},
 			{Package: "gpu", Name: "launch", Kind: CallGPULaunch, Detail: "launch a GPU kernel", StatementOnly: true, SignatureText: "gpu.launch(kernel, gridX int, gridY int, gridZ int, blockX int, blockY int, blockZ int, args...)"},
 			{Package: "gpu", Name: "launch1d", Kind: CallGPULaunch1D, Detail: "launch a kernel over n elements", StatementOnly: true, SignatureText: "gpu.launch1d(kernel, n int, args...)"},

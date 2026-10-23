@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -34,6 +35,7 @@ type compileResult struct {
 	UsesHTTP          bool
 	UsesSQLite        bool
 	UsesJSON          bool
+	UsesJWT           bool
 	Debug             bool
 }
 
@@ -47,6 +49,7 @@ type generatedCompileOptions struct {
 	UsesHTTP   bool
 	UsesSQLite bool
 	UsesJSON   bool
+	UsesJWT    bool
 	Debug      bool
 }
 
@@ -107,6 +110,9 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 	if typedIR.UsesHTTP && len(typedIR.Kernels) > 0 {
 		return nil, fmt.Errorf("http and gpu cannot be used in the same program yet")
 	}
+	if typedIR.UsesJWT && len(typedIR.Kernels) > 0 {
+		return nil, fmt.Errorf("jwt and gpu cannot be used in the same program yet")
+	}
 	if debug != nil {
 		if err := debug.writeJSON("04-ir.json", typedIR); err != nil {
 			return nil, err
@@ -135,7 +141,12 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 	}
 	if typedIR.UsesJSON {
 		headers = append(headers, runtimeHeader{Name: runtimec.JSONHeaderName, Source: runtimec.JSONHeaderSource})
+	}
+	if typedIR.UsesJSON || typedIR.UsesJWT {
 		headers = append(headers, runtimeHeader{Name: "yyjson.h", Source: runtimec.YYJSONHeaderSource})
+	}
+	if typedIR.UsesJWT {
+		headers = append(headers, runtimeHeader{Name: runtimec.JWTHeaderName, Source: runtimec.JWTHeaderSource})
 	}
 
 	return &compileResult{
@@ -147,6 +158,7 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 		UsesHTTP:          typedIR.UsesHTTP,
 		UsesSQLite:        typedIR.UsesSQLite,
 		UsesJSON:          typedIR.UsesJSON,
+		UsesJWT:           typedIR.UsesJWT,
 		Debug:             opts.Debug,
 	}, nil
 }
@@ -173,6 +185,7 @@ func buildFile(sourcePath string, outputPath string) error {
 		UsesHTTP:   result.UsesHTTP,
 		UsesSQLite: result.UsesSQLite,
 		UsesJSON:   result.UsesJSON,
+		UsesJWT:    result.UsesJWT,
 		Debug:      result.Debug,
 	})
 }
@@ -186,6 +199,7 @@ func compileC(sourcePath string, outputPath string) error {
 		UsesHTTP:   strings.Contains(string(content), runtimec.HTTPHeaderName),
 		UsesSQLite: strings.Contains(string(content), runtimec.SQLiteHeaderName),
 		UsesJSON:   strings.Contains(string(content), runtimec.JSONHeaderName),
+		UsesJWT:    strings.Contains(string(content), runtimec.JWTHeaderName),
 	})
 }
 
@@ -246,12 +260,16 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 			}
 			args = append(args, sqliteObj, "-pthread", "-lm")
 		}
-		if opts.UsesJSON {
+		if opts.UsesJSON || opts.UsesJWT {
 			yyjsonObj, err := ensureYYJSONObjectCached(compiler)
 			if err != nil {
 				return err
 			}
 			args = append(args, yyjsonObj)
+		}
+		if opts.UsesJWT {
+			prefix := jwtPrefix()
+			args = appendJWTLinkArgs(args, prefix)
 		}
 	}
 
@@ -259,13 +277,98 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(output))
+		var compileErr error
 		if msg == "" {
-			return fmt.Errorf("%s failed: %w", compiler, err)
+			compileErr = fmt.Errorf("%s failed: %w", compiler, err)
+		} else {
+			compileErr = fmt.Errorf("%s failed: %w\n%s", compiler, err, msg)
 		}
-		return fmt.Errorf("%s failed: %w\n%s", compiler, err, msg)
+		if opts.UsesJWT {
+			return fmt.Errorf("%w\n\njwt programs need libjwt 3, jansson, and OpenSSL. Install them, or set TRUX_LIBJWT_PREFIX to a directory with include/jwt.h and lib/libjwt.a.", compileErr)
+		}
+		return compileErr
+	}
+	if opts.UsesJWT {
+		if err := copyJWTRuntimeDLLs(jwtPrefix(), outputPath); err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+func jwtPrefix() string {
+	if p := strings.TrimSpace(os.Getenv("TRUX_LIBJWT_PREFIX")); p != "" {
+		return p
+	}
+	base, err := os.UserCacheDir()
+	if err != nil || base == "" {
+		return ""
+	}
+	p := filepath.Join(base, "trux", "libjwt")
+	header := filepath.Join(p, "include", "jwt.h")
+	lib := filepath.Join(p, "lib", "libjwt.a")
+	if info, statErr := os.Stat(header); statErr != nil || info.IsDir() {
+		return ""
+	}
+	if info, statErr := os.Stat(lib); statErr != nil || info.IsDir() {
+		return ""
+	}
+	return p
+}
+
+func appendJWTLinkArgs(args []string, prefix string) []string {
+	if prefix != "" {
+		args = append(args,
+			"-I"+filepath.Join(prefix, "include"),
+			"-L"+filepath.Join(prefix, "lib"),
+			"-DJWT_STATIC_DEFINE",
+		)
+		if runtime.GOOS != "windows" {
+			args = append(args, "-Wl,-rpath,"+filepath.Join(prefix, "lib"))
+		}
+	}
+	args = append(args, "-Wl,-Bstatic", "-ljwt", "-Wl,-Bdynamic", "-ljansson", "-lcrypto")
+	if runtime.GOOS == "windows" {
+		args = append(args, "-lws2_32", "-lgdi32", "-lcrypt32", "-lbcrypt")
+	}
+	return args
+}
+
+func copyJWTRuntimeDLLs(prefix string, outputPath string) error {
+	if prefix == "" || runtime.GOOS != "windows" {
+		return nil
+	}
+	destDir := filepath.Dir(outputPath)
+	bin := filepath.Join(prefix, "bin")
+	for _, name := range []string{"libcrypto-3-x64.dll", "libssl-3-x64.dll", "libjansson-4.dll"} {
+		src := filepath.Join(bin, name)
+		info, err := os.Stat(src)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if err := copyFile(src, filepath.Join(destDir, name)); err != nil {
+			return fmt.Errorf("copy %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func copyFile(src string, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func runExecutable(out io.Writer, in io.Reader, executablePath string) error {

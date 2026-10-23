@@ -21,6 +21,7 @@ import "csv"
 | [`time`](/docs/stdlib/time/) | wall-clock timestamps, monotonic timers, and sleeping |
 | [`sqlite`](/docs/stdlib/sqlite/) | embedded relational database with transactions and prepared statements |
 | [`json`](/docs/stdlib/json/) | high-performance JSON parsing, inspection, and generation |
+| [`jwt`](/docs/stdlib/jwt/) | HS256 signing and verification for API authentication |
 | [`http`](/docs/stdlib/http/) | a plaintext HTTP/1.1 server with a worker pool (Linux/macOS) |
 | [`gpu`](/docs/stdlib/gpu/) | CUDA device buffers, kernel launches, and thread coordinates |
 | [`errors`](/docs/guide/errors/) | creating errors with `errors.new` and retrieving messages with `errors.message` |
@@ -30,8 +31,8 @@ import "csv"
 **Built into the compiler**
 
 These packages are not written in Trux. The type checker knows their signatures, and the code generator lowers each
-call to a helper in the C runtime header (`trux_runtime.h`, plus `trux_http_runtime.h` for `http`). Calls that
-produce no value are statement-only.
+call to a helper in the C runtime header (`trux_runtime.h`, plus `trux_http_runtime.h` for `http` and
+`trux_jwt_runtime.h` for `jwt`). Calls that produce no value are statement-only.
 
 {{% /alert %}}
 

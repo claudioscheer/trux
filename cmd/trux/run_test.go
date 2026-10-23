@@ -3178,3 +3178,154 @@ func main() int {
 		t.Fatalf("expected output to contain 'false' for json.valid, got %q", out.String())
 	}
 }
+
+func TestJWTSignAndVerify(t *testing.T) {
+	src := `package main
+import "jwt"
+
+func main() int {
+    let claims string = "{\"sub\":\"ada\",\"n\":7,\"admin\":true,\"score\":1.5}"
+    let secret string = "0123456789abcdef0123456789abcdef"
+    let token string, err error = jwt.sign(claims, secret)
+    if err != nil {
+        print("sign err")
+        return 1
+    }
+    let parsed *jwt.Claims, verr error = jwt.verify(token, secret)
+    if verr != nil {
+        print("verify err")
+        return 1
+    }
+    print(jwt.getString(parsed, "sub"))
+    print(jwt.getInt(parsed, "n"))
+    print(jwt.getBool(parsed, "admin"))
+    print(jwt.getFloat(parsed, "score"))
+    print(jwt.getString(parsed, "missing"))
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "ada\n7\ntrue\n1.5\n\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestJWTRejectsBadSignature(t *testing.T) {
+	src := `package main
+import "jwt"
+
+func main() int {
+    let claims string = "{\"sub\":\"ada\"}"
+    let secret string = "0123456789abcdef0123456789abcdef"
+    let other string = "fedcba9876543210fedcba9876543210"
+    let token string, err error = jwt.sign(claims, secret)
+    if err != nil {
+        print("sign err")
+        return 1
+    }
+    let parsed *jwt.Claims, verr error = jwt.verify(token, other)
+    if verr != nil {
+        print("bad")
+    }
+    if parsed != nil {
+        print("claims")
+    }
+    let _, shortErr error = jwt.sign(claims, "secret-key")
+    if shortErr != nil {
+        print("short")
+    }
+    let _, badErr error = jwt.sign("[]", secret)
+    if badErr != nil {
+        print("not-object")
+    }
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+	want := "bad\nshort\nnot-object\n"
+	if out.String() != want {
+		t.Fatalf("got output %q, want %q", out.String(), want)
+	}
+}
+
+func TestJWTLinkFlags(t *testing.T) {
+	plain := writeTempSource(t, `package main
+func main() int {
+    print("no jwt")
+    return 0
+}
+`)
+	plainResult, err := compileFile(plain, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plainResult.UsesJWT {
+		t.Fatal("expected UsesJWT = false")
+	}
+	if strings.Contains(plainResult.CSource, "trux_jwt_runtime.h") {
+		t.Fatal("expected CSource to omit trux_jwt_runtime.h")
+	}
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "cc.log")
+	fakeCC := writeFakeCompiler(t, filepath.Join(dir, "fake-cc"), logPath)
+	t.Setenv("CC", fakeCC)
+	cPath, err := writeGeneratedFiles(dir, "main", plainResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compileGenerated(cPath, filepath.Join(dir, "program"), generatedCompileOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(readFile(t, logPath), "-ljwt") {
+		t.Fatalf("expected compiler args to omit -ljwt, got: %s", readFile(t, logPath))
+	}
+
+	src := `package main
+import "jwt"
+
+func main() int {
+    let token string, err error = jwt.sign("{\"sub\":\"ada\"}", "0123456789abcdef0123456789abcdef")
+    if err != nil {
+        return 1
+    }
+    print(token)
+    return 0
+}
+`
+	path := writeTempSource(t, src)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.UsesJWT {
+		t.Fatal("expected UsesJWT = true")
+	}
+	if !strings.Contains(result.CSource, "rt_jwt_sign") {
+		t.Fatal("expected generated C to call rt_jwt_sign")
+	}
+	jwtDir := t.TempDir()
+	jwtLog := filepath.Join(jwtDir, "cc.log")
+	jwtCC := writeFakeCompiler(t, filepath.Join(jwtDir, "fake-cc"), jwtLog)
+	t.Setenv("CC", jwtCC)
+	jwtC, err := writeGeneratedFiles(jwtDir, "main", result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compileGenerated(jwtC, filepath.Join(jwtDir, "program"), generatedCompileOptions{UsesJWT: result.UsesJWT}); err != nil {
+		t.Fatal(err)
+	}
+	log := readFile(t, jwtLog)
+	if !strings.Contains(log, "-ljwt") {
+		t.Fatalf("expected compiler args to contain -ljwt, got: %s", log)
+	}
+}

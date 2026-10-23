@@ -176,6 +176,16 @@ func exprNeedsFrame(expr ir.Expr) bool {
 			}
 		}
 		return false
+	case *ir.JWTCallExpr:
+		if isDynamicType(expr.Type()) {
+			return true
+		}
+		for _, arg := range expr.Args {
+			if exprNeedsFrame(arg) {
+				return true
+			}
+		}
+		return false
 	case *ir.BinaryExpr:
 		if expr.Operator == "+" && ast.TypeEqual(expr.Type(), ast.StringType) {
 			return true
@@ -439,6 +449,13 @@ func exprPublishesFrame(expr ir.Expr, declared map[string]bool, tainted map[stri
 			}
 		}
 		return false
+	case *ir.JWTCallExpr:
+		for _, arg := range expr.Args {
+			if valueReferencesFrame(arg, tainted) || exprPublishesFrame(arg, declared, tainted) {
+				return true
+			}
+		}
+		return false
 	case *ir.BinaryExpr:
 		return exprPublishesFrame(expr.Left, declared, tainted) || exprPublishesFrame(expr.Right, declared, tainted)
 	case *ir.UnaryExpr:
@@ -530,7 +547,7 @@ func valueReferencesFrame(expr ir.Expr, tainted map[string]bool) bool {
 		return valueReferencesFrame(expr.Object, tainted)
 	case *ir.MapLookupExpr:
 		return valueReferencesFrame(expr.Map, tainted)
-	case *ir.CallExpr, *ir.SQLiteCallExpr, *ir.JSONCallExpr:
+	case *ir.CallExpr, *ir.SQLiteCallExpr, *ir.JSONCallExpr, *ir.JWTCallExpr:
 		return isDynamicType(expr.Type())
 	case *ir.IndexExpr, *ir.SliceExpr:
 		return dynamicValueReferencesCollection(expr, tainted)
@@ -601,6 +618,9 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	if program.UsesJSON {
 		fmt.Fprintf(&out, "#include %s\n", cStringLiteral(runtimec.JSONHeaderName))
 	}
+	if program.UsesJWT {
+		fmt.Fprintf(&out, "#include %s\n", cStringLiteral(runtimec.JWTHeaderName))
+	}
 	fmt.Fprintln(&out)
 
 	if err := emitProgramTypes(&out, program); err != nil {
@@ -637,6 +657,9 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	}
 	if program.UsesJSON {
 		fmt.Fprintf(&out, "\n%s\n", runtimec.JSONImplSource)
+	}
+	if program.UsesJWT {
+		fmt.Fprintf(&out, "\n%s\n", runtimec.JWTImplSource)
 	}
 
 	for _, fn := range program.Functions {
@@ -2163,6 +2186,30 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 		}
 		fnName := jsonRuntimeFnName(expr.Kind)
 		return emittedExpr{prelude: prelude, value: fmt.Sprintf("%s(%s)", fnName, strings.Join(values, ", "))}, nil
+	case *ir.JWTCallExpr:
+		callResultArena := e.scratch
+		if isDynamicType(expr.Type()) {
+			callResultArena = targetArena
+		}
+		var jwtArgs []emittedExpr
+		for _, arg := range expr.Args {
+			argArena := e.scratch
+			if isDynamicType(expr.Type()) && isDynamicType(arg.Type()) {
+				argArena = callResultArena
+			}
+			emitArg, err := e.emitOrderedOperand(arg, argArena)
+			if err != nil {
+				return emittedExpr{}, err
+			}
+			jwtArgs = append(jwtArgs, emitArg)
+		}
+		jwtValues := []string{callResultArena}
+		var jwtPrelude []string
+		for _, arg := range jwtArgs {
+			jwtPrelude = append(jwtPrelude, arg.prelude...)
+			jwtValues = append(jwtValues, arg.value)
+		}
+		return emittedExpr{prelude: jwtPrelude, value: fmt.Sprintf("%s(%s)", jwtRuntimeFnName(expr.Kind), strings.Join(jwtValues, ", "))}, nil
 	case *ir.UnaryExpr:
 		if expr.Operator == "&" {
 			if _, ok := expr.Operand.(*ir.StructLiteral); ok {
@@ -2473,7 +2520,7 @@ func exprHasSideEffect(expr ir.Expr) bool {
 	switch expr := expr.(type) {
 	case *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr,
 		*ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ImageDimensionExpr, *ir.ReadPPMExpr,
-		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CallExpr, *ir.SQLiteCallExpr, *ir.JSONCallExpr,
+		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CallExpr, *ir.SQLiteCallExpr, *ir.JSONCallExpr, *ir.JWTCallExpr,
 		*ir.ErrorsNewExpr, *ir.WriteFileExpr, *ir.WriteCSVExpr, *ir.WritePPMExpr,
 		*ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.PathQueryExpr,
 		*ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.MapLookupExpr, *ir.KeysExpr, *ir.ValuesExpr:
@@ -2823,6 +2870,24 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 		}
 		fnName := jsonRuntimeFnName(expr.Kind)
 		return fmt.Sprintf("%s(%s)", fnName, strings.Join(args, ", ")), nil
+	case *ir.JWTCallExpr:
+		callResultArena := frameArena
+		if isDynamicType(expr.Type()) {
+			callResultArena = targetArena
+		}
+		jwtArgs := []string{callResultArena}
+		for _, arg := range expr.Args {
+			argArena := frameArena
+			if isDynamicType(expr.Type()) && isDynamicType(arg.Type()) {
+				argArena = callResultArena
+			}
+			emitArg, err := emitExpr(arg, argArena)
+			if err != nil {
+				return "", err
+			}
+			jwtArgs = append(jwtArgs, emitArg)
+		}
+		return fmt.Sprintf("%s(%s)", jwtRuntimeFnName(expr.Kind), strings.Join(jwtArgs, ", ")), nil
 	case *ir.UnaryExpr:
 		operand, err := emitExpr(expr.Operand, targetArena)
 		if err != nil {
@@ -2956,7 +3021,7 @@ func emitType(typ ast.Type) (string, error) {
 		if typ.TargetName() == "trux_sqlite_stmt" {
 			return "trux_sqlite_stmt", nil
 		}
-		if isJSONOpaqueStruct(typ.TargetName()) {
+		if isOpaqueRuntimeStruct(typ.TargetName()) {
 			return typ.TargetName(), nil
 		}
 		return mangleStruct(typ.TargetName()), nil
@@ -3548,7 +3613,7 @@ func emitCloneValueExpr(typ ast.Type, arenaExpr string, valueExpr string) (strin
 	case *ast.GPUBufferType:
 		return valueExpr, nil
 	case *ast.StructType:
-		if t.TargetName() == "trux_sqlite_db" || t.TargetName() == "trux_sqlite_stmt" || isJSONOpaqueStruct(t.TargetName()) {
+		if t.TargetName() == "trux_sqlite_db" || t.TargetName() == "trux_sqlite_stmt" || isOpaqueRuntimeStruct(t.TargetName()) {
 			return valueExpr, nil
 		}
 	}
@@ -3602,7 +3667,7 @@ func emitProgramTypes(out *bytes.Buffer, program *ir.Program) error {
 	}
 
 	visitStruct := func(name string) error {
-		if name == "trux_sqlite_db" || name == "trux_sqlite_stmt" || isJSONOpaqueStruct(name) {
+		if name == "trux_sqlite_db" || name == "trux_sqlite_stmt" || isOpaqueRuntimeStruct(name) {
 			return nil
 		}
 		if seenStructs[name] {
@@ -4270,8 +4335,27 @@ func sqliteRuntimeFnName(kind semtypes.SQLiteCallKind) string {
 	}
 }
 
-func isJSONOpaqueStruct(name string) bool {
-	return name == "trux_json_doc" || name == "trux_json_val" || name == "trux_json_mut_doc" || name == "trux_json_mut_val"
+func isOpaqueRuntimeStruct(name string) bool {
+	return name == "trux_json_doc" || name == "trux_json_val" || name == "trux_json_mut_doc" || name == "trux_json_mut_val" || name == "trux_jwt_claims"
+}
+
+func jwtRuntimeFnName(kind semtypes.JWTCallKind) string {
+	switch kind {
+	case semtypes.JWTCallSign:
+		return "rt_jwt_sign"
+	case semtypes.JWTCallVerify:
+		return "rt_jwt_verify"
+	case semtypes.JWTCallGetString:
+		return "rt_jwt_get_string"
+	case semtypes.JWTCallGetInt:
+		return "rt_jwt_get_int"
+	case semtypes.JWTCallGetBool:
+		return "rt_jwt_get_bool"
+	case semtypes.JWTCallGetFloat:
+		return "rt_jwt_get_float"
+	default:
+		panic("unknown jwt call kind: " + string(kind))
+	}
 }
 
 func jsonRuntimeFnName(kind semtypes.JSONCallKind) string {

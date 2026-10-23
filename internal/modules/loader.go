@@ -615,6 +615,10 @@ func (l *loader) rewriteType(unit *fileUnit, pos token.Position, typ ast.Type, c
 					}
 					return nil
 				}
+				if typ.Package == "jwt" && typ.Name == "Claims" {
+					typ.ResolvedName = "trux_jwt_claims"
+					return nil
+				}
 				return l.errorInUnit(unit, pos, "package %q has no struct %q", typ.Package, typ.Name)
 			}
 			var private *structInfo
@@ -678,6 +682,9 @@ func (l *loader) directExportingStructPackage(unit *fileUnit, name string, ctx r
 		if set.isStdlib() {
 			if packageName == "sqlite" && (name == "DB" || name == "Stmt") {
 				return "sqlite", true
+			}
+			if packageName == "jwt" && name == "Claims" {
+				return "jwt", true
 			}
 			continue
 		}

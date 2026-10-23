@@ -70,6 +70,7 @@ func runCompiledResult(out io.Writer, in io.Reader, result *compileResult) error
 		UsesHTTP:   result.UsesHTTP,
 		UsesSQLite: result.UsesSQLite,
 		UsesJSON:   result.UsesJSON,
+		UsesJWT:    result.UsesJWT,
 		Debug:      result.Debug,
 	}); err != nil {
 		return err

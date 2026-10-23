@@ -18,6 +18,7 @@ type Program struct {
 	UsesHTTP    bool
 	UsesSQLite  bool
 	UsesJSON    bool
+	UsesJWT     bool
 	UsedTypes   []ast.Type
 }
 
@@ -798,6 +799,19 @@ func (e *JSONCallExpr) Ownership() types.Origin { return e.Origin }
 
 func (*JSONCallExpr) exprNode() {}
 
+type JWTCallExpr struct {
+	Kind   types.JWTCallKind
+	Args   []Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *JWTCallExpr) Type() ast.Type { return e.Typ }
+
+func (e *JWTCallExpr) Ownership() types.Origin { return e.Origin }
+
+func (*JWTCallExpr) exprNode() {}
+
 type ReadPPMExpr struct {
 	Path   Expr
 	Typ    ast.Type
@@ -963,6 +977,11 @@ func Build(program *ast.Program, info *types.Info) (*Program, error) {
 		builder.used.note(&ast.TupleType{Types: []ast.Type{stdlib.JSONDocType, ast.ErrorType}})
 		builder.used.note(&ast.TupleType{Types: []ast.Type{stdlib.JSONMapType, ast.ErrorType}})
 	}
+	if out.UsesJWT {
+		builder.used.note(stdlib.JWTClaimsType)
+		builder.used.note(&ast.TupleType{Types: []ast.Type{ast.StringType, ast.ErrorType}})
+		builder.used.note(&ast.TupleType{Types: []ast.Type{stdlib.JWTClaimsType, ast.ErrorType}})
+	}
 	out.UsedTypes = builder.used.list
 	return out, nil
 }
@@ -1051,7 +1070,7 @@ func (b builder) buildProgram(program *ast.Program) (*Program, error) {
 	for k, v := range b.info.Structs {
 		structs[k] = v
 	}
-	out := &Program{PackageName: program.PackageName, Structs: structs, UsesHTTP: len(b.info.HTTPCalls) > 0, UsesSQLite: b.info.UsesSQLite, UsesJSON: b.info.UsesJSON}
+	out := &Program{PackageName: program.PackageName, Structs: structs, UsesHTTP: len(b.info.HTTPCalls) > 0, UsesSQLite: b.info.UsesSQLite, UsesJSON: b.info.UsesJSON, UsesJWT: b.info.UsesJWT}
 	for _, fn := range program.Functions {
 		irFn, err := b.buildFunc(fn)
 		if err != nil {
@@ -1525,6 +1544,13 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 				return nil, err
 			}
 			return &JSONCallExpr{Kind: jsonSig.Kind, Args: args, Typ: typ, Origin: origin}, nil
+		}
+		if jwtSig, ok := b.info.JWTCalls[expr]; ok {
+			args, err := b.buildExprs(expr.Args)
+			if err != nil {
+				return nil, err
+			}
+			return &JWTCallExpr{Kind: jwtSig.Kind, Args: args, Typ: typ, Origin: origin}, nil
 		}
 		if httpSig, ok := b.info.HTTPCalls[expr]; ok {
 			return b.buildHTTPExpr(expr, httpSig, typ, origin)

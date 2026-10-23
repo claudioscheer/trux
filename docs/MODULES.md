@@ -4,7 +4,7 @@
 
 Trux now has initial module support. Programs can load multiple `.tx` source files through relative imports, while the backend still compiles the loaded program into one generated program source (`.c` or `.cu`) plus the shared `trux_runtime.h` header.
 
-The implemented stage supports `import "relative/path.tx"`, standard package imports such as `import "io"`, `import "csv"`, `import "image"`, `import "time"`, `import "http"`, and `import "gpu"`, `pub func`, package-qualified calls such as `math.add(...)`, package-private functions across same-directory files that declare the same package, private-name hygiene, import de-duplication, different package names per loaded file, multiple direct imports that share one package name, and cycle detection. Recursive directory-based packages, reusable package artifacts, and separate C compilation are still deferred.
+The implemented stage supports `import "relative/path.tx"`, standard package imports such as `import "io"`, `import "csv"`, `import "image"`, `import "time"`, `import "http"`, `import "gpu"`, and `import "jwt"`, `pub func`, package-qualified calls such as `math.add(...)`, package-private functions across same-directory files that declare the same package, private-name hygiene, import de-duplication, different package names per loaded file, multiple direct imports that share one package name, and cycle detection. Recursive directory-based packages, reusable package artifacts, and separate C compilation are still deferred.
 
 ## Generated C Code and Modules
 
@@ -81,7 +81,7 @@ entry file
 Concrete loader rules:
 
 - Source import paths must be relative string literals. Absolute paths are rejected.
-- Bare imports are reserved for standard packages. The standard packages are `io`, `csv`, `image`, `time`, `http`, and `gpu`. Other bare imports are rejected.
+- Bare imports are reserved for standard packages. The standard packages are `io`, `csv`, `image`, `time`, `http`, `gpu`, and `jwt`. Other bare imports are rejected.
 - Import paths are normalized with `filepath.Clean` and resolved to canonical absolute paths before de-duplication and cycle detection.
 - A source file is loaded at most once, even if reached through multiple import paths such as `foo.tx` and `./foo.tx`.
 - Loading an imported source file also loads same-directory siblings whose package clause matches that imported file.

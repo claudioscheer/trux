@@ -52,7 +52,7 @@ Highlights:
 - arena-based memory with simple ownership rules (`mut` parameters, pointers, `new(T)`, `clone`) instead of a garbage collector
 - multi-file programs with relative imports, `pub func`, and `pub type ... struct`
 - built-in unit tests: `.test.tx` files run by `trux test`
-- standard packages for stdin, files, and directories (`io`), CSV (`csv`), PPM images (`image`), errors (`errors`), clocks (`time`), and HTTP servers (`http`)
+- standard packages for stdin, files, and directories (`io`), CSV (`csv`), PPM images (`image`), errors (`errors`), clocks (`time`), HTTP servers (`http`), and HS256 tokens (`jwt`)
 - GPU kernels written in Trux with `kernel func`, compiled as CUDA
 
 ## Install and build
@@ -62,6 +62,7 @@ Requirements:
 - [Go](https://go.dev/dl/) to build the compiler (`go.mod` declares Go 1.26.3)
 - a C11 compiler, invoked as `cc` or `$CC`
 - optional: the NVIDIA CUDA toolkit (`nvcc` or `$NVCC`) and an NVIDIA GPU for programs with kernels
+- optional: [libjwt](https://github.com/benmcollins/libjwt) 3 with jansson and OpenSSL for programs that `import "jwt"`. Set `TRUX_LIBJWT_PREFIX` when those libraries are not on the compiler's default search path. HS256 secrets must be at least 32 bytes
 - optional: `make` for the convenience targets
 
 ```bash
@@ -96,7 +97,7 @@ The website covers everything from installation to compiler internals:
 | --- | --- |
 | [Getting started](https://claudioscheer.github.io/trux/docs/getting-started/) | install, first program, editor setup |
 | [Language guide](https://claudioscheer.github.io/trux/docs/guide/) | every feature: what it is, how to use it, and the real errors it produces |
-| [Standard library](https://claudioscheer.github.io/trux/docs/stdlib/) | `io`, `csv`, `image`, `time`, `http`, `gpu` |
+| [Standard library](https://claudioscheer.github.io/trux/docs/stdlib/) | `io`, `csv`, `image`, `time`, `http`, `gpu`, `jwt` |
 | [Examples](https://claudioscheer.github.io/trux/docs/examples/) | every program in `examples/`, with its output |
 | [CLI reference](https://claudioscheer.github.io/trux/docs/cli/) | `run`, `build`, `emit-c`, `fmt`, `test` |
 | [How it works](https://claudioscheer.github.io/trux/docs/internals/) | the compilation pipeline, generated C and CUDA, codebase tour |

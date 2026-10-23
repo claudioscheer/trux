@@ -53,9 +53,11 @@ type Info struct {
 	GPUCalls      map[*ast.CallExpr]GPUCallSig
 	SQLiteCalls   map[*ast.CallExpr]SQLiteCallSig
 	JSONCalls     map[*ast.CallExpr]JSONCallSig
+	JWTCalls      map[*ast.CallExpr]JWTCallSig
 	KernelAxes    map[string]int
 	UsesSQLite    bool
 	UsesJSON      bool
+	UsesJWT       bool
 }
 
 type AppendSig struct {
@@ -180,6 +182,21 @@ const (
 
 type JSONCallSig struct {
 	Kind JSONCallKind
+}
+
+type JWTCallKind string
+
+const (
+	JWTCallSign      JWTCallKind = JWTCallKind(stdlib.CallJWTSign)
+	JWTCallVerify    JWTCallKind = JWTCallKind(stdlib.CallJWTVerify)
+	JWTCallGetString JWTCallKind = JWTCallKind(stdlib.CallJWTGetString)
+	JWTCallGetInt    JWTCallKind = JWTCallKind(stdlib.CallJWTGetInt)
+	JWTCallGetBool   JWTCallKind = JWTCallKind(stdlib.CallJWTGetBool)
+	JWTCallGetFloat  JWTCallKind = JWTCallKind(stdlib.CallJWTGetFloat)
+)
+
+type JWTCallSig struct {
+	Kind JWTCallKind
 }
 
 type HTTPCallKind string
@@ -421,6 +438,7 @@ func Check(program *ast.Program) (*Info, error) {
 			GPUCalls:      map[*ast.CallExpr]GPUCallSig{},
 			SQLiteCalls:   map[*ast.CallExpr]SQLiteCallSig{},
 			JSONCalls:     map[*ast.CallExpr]JSONCallSig{},
+			JWTCalls:      map[*ast.CallExpr]JWTCallSig{},
 			KernelAxes:    map[string]int{},
 		},
 	}
@@ -433,6 +451,10 @@ func Check(program *ast.Program) (*Info, error) {
 		if imp.Path == "json" {
 			c.info.UsesJSON = true
 			c.registerJSONStructs()
+		}
+		if imp.Path == "jwt" {
+			c.info.UsesJWT = true
+			c.registerJWTStructs()
 		}
 	}
 
@@ -508,6 +530,17 @@ func (c *checker) registerJSONStructs() {
 		c.info.Structs["trux_json_mut_val"] = StructSig{
 			Name:        "trux_json_mut_val",
 			DisplayName: "json.MutVal",
+			Fields:      nil,
+			FieldMap:    map[string]ast.Type{},
+		}
+	}
+}
+
+func (c *checker) registerJWTStructs() {
+	if _, ok := c.info.Structs["trux_jwt_claims"]; !ok {
+		c.info.Structs["trux_jwt_claims"] = StructSig{
+			Name:        "trux_jwt_claims",
+			DisplayName: "jwt.Claims",
 			Fields:      nil,
 			FieldMap:    map[string]ast.Type{},
 		}
@@ -1555,6 +1588,9 @@ func (c *checker) checkExpr(locals *scope, expr ast.Expression, allowPrint bool)
 		if expr.Type.Package == "json" {
 			return nil, typeError(expr.Start, "cannot instantiate %s directly; use json functions", expr.Type)
 		}
+		if expr.Type.Package == "jwt" {
+			return nil, typeError(expr.Start, "cannot instantiate %s directly; use jwt functions", expr.Type)
+		}
 		if err := c.validateType(expr.Start, expr.Type); err != nil {
 			return nil, err
 		}
@@ -2570,6 +2606,9 @@ func (c *checker) checkStdlibCall(expr *ast.CallExpr, member stdlib.Member, argT
 	} else if member.Package == "json" {
 		c.info.UsesJSON = true
 		c.info.JSONCalls[expr] = JSONCallSig{Kind: JSONCallKind(member.Kind)}
+	} else if member.Package == "jwt" {
+		c.info.UsesJWT = true
+		c.info.JWTCalls[expr] = JWTCallSig{Kind: JWTCallKind(member.Kind)}
 	} else {
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallKind(member.Kind)}
 	}
@@ -2868,6 +2907,11 @@ func (c *checker) validateType(pos token.Position, typ ast.Type) error {
 				targetName = "trux_json_mut_val"
 			}
 			typ.ResolvedName = targetName
+		}
+		if typ.Package == "jwt" && typ.Name == "Claims" {
+			c.info.UsesJWT = true
+			c.registerJWTStructs()
+			typ.ResolvedName = "trux_jwt_claims"
 		}
 		sig, ok := c.info.Structs[typ.TargetName()]
 		if !ok {

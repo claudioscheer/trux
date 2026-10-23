@@ -133,6 +133,12 @@ const (
 	CallJSONAddVal            CallKind = "jsonAddVal"
 	CallJSONAppendVal         CallKind = "jsonAppendVal"
 	CallJSONWrite             CallKind = "jsonWrite"
+	CallJWTSign               CallKind = "jwtSign"
+	CallJWTVerify             CallKind = "jwtVerify"
+	CallJWTGetString          CallKind = "jwtGetString"
+	CallJWTGetInt             CallKind = "jwtGetInt"
+	CallJWTGetBool            CallKind = "jwtGetBool"
+	CallJWTGetFloat           CallKind = "jwtGetFloat"
 )
 
 type ResultOrigin string
@@ -195,6 +201,8 @@ var (
 	JSONMutDocType = &ast.PointerType{Elem: &ast.StructType{Name: "MutDoc", Package: "json", ResolvedName: "trux_json_mut_doc"}}
 	JSONMutValType = &ast.PointerType{Elem: &ast.StructType{Name: "MutVal", Package: "json", ResolvedName: "trux_json_mut_val"}}
 	JSONMapType    = &ast.MapType{Key: ast.StringType, Value: ast.StringType}
+
+	JWTClaimsType = &ast.PointerType{Elem: &ast.StructType{Name: "Claims", Package: "jwt", ResolvedName: "trux_jwt_claims"}}
 )
 
 var packages = []Package{
@@ -892,6 +900,17 @@ var packages = []Package{
 			{Package: "json", Name: "addVal", Kind: CallJSONAddVal, Params: []Param{{Name: "doc", Type: JSONMutDocType}, {Name: "obj", Type: JSONMutValType}, {Name: "key", Type: ast.StringType}, {Name: "val", Type: JSONMutValType}}, StatementOnly: true, Detail: "add value key-value to mutable object"},
 			{Package: "json", Name: "appendVal", Kind: CallJSONAppendVal, Params: []Param{{Name: "arr", Type: JSONMutValType}, {Name: "val", Type: JSONMutValType}}, StatementOnly: true, Detail: "append value to mutable array"},
 			{Package: "json", Name: "write", Kind: CallJSONWrite, Params: []Param{{Name: "doc", Type: JSONMutDocType}}, ReturnType: ast.StringType, ResultOrigin: ResultOwned, Detail: "serialize a mutable JSON document to a string"},
+		},
+	},
+	{
+		Name: "jwt",
+		Members: []Member{
+			{Package: "jwt", Name: "sign", Kind: CallJWTSign, Params: []Param{{Name: "claims", Type: ast.StringType}, {Name: "secret", Type: ast.StringType}}, ReturnType: &ast.TupleType{Types: []ast.Type{ast.StringType, ast.ErrorType}}, ResultOrigin: ResultOwned, Detail: "sign a JSON object as an HS256 JWT"},
+			{Package: "jwt", Name: "verify", Kind: CallJWTVerify, Params: []Param{{Name: "token", Type: ast.StringType}, {Name: "secret", Type: ast.StringType}}, ReturnType: &ast.TupleType{Types: []ast.Type{JWTClaimsType, ast.ErrorType}}, ResultOrigin: ResultOwned, Detail: "verify an HS256 JWT and return its claims"},
+			{Package: "jwt", Name: "getString", Kind: CallJWTGetString, Params: []Param{{Name: "claims", Type: JWTClaimsType}, {Name: "key", Type: ast.StringType}}, ReturnType: ast.StringType, ResultOrigin: ResultOwned, Detail: "read a string claim"},
+			{Package: "jwt", Name: "getInt", Kind: CallJWTGetInt, Params: []Param{{Name: "claims", Type: JWTClaimsType}, {Name: "key", Type: ast.StringType}}, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "read an integer claim"},
+			{Package: "jwt", Name: "getBool", Kind: CallJWTGetBool, Params: []Param{{Name: "claims", Type: JWTClaimsType}, {Name: "key", Type: ast.StringType}}, ReturnType: ast.BoolType, ResultOrigin: ResultOwned, Detail: "read a boolean claim"},
+			{Package: "jwt", Name: "getFloat", Kind: CallJWTGetFloat, Params: []Param{{Name: "claims", Type: JWTClaimsType}, {Name: "key", Type: ast.StringType}}, ReturnType: ast.FloatType, ResultOrigin: ResultOwned, Detail: "read a float claim"},
 		},
 	},
 }

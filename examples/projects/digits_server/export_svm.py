@@ -109,7 +109,9 @@ def full_tensors():
     train_x, test_x, train_y, test_y = train_test_split(
         images, digits.target, test_size=0.5, shuffle=False
     )
-    clf = SVC(gamma=0.001)
+    # ovo matches the 45 pairwise sums in vote_digit. The default ovr shape
+    # is 10 numbers and does not change the fitted weights.
+    clf = SVC(gamma=0.001, decision_function_shape="ovo")
     clf.fit(train_x, train_y)
     gamma = float(clf._gamma)
     if abs(gamma - 0.001) > 1e-15:

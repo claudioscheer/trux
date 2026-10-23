@@ -1,10 +1,20 @@
 # Handwritten digits HTTP + GPU
 
-Times `POST /predict` on the digits server. Each request is one 8x8 image. The weights are a TXM1 file mounted once, before listen. A request copies 64 floats into that worker's workspace, launches the RBF kernel, and finishes on the `io_uring` loop. The worker does not load the file again and does not allocate the weights again.
+Times `POST /predict` on `server.tx`. Each request posts `image.json`: one 8×8 image from scikit-learn [`load_digits`](https://scikit-learn.org/stable/modules/generated/sklearn.datasets.load_digits.html) (1,797 images, 64 pixels, values 0–16). Row 1728 is a handwritten 7 from the held-out half. Rows 0–897 train the model. The dataset label is the first line of `label.txt`.
 
-The default file matches the notebook model shape: 519 support vectors, 64 features, dual coefficients `9 x 519`, 45 intercepts, gamma `0.001`. The notebook prints that support-vector count after `SVC(gamma=0.001)` on the 898-image training split. The numbers in the default file are synthetic. Class 0 owns the first 52 vectors, all zeros, so an image of 64 zeros is digit 0. Pass `-model` with the `digits.txm` from `export_svm.py` to time the trained weights instead.
+The trained model is `weights.txm`. That file is binary. `examples/projects/digits_server/export_svm.py` is the script that packs `SVC(gamma=0.001)` into it (`support_vectors_`, `dual_coef_`, `intercept_`, `n_support_`, gamma). Regenerate with:
 
-The server is `server.tx`. It is the same predict and vote path as `examples/projects/digits_server`, bound to `127.0.0.1:8090`, mounting `digits.txm`.
+```
+python3 examples/projects/digits_server/export_svm.py --output benchmarks/digits/weights.txm
+```
+
+The harness copies `weights.txm` to `digits.txm` for `gpu.mount` and deletes the copy when the run ends. `digits.txm` is gitignored.
+
+A request copies the 64 floats into that worker's workspace, launches the RBF kernel, and finishes on the `io_uring` loop. The worker does not load the file again and does not allocate the weights again.
+
+The correct digit is 7. The harness votes the image on the host and requires that vote to be 7. It then requires every response, including the ones inside the timer, to be `{"digit":7}`. `-model` still has to classify this image as 7. Device `exp` and host `exp` can disagree when a pair sum is almost zero, and that run fails.
+
+`server.tx` is the same predict and vote path as `examples/projects/digits_server`, bound to `127.0.0.1:8090`.
 
 ## Run
 
@@ -14,13 +24,11 @@ Linux, `liburing`, and CUDA:
 make bench-digits
 ```
 
-That runs `go run ./benchmarks/digits/`. The harness builds the server, writes `digits.txm`, checks one prediction, then measures keep-alive posts. Default levels are 1, 8, and 32 connections, 6 seconds each. One kernel is in flight per worker. Workers follow the process CPU affinity mask.
+That runs `go run ./benchmarks/digits/`. The harness builds the server, copies `weights.txm` to `digits.txm`, checks the digit, then measures keep-alive posts. Default levels are 1, 8, and 32 connections, 6 seconds each. Concurrency is the number of clients posting at once. It is separate from the worker count. Workers follow the process CPU affinity mask. One kernel is in flight per worker.
 
 ```
 go run ./benchmarks/digits/ -duration 10s -concurrency 1,4,16
-go run ./benchmarks/digits/ -model examples/projects/digits_server/digits.txm
+go run ./benchmarks/digits/ -model path/to/other.txm
 ```
 
 `make bench` does not run this. That target is the in-process integer, matrix, stencil, and conv-net programs. This server needs the Linux HTTP runtime.
-
-The check image is 64 zeros. The harness computes the digit with the same host vote as `server.tx` and requires the response body to be that digit. A trained file can disagree if `exp` on the device and `exp` on the host land on opposite sides of a decision that is almost zero.

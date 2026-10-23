@@ -23,6 +23,24 @@ payload        raw      product(dims) values, int64 or float64
 
 A one-element float tensor is a scalar. There is no separate scalar table and no workspace table. Workspace sizes are chosen by the program with `gpu.workspaceFloat` and `gpu.workspaceInt`.
 
+## Two files
+
+The bytes start the same way for every model. `examples/projects/digits_server/sample.txm` begins:
+
+```
+54 58 4d 31   01 00 00 00   05 00 00 00
+T  X  M  1    version 1     5 tensors
+```
+
+A linear regression `y = w0*x0 + w1*x1 + b` is two tensors. The program multiplies `w` by the input and adds `b`. The file does not store that formula.
+
+| Name | Shape | Dtype | Values |
+| --- | --- | --- | --- |
+| `w` | `[2]` | float | 1.5, -0.25 |
+| `b` | `[1]` | float | 0.5 |
+
+An SVM uses other names. The digits table below is what `examples/projects/digits_server` and `benchmarks/digits` read. `sample.txm` has those names with `n_sv = 2`. `benchmarks/digits/weights.txm` is the trained file, with `n_sv = 519`.
+
 The reader rejects:
 
 - a magic other than `TXM1`

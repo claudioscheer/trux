@@ -139,7 +139,7 @@ The script compiles the Trux HTTP server, builds the runtime Docker container, e
 
 ## Handwritten digits on the GPU
 
-`benchmarks/digits` times `POST /predict` for the handwritten-digits SVM. The server mounts a TXM1 file once, then each request launches one RBF kernel and reuses that device memory. The default file has the notebook shape: 519 support vectors, 64 features, gamma 0.001.
+`benchmarks/digits` times `POST /predict` for one real 8×8 digit, `load_digits` row 1728. The [HTTP + GPU](/docs/benchmarks/http-gpu/) page shows that image, the trained TXM1 weights, and the digit check.
 
 ```bash
 make bench-digits

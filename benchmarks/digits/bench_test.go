@@ -36,6 +36,36 @@ func TestSyntheticModelVotesZero(t *testing.T) {
 	}
 }
 
+func TestBenchImageMatchesDatasetLabel(t *testing.T) {
+	dir := sourceDir()
+	_, pixels, err := loadImage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digit, index, err := loadLabel(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index != 1728 || digit != 7 {
+		t.Fatalf("label = row %d digit %d, want row 1728 digit 7", index, digit)
+	}
+	raw, _, err := loadModelBytes(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := parseModel(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.nSV != digitsSV {
+		t.Fatalf("n_sv = %d, want %d", model.nSV, digitsSV)
+	}
+	got := model.voteDigit(model.scores(pixels))
+	if got != digit {
+		t.Fatalf("host vote = %d, dataset label = %d", got, digit)
+	}
+}
+
 func TestParseLevels(t *testing.T) {
 	levels, err := parseLevels("1, 8, 32")
 	if err != nil {

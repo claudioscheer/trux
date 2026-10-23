@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -27,7 +28,7 @@ func main() {
 func run() error {
 	duration := flag.Duration("duration", 6*time.Second, "length of each concurrency level")
 	concurrency := flag.String("concurrency", "1,8,32", "comma-separated keep-alive connection counts")
-	modelPath := flag.String("model", "", "TXM1 file to serve; empty writes the synthetic 519-vector model")
+	modelPath := flag.String("model", "", "TXM1 file to serve; empty uses benchmarks/digits/weights.txm")
 	flag.Parse()
 
 	if runtime.GOOS != "linux" {
@@ -41,7 +42,7 @@ func run() error {
 
 	dir := sourceDir()
 	root := filepath.Join(dir, "..", "..")
-	raw, label, err := loadModelBytes(*modelPath)
+	raw, label, err := loadModelBytes(dir, *modelPath)
 	if err != nil {
 		return err
 	}
@@ -49,8 +50,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	want := model.voteDigit(model.scores(zeroImage()))
-	body := zeroBody()
+	body, pixels, err := loadImage(dir)
+	if err != nil {
+		return err
+	}
+	want, imageIndex, err := loadLabel(dir)
+	if err != nil {
+		return err
+	}
+	voted := model.voteDigit(model.scores(pixels))
+	if voted != want {
+		return fmt.Errorf("weights classify load_digits row %d as %d, dataset label is %d", imageIndex, voted, want)
+	}
 	expected := []byte(fmt.Sprintf(`{"digit":%d}`, want))
 
 	txmPath := filepath.Join(dir, "digits.txm")
@@ -109,7 +120,8 @@ func run() error {
 	fmt.Printf("handwritten digits HTTP+GPU\n")
 	fmt.Printf("model %s  n_sv %d  features %d  gamma %g\n", label, model.nSV, digitsFeatures, model.gamma)
 	fmt.Printf("listen 127.0.0.1:8090  workers one per CPU in the affinity mask\n")
-	fmt.Printf("check 64 zeros -> {\"digit\":%d}\n", want)
+	fmt.Printf("image %s  load_digits row %d  label %d\n", filepath.Join(dir, "image.json"), imageIndex, want)
+	fmt.Printf("check host vote %d and every response {\"digit\":%d}\n", want, want)
 	fmt.Printf("one launch per request per worker; weights stay mounted\n")
 
 	failed := false
@@ -241,17 +253,58 @@ func newClient(concurrency int) *http.Client {
 	}
 }
 
-func zeroBody() []byte {
-	var buf bytes.Buffer
-	buf.WriteByte('[')
-	for i := 0; i < digitsFeatures; i++ {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-		buf.WriteByte('0')
+func loadImage(dir string) ([]byte, []float64, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "image.json"))
+	if err != nil {
+		return nil, nil, err
 	}
-	buf.WriteByte(']')
-	return buf.Bytes()
+	data = bytes.TrimSpace(data)
+	pixels, err := parsePixels(data)
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, pixels, nil
+}
+
+func parsePixels(data []byte) ([]float64, error) {
+	var pixels []float64
+	if err := json.Unmarshal(data, &pixels); err != nil {
+		return nil, fmt.Errorf("image.json: %w", err)
+	}
+	if len(pixels) != digitsFeatures {
+		return nil, fmt.Errorf("image.json has %d pixels, want %d", len(pixels), digitsFeatures)
+	}
+	blank := true
+	for _, pixel := range pixels {
+		if pixel != 0 {
+			blank = false
+			break
+		}
+	}
+	if blank {
+		return nil, fmt.Errorf("image.json is 64 zeros, want a handwritten digit")
+	}
+	return pixels, nil
+}
+
+func loadLabel(dir string) (int, int, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "label.txt"))
+	if err != nil {
+		return 0, 0, err
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) != 2 {
+		return 0, 0, fmt.Errorf("label.txt wants the digit and the load_digits row")
+	}
+	digit, err := strconv.Atoi(fields[0])
+	if err != nil || digit < 0 || digit > 9 {
+		return 0, 0, fmt.Errorf("label.txt digit is %q", fields[0])
+	}
+	index, err := strconv.Atoi(fields[1])
+	if err != nil || index < 0 {
+		return 0, 0, fmt.Errorf("label.txt row is %q", fields[1])
+	}
+	return digit, index, nil
 }
 
 func parseLevels(text string) ([]int, error) {
@@ -274,9 +327,9 @@ func parseLevels(text string) ([]int, error) {
 	return levels, nil
 }
 
-func loadModelBytes(path string) ([]byte, string, error) {
+func loadModelBytes(dir string, path string) ([]byte, string, error) {
 	if path == "" {
-		return syntheticTXM(), "synthetic", nil
+		path = filepath.Join(dir, "weights.txm")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

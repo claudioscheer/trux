@@ -21,7 +21,7 @@ python3 export_svm.py
 python3 export_svm.py --sample
 ```
 
-The full export needs numpy and scikit-learn. `--sample` needs only the Python standard library.
+The full export needs numpy and scikit-learn. `--sample` needs only the Python standard library. The benchmark commits one export as `benchmarks/digits/weights.txm`.
 
 ## What costs what
 
@@ -42,4 +42,4 @@ A second `copyToDevice` into the same workspace before the first device copy fin
 
 ## Benchmark
 
-`make bench-digits` times this predict path on Linux with liburing and CUDA. The harness is `benchmarks/digits`. It serves a TXM1 file with the notebook shape, 519 support vectors, and reports request rate and latency. `make bench` does not start this server.
+`make bench-digits` times this predict path on Linux with liburing and CUDA. The harness is `benchmarks/digits`. It posts `load_digits` row 1728, a handwritten 7, and mounts the trained `weights.txm` from that directory. `make bench` does not start this server.

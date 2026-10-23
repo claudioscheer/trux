@@ -2801,10 +2801,15 @@ func originForParam(param ast.Param) Origin {
 }
 
 // originForUnpackedValue is the origin of one value taken out of a call's
-// tuple. Dynamic values are allocated in this function's frame, so returning
-// them later must copy them into the caller. Marking them owned skipped that
-// copy and left the caller with a pointer into a freed frame.
+// tuple. A string's bytes live in this function's frame, so returning it must
+// copy those bytes into the caller. A pointer is an owned heap identity
+// (a sqlite connection, for example). Cloning it shallow-copies the struct
+// onto the caller frame and splits that identity, so the pointer is returned
+// as-is.
 func originForUnpackedValue(typ ast.Type) Origin {
+	if _, isPtr := typ.(*ast.PointerType); isPtr {
+		return OriginOwned
+	}
 	if dynamicType(typ) {
 		return OriginFrameOwned
 	}

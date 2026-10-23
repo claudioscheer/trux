@@ -413,6 +413,68 @@ func main() int {
 	}
 }
 
+func TestRunFileReturnedSQLiteHandleIsNotCloned(t *testing.T) {
+	requireCC(t)
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "t.db")
+	src := `package main
+import "sqlite"
+
+func openDB(path string) (*sqlite.DB, error) {
+    let db *sqlite.DB, err error = sqlite.open(path)
+    return db, err
+}
+
+func readTwice(path string) int {
+    let db *sqlite.DB, err error = openDB(path)
+    if err != nil {
+        return -1
+    }
+    let i int = 0
+    let total int = 0
+    for i < 2 {
+        let stmt *sqlite.Stmt, perr error = sqlite.prepare(db, "SELECT 7")
+        if perr != nil {
+            return -2
+        }
+        let has bool, serr error = sqlite.step(stmt)
+        if serr != nil || !has {
+            return -3
+        }
+        total = total + sqlite.columnInt(stmt, 0)
+        let ferr error = sqlite.finalize(stmt)
+        if ferr != nil {
+            return -4
+        }
+        i = i + 1
+    }
+    return total
+}
+
+func main() int {
+    print(readTwice("` + dbPath + `"))
+    print(readTwice("` + dbPath + `"))
+    return 0
+}`
+	path := writeTempSource(t, src)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.CSource, "trux_sqlite_db_clone(trux_result_arena") || strings.Contains(result.CSource, "trux_sqlite_db_clone(&trux_frame") {
+		t.Fatal("returning an unpacked sqlite.DB pointer cloned the connection")
+	}
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "14\n14\n" {
+		t.Fatalf("output = %q, want 14\\n14\\n", out.String())
+	}
+}
+
 func TestRunFileKeepsTempStringReturnAliveForCaller(t *testing.T) {
 	requireCC(t)
 

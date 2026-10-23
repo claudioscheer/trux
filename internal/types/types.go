@@ -2815,13 +2815,26 @@ func opaqueSQLitePointer(typ ast.Type) bool {
 	return st.Package == "sqlite" && (st.Name == "DB" || st.Name == "Stmt")
 }
 
+// returnedPointerOrigin is how a pointer crosses a return, whether the
+// return is a single value or one element of a tuple. sqlite.DB and
+// sqlite.Stmt stay the original heap identity. Every other pointer is
+// copied into the caller, because new(T) allocates in the callee frame.
+func returnedPointerOrigin(typ ast.Type) (Origin, bool) {
+	if _, ok := typ.(*ast.PointerType); !ok {
+		return OriginUnknown, false
+	}
+	if opaqueSQLitePointer(typ) {
+		return OriginOwned, true
+	}
+	return OriginFrameOwned, true
+}
+
 // originForUnpackedValue is the origin of one value taken out of a call's
 // tuple. Strings and ordinary pointers live in this function's frame, so
-// returning them must copy them into the caller. sqlite.DB and sqlite.Stmt
-// are the exception: they are returned as the original pointer.
+// returning them must copy them into the caller.
 func originForUnpackedValue(typ ast.Type) Origin {
-	if opaqueSQLitePointer(typ) {
-		return OriginOwned
+	if origin, ok := returnedPointerOrigin(typ); ok {
+		return origin
 	}
 	if dynamicType(typ) {
 		return OriginFrameOwned
@@ -2830,8 +2843,8 @@ func originForUnpackedValue(typ ast.Type) Origin {
 }
 
 func originForCallResult(typ ast.Type) Origin {
-	if _, isPtr := typ.(*ast.PointerType); isPtr {
-		return OriginOwned
+	if origin, ok := returnedPointerOrigin(typ); ok {
+		return origin
 	}
 	if dynamicType(typ) {
 		return OriginUnknown

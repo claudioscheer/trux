@@ -520,6 +520,130 @@ func main() int {
 	}
 }
 
+func TestRunFileReturnedSingleValueBoxSurvivesLaterAllocation(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+
+type Box struct {
+    n int
+    label string
+}
+
+func makeBox() *Box {
+    let b *Box = new(Box)
+    b.n = 7
+    b.label = "hello" + "-box"
+    return b
+}
+
+func wrap() *Box {
+    let b *Box = makeBox()
+    return b
+}
+
+func main() int {
+    let b *Box = wrap()
+    let junk *Box = new(Box)
+    junk.n = 99
+    junk.label = "over" + "write"
+    print(b.n)
+    print(b.label)
+    return 0
+}`)
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "7\nhello-box\n" {
+		t.Fatalf("output = %q, want 7\\nhello-box\\n", out.String())
+	}
+}
+
+func TestRunFileReturnedSingleValueSQLiteHandleIsNotCloned(t *testing.T) {
+	requireCC(t)
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "t.db")
+	src := `package main
+import "sqlite"
+
+func openRaw(path string) *sqlite.DB {
+    let db *sqlite.DB, err error = sqlite.open(path)
+    if err != nil {
+        return nil
+    }
+    return db
+}
+
+func openDB(path string) *sqlite.DB {
+    let db *sqlite.DB = openRaw(path)
+    return db
+}
+
+func prep(db *sqlite.DB) *sqlite.Stmt {
+    let stmt *sqlite.Stmt, err error = sqlite.prepare(db, "SELECT 7")
+    if err != nil {
+        return nil
+    }
+    return stmt
+}
+
+func prepWrap(db *sqlite.DB) *sqlite.Stmt {
+    let stmt *sqlite.Stmt = prep(db)
+    return stmt
+}
+
+func readTwice(path string) int {
+    let db *sqlite.DB = openDB(path)
+    if db == nil {
+        return -1
+    }
+    let i int = 0
+    let total int = 0
+    for i < 2 {
+        let stmt *sqlite.Stmt = prepWrap(db)
+        if stmt == nil {
+            return -2
+        }
+        let has bool, serr error = sqlite.step(stmt)
+        if serr != nil || !has {
+            return -3
+        }
+        total = total + sqlite.columnInt(stmt, 0)
+        let ferr error = sqlite.finalize(stmt)
+        if ferr != nil {
+            return -4
+        }
+        i = i + 1
+    }
+    return total
+}
+
+func main() int {
+    print(readTwice("` + dbPath + `"))
+    print(readTwice("` + dbPath + `"))
+    return 0
+}`
+	path := writeTempSource(t, src)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.CSource, "trux_sqlite_db_clone(trux_result_arena") || strings.Contains(result.CSource, "trux_sqlite_db_clone(&trux_frame") || strings.Contains(result.CSource, "trux_sqlite_stmt_clone(trux_result_arena") || strings.Contains(result.CSource, "trux_sqlite_stmt_clone(&trux_frame") {
+		t.Fatal("returning a single-value sqlite handle cloned the connection or statement")
+	}
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "14\n14\n" {
+		t.Fatalf("output = %q, want 14\\n14\\n", out.String())
+	}
+}
+
 func TestRunFileKeepsTempStringReturnAliveForCaller(t *testing.T) {
 	requireCC(t)
 

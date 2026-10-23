@@ -39,6 +39,8 @@ struct trux_sqlite_db {
     sqlite3* handle;
     int is_open;
     int is_thread_local;
+    int commits_since_ckpt;
+    int checkpoint_frames;
     trux_sqlite_stmt* stmt_cache[RT_SQLITE_STMT_CACHE_SIZE];
     size_t stmt_cache_count;
 };
@@ -94,11 +96,68 @@ static int rt_sqlite_busy_handler(void* ptr, int count) {
     return 0;
 }
 
-static int rt_sqlite_wal_hook(void* arg, sqlite3* db, const char* zDb, int nEntry) {
-    (void)arg;
-    if (nEntry >= 2000) {
-        sqlite3_wal_checkpoint_v2(db, zDb, SQLITE_CHECKPOINT_TRUNCATE, NULL, NULL);
+/* WAL checkpoint policy: checking + truncating every 2,000 frames fsyncs the
+ * database every ~8 MB of WAL, which bottlenecks single-row INSERT throughput.
+ * Checkpoint less often instead, but keep the WAL small enough that it does not
+ * dominate the container memory limit: cap it at roughly 1/8 of that limit.
+ * Retries are rate-limited so a checkpoint that cannot complete (active
+ * readers) is not re-attempted on every single commit. */
+#define RT_SQLITE_CHECKPOINT_FRAMES_MIN 2000
+#define RT_SQLITE_CHECKPOINT_FRAMES_MAX 20000
+#define RT_SQLITE_CHECKPOINT_COMMITS 500
+
+#if !defined(_WIN32)
+static long long rt_sqlite_read_limit_file(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (f == NULL) return 0;
+    char buf[64] = {0};
+    long long limit = 0;
+    if (fgets(buf, (int)sizeof(buf), f) != NULL && strncmp(buf, "max", 3) != 0) {
+        limit = atoll(buf);
     }
+    fclose(f);
+    return limit;
+}
+#endif
+
+static int rt_sqlite_default_checkpoint_frames(void) {
+#if defined(_WIN32)
+    return RT_SQLITE_CHECKPOINT_FRAMES_MAX;
+#else
+    long long limit = rt_sqlite_read_limit_file("/sys/fs/cgroup/memory.max");
+    if (limit <= 0) {
+        limit = rt_sqlite_read_limit_file("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+    }
+    if (limit <= 0 || limit > (1LL << 60)) {
+        long pages = sysconf(_SC_PHYS_PAGES);
+        long page_size = sysconf(_SC_PAGESIZE);
+        if (pages > 0 && page_size > 0) {
+            limit = (long long)pages * (long long)page_size;
+        }
+    }
+    if (limit <= 0) return RT_SQLITE_CHECKPOINT_FRAMES_MAX;
+    long long frames = limit / 32768; /* 4 KiB frames, WAL <= memory_limit / 8 */
+    if (frames < RT_SQLITE_CHECKPOINT_FRAMES_MIN) frames = RT_SQLITE_CHECKPOINT_FRAMES_MIN;
+    if (frames > RT_SQLITE_CHECKPOINT_FRAMES_MAX) frames = RT_SQLITE_CHECKPOINT_FRAMES_MAX;
+    return (int)frames;
+#endif
+}
+
+static int rt_sqlite_wal_hook(void* arg, sqlite3* db, const char* zDb, int nEntry) {
+    trux_sqlite_db* tdb = (trux_sqlite_db*)arg;
+    int frames = (tdb != NULL) ? tdb->checkpoint_frames : RT_SQLITE_CHECKPOINT_FRAMES_MAX;
+    if (nEntry < frames) {
+        if (tdb != NULL) tdb->commits_since_ckpt = 0;
+        return SQLITE_OK;
+    }
+    if (tdb != NULL) {
+        if (tdb->commits_since_ckpt < RT_SQLITE_CHECKPOINT_COMMITS) {
+            tdb->commits_since_ckpt++;
+            return SQLITE_OK;
+        }
+        tdb->commits_since_ckpt = 0;
+    }
+    sqlite3_wal_checkpoint_v2(db, zDb, SQLITE_CHECKPOINT_TRUNCATE, NULL, NULL);
     return SQLITE_OK;
 }
 
@@ -122,9 +181,10 @@ static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt
         free(db);
         return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, NULL, err);
     }
+    db->checkpoint_frames = rt_sqlite_default_checkpoint_frames();
     sqlite3_busy_handler(db->handle, rt_sqlite_busy_handler, NULL);
-    (void)sqlite3_exec(db->handle, "PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA journal_size_limit=4194304; PRAGMA mmap_size=67108864; PRAGMA cache_size=-16384;", NULL, NULL, NULL);
-    sqlite3_wal_hook(db->handle, rt_sqlite_wal_hook, NULL);
+    (void)sqlite3_exec(db->handle, "PRAGMA synchronous=NORMAL; PRAGMA wal_autocheckpoint=0; PRAGMA temp_store=MEMORY; PRAGMA journal_size_limit=4194304; PRAGMA mmap_size=67108864; PRAGMA cache_size=-16384;", NULL, NULL, NULL);
+    sqlite3_wal_hook(db->handle, rt_sqlite_wal_hook, db);
     db->is_open = 1;
     return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, db, NULL);
 }

@@ -118,7 +118,7 @@ Handlers utilize thread-local connection caching (`sqlite.openThreadLocal`) pair
 
 ### Concurrent Readers vs. High-Throughput WAL Writes
 - **High-Throughput Reads (`/sqlite/query-by-id/1024`)**: Parameterized prepared queries scale up to **262,263 req/s** on disk with a **10.14 ms** p99 latency at 1,000 concurrency across 4 cores.
-- **High-Throughput WAL Writes (`/sqlite/insert-and-query`, `/api/authenticated-audit`)**: Combining `PRAGMA synchronous=NORMAL`, persistent statement caching, CPU-affinity worker sizing (`sched_getaffinity`), and bounded 2,000-frame `SQLITE_CHECKPOINT_TRUNCATE` checkpoints sustains **52,767 to 73,039 writes/sec** with **1.09–2.18 ms** median latency at 100 concurrency and zero lock errors.
+- **High-Throughput WAL Writes (`/sqlite/insert-and-query`, `/api/authenticated-audit`)**: Combining `PRAGMA synchronous=NORMAL`, persistent statement caching, CPU-affinity worker sizing (`sched_getaffinity`), and memory-scaled (2,000–20,000 frame) `SQLITE_CHECKPOINT_TRUNCATE` checkpoints sustains **52,767 to 73,039 writes/sec** with **1.09–2.18 ms** median latency at 100 concurrency and zero lock errors.
 - **Async `io_uring_prep_send` & Batched CQE Draining**: Worker threads drain all ready completion queue entries (`io_uring_for_each_cqe`) and queue HTTP responses via `io_uring_prep_send`, coalescing network I/O into batched ring submissions.
 
 ### Low Memory Footprint Under Continuous I/O

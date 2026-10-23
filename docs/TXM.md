@@ -66,3 +66,18 @@ The reader rejects:
 | `n_support` | `[10]` | int | support vectors per digit |
 
 The checked-in `sample.txm` has `n_sv = 2` so the fixture stays small. The full training file is produced by `export_svm.py` and is not committed.
+
+## Writing a file
+
+`python/txm.py` writes this layout and enforces the name, shape, dtype, and size rules before a file reaches `gpu.mount`. The example exporters use it instead of packing `struct` by hand:
+
+```python
+import txm
+
+txm.pack("model.txm", [
+    txm.floats("w", [[1.5, -0.25]]),
+    txm.floats("b", [0.5]),
+])
+```
+
+`python3 python/txm.py info model.txm` prints the tensor table, and `txm.verify` checks names and shapes after a write. The module is one file and needs only the Python standard library. numpy arrays are accepted when numpy is available.

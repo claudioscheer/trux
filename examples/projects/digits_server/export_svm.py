@@ -8,61 +8,31 @@ has the tensor names and shapes the server expects.
 """
 
 import argparse
-import struct
 import sys
+from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "python"))
 
-def write_u32(out, value):
-    out.extend(struct.pack("<I", value))
-
-
-def write_u64(out, value):
-    out.extend(struct.pack("<Q", value))
-
-
-def add_tensor(out, name, dtype, dims, payload):
-    raw = name.encode("utf-8")
-    if not 1 <= len(raw) <= 64:
-        raise SystemExit("bad tensor name length")
-    write_u32(out, len(raw))
-    out.extend(raw)
-    write_u32(out, dtype)
-    write_u32(out, len(dims))
-    for dim in dims:
-        if dim < 1:
-            raise SystemExit("dimension must be at least 1")
-        write_u64(out, dim)
-    out.extend(payload)
-
-
-def write_file(path, tensors):
-    out = bytearray(b"TXM1")
-    write_u32(out, 1)
-    write_u32(out, len(tensors))
-    for name, dtype, dims, payload in tensors:
-        add_tensor(out, name, dtype, dims, payload)
-    with open(path, "wb") as handle:
-        handle.write(out)
+import txm
 
 
 def sample_tensors():
-    gamma = struct.pack("<d", 0.001)
-    support = bytearray()
+    support = []
     for sv in range(2):
         for feature in range(64):
-            support.extend(struct.pack("<d", float(sv + 1) * float(feature)))
-    dual = bytearray()
+            support.append(float(sv + 1) * float(feature))
+    dual = []
     for row in range(9):
         for col in range(2):
-            dual.extend(struct.pack("<d", 0.01 * float(row + 1)))
-    intercept = struct.pack("<d", 0.0) * 45
-    n_support = struct.pack("<q", 1) + struct.pack("<q", 1) + (struct.pack("<q", 0) * 8)
+            dual.append(0.01 * float(row + 1))
+    n_support = [1, 1, 0, 0, 0, 0, 0, 0, 0, 0]
     return [
-        ("gamma", 2, (1,), gamma),
-        ("support", 2, (2, 64), bytes(support)),
-        ("dual", 2, (9, 2), bytes(dual)),
-        ("intercept", 2, (45,), intercept),
-        ("n_support", 1, (10,), n_support),
+        txm.floats("gamma", [0.001]),
+        txm.floats("support", support, (2, 64)),
+        txm.floats("dual", dual, (9, 2)),
+        txm.floats("intercept", [0.0] * 45),
+        txm.ints("n_support", n_support),
     ]
 
 
@@ -145,11 +115,11 @@ def full_tensors():
     print("checked %d test rows against sklearn" % len(test_x))
 
     tensors = [
-        ("gamma", 2, (1,), struct.pack("<d", gamma)),
-        ("support", 2, support.shape, support.tobytes()),
-        ("dual", 2, dual.shape, dual.tobytes()),
-        ("intercept", 2, intercept.shape, intercept.tobytes()),
-        ("n_support", 1, n_support.shape, n_support.tobytes()),
+        txm.floats("gamma", [gamma]),
+        txm.floats("support", support),
+        txm.floats("dual", dual),
+        txm.floats("intercept", intercept),
+        txm.ints("n_support", n_support),
     ]
     return tensors
 
@@ -161,7 +131,7 @@ def main():
     args = parser.parse_args()
     if args.sample:
         path = args.output or "sample.txm"
-        write_file(path, sample_tensors())
+        txm.pack(path, sample_tensors())
         print("wrote %s" % path)
         return
     try:
@@ -171,7 +141,7 @@ def main():
         print("pass --sample to write the small fixture", file=sys.stderr)
         return 1
     path = args.output or "digits.txm"
-    write_file(path, tensors)
+    txm.pack(path, tensors)
     print("wrote %s" % path)
     return 0
 

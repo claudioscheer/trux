@@ -6,6 +6,11 @@
 *.out
 benchmarks/**/server
 benchmarks/digits/digits.txm
+examples/projects/mnist_mlp/model.txm
+
+# Python
+__pycache__/
+*.pyc
 
 # Go build artifacts
 *.o

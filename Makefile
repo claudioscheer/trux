@@ -7,7 +7,7 @@ BINARY := trux
 CMD := ./cmd/trux
 RUN_BIN := ./bin/$(BINARY)
 
-.PHONY: build run test bench bench-digits mnist mnist-bench fmt emit-c lsp clean
+.PHONY: build run test bench bench-digits mnist mnist-bench transformer transformer-train fmt emit-c lsp clean
 
 build:
 	$(GO) build -o $(RUN_BIN) $(CMD)
@@ -61,6 +61,15 @@ mnist: build
 mnist-bench: build
 	@cd examples/projects/mnist_mlp && if [ ! -f model.txm ]; then echo "model.txm missing; run python3 export_mlp.py first"; exit 1; fi
 	@cd examples/projects/mnist_mlp && ../../../bin/$(BINARY) run bench.tx
+
+# Tiny character-level transformer. Needs CUDA; uses the committed model.txm
+# and does not require Python or PyTorch.
+transformer: build
+	@cd examples/projects/tiny_transformer && ../../../bin/$(BINARY) run main.tx
+
+# Train and re-export the tiny transformer in Python/PyTorch.
+transformer-train:
+	@cd examples/projects/tiny_transformer && python3 train.py
 
 fmt: build
 	./bin/$(BINARY) fmt -r

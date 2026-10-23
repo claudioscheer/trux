@@ -281,7 +281,7 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 			if err != nil {
 				return err
 			}
-			args = append(args, sqliteObj, "-pthread", "-lm")
+			args = append(args, sqliteObj, "-pthread")
 		}
 		if opts.UsesJSON || opts.UsesJWT {
 			yyjsonObj, err := ensureYYJSONObjectCached(compiler)
@@ -294,6 +294,9 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 			prefix := jwtPrefix()
 			args = appendJWTLinkArgs(args, prefix, false)
 		}
+		// Host math calls (math.exp, math.sqrt) lower to libm functions.
+		// Keep -lm after any cached object files so the linker resolves them.
+		args = append(args, "-lm")
 	}
 
 	cmd := exec.Command(compiler, args...)

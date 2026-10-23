@@ -1384,6 +1384,43 @@ func main() int {
 	}
 }
 
+func TestMathExpAndSqrtCompileAndRun(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "math"
+
+func main() int {
+    let a float = math.exp(0.0)
+    let b float = math.sqrt(4.0)
+    print(a == 1.0 && b == 2.0)
+    return 0
+}`)
+	for _, part := range []string{"exp(", "sqrt("} {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	stdout, _ := compileAndRunGeneratedC(t, cSource)
+	if stdout != "true\n" {
+		t.Fatalf("stdout = %q, want true", stdout)
+	}
+}
+
+func TestGenerateKernelSqrt(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "gpu"
+
+kernel func normalize(i int, input gpu.Buffer[float], out gpu.Buffer[float]) {
+    out[i] = sqrt(input[i])
+}
+
+func main() int {
+    return 0
+}`)
+	if !strings.Contains(cSource, "sqrt(") {
+		t.Fatalf("generated C missing sqrt kernel call:\n%s", cSource)
+	}
+}
+
 func TestEscapingLoopKeepsGrowingString(t *testing.T) {
 	cSource := mustGenerateC(t, `package main
 func main() int {
@@ -1459,7 +1496,7 @@ static void* rt_test_realloc(void* ptr, size_t size) {
 	if err := os.WriteFile(cPath, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	compile := exec.Command(compiler, "-std=c11", "-Wall", "-Wextra", "-pedantic", cPath, "-o", exePath)
+	compile := exec.Command(compiler, "-std=c11", "-Wall", "-Wextra", "-pedantic", cPath, "-o", exePath, "-lm")
 	if output, err := compile.CombinedOutput(); err != nil {
 		t.Fatalf("compile generated C: %v\n%s", err, output)
 	}
@@ -1881,7 +1918,7 @@ func main() int {
 	if err := os.WriteFile(cPath, []byte(cSource), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	compile := exec.Command(compiler, "-std=c11", "-Wall", "-Wextra", "-pedantic", cPath, "-o", exePath)
+	compile := exec.Command(compiler, "-std=c11", "-Wall", "-Wextra", "-pedantic", cPath, "-o", exePath, "-lm")
 	if output, err := compile.CombinedOutput(); err != nil {
 		t.Fatalf("compile generated C: %v\n%s", err, output)
 	}

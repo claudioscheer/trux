@@ -157,6 +157,8 @@ func exprNeedsFrame(expr ir.Expr) bool {
 			}
 		}
 		return false
+	case *ir.MathCallExpr:
+		return exprNeedsFrame(expr.Arg)
 	case *ir.SQLiteCallExpr:
 		if isDynamicType(expr.Type()) {
 			return true
@@ -436,6 +438,8 @@ func exprPublishesFrame(expr ir.Expr, declared map[string]bool, tainted map[stri
 			}
 		}
 		return false
+	case *ir.MathCallExpr:
+		return exprPublishesFrame(expr.Arg, declared, tainted)
 	case *ir.SQLiteCallExpr:
 		for _, arg := range expr.Args {
 			if valueReferencesFrame(arg, tainted) || exprPublishesFrame(arg, declared, tainted) {
@@ -550,6 +554,8 @@ func valueReferencesFrame(expr ir.Expr, tainted map[string]bool) bool {
 		return valueReferencesFrame(expr.Map, tainted)
 	case *ir.CallExpr, *ir.SQLiteCallExpr, *ir.JSONCallExpr, *ir.JWTCallExpr:
 		return isDynamicType(expr.Type())
+	case *ir.MathCallExpr:
+		return false
 	case *ir.IndexExpr, *ir.SliceExpr:
 		return dynamicValueReferencesCollection(expr, tainted)
 	default:
@@ -2287,6 +2293,12 @@ func (e *funcEmitter) emitOrderedExpr(expr ir.Expr, targetArena string) (emitted
 			jwtValues = append(jwtValues, arg.value)
 		}
 		return emittedExpr{prelude: jwtPrelude, value: fmt.Sprintf("%s(%s)", jwtRuntimeFnName(expr.Kind), strings.Join(jwtValues, ", "))}, nil
+	case *ir.MathCallExpr:
+		arg, err := e.emitOrderedOperand(expr.Arg, e.scratch)
+		if err != nil {
+			return emittedExpr{}, err
+		}
+		return emittedExpr{prelude: arg.prelude, value: fmt.Sprintf("%s(%s)", mathFuncName(expr.Kind), arg.value)}, nil
 	case *ir.UnaryExpr:
 		if expr.Operator == "&" {
 			if _, ok := expr.Operand.(*ir.StructLiteral); ok {
@@ -2602,6 +2614,8 @@ func exprHasSideEffect(expr ir.Expr) bool {
 		*ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.PathQueryExpr, *ir.EnvExpr,
 		*ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.MapLookupExpr, *ir.KeysExpr, *ir.ValuesExpr:
 		return true
+	case *ir.MathCallExpr:
+		return exprHasSideEffect(expr.Arg)
 	case *ir.FieldExpr:
 		if _, isPtr := expr.Object.Type().(*ast.PointerType); isPtr {
 			return true
@@ -2984,6 +2998,12 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 			jwtArgs = append(jwtArgs, emitArg)
 		}
 		return fmt.Sprintf("%s(%s)", jwtRuntimeFnName(expr.Kind), strings.Join(jwtArgs, ", ")), nil
+	case *ir.MathCallExpr:
+		arg, err := emitExpr(expr.Arg, targetArena)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s(%s)", mathFuncName(expr.Kind), arg), nil
 	case *ir.UnaryExpr:
 		operand, err := emitExpr(expr.Operand, targetArena)
 		if err != nil {
@@ -3332,6 +3352,17 @@ func emitKernelStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts Options, lo
 	return nil
 }
 
+func mathFuncName(kind semtypes.MathCallKind) string {
+	switch kind {
+	case semtypes.MathCallExp:
+		return "exp"
+	case semtypes.MathCallSqrt:
+		return "sqrt"
+	default:
+		return ""
+	}
+}
+
 func emitKernelExpr(expr ir.Expr) (string, error) {
 	switch expr := expr.(type) {
 	case *ir.IdentExpr:
@@ -3376,6 +3407,12 @@ func emitKernelExpr(expr ir.Expr) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("exp(%s)", arg), nil
+	case *ir.GPUSqrtExpr:
+		arg, err := emitKernelExpr(expr.Arg)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("sqrt(%s)", arg), nil
 	default:
 		return "", fmt.Errorf("unsupported kernel expression %T", expr)
 	}

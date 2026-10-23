@@ -1,0 +1,14 @@
+package hostmath
+
+import "math"
+
+// The GPU kernels use the built-in sqrt/exp names. Keeping the host math
+// import in this module means the kernel file does not import math, so those
+// names still resolve to the GPU built-ins there.
+pub func hexp(x float) float {
+  return math.exp(x)
+}
+
+pub func hsqrt(x float) float {
+  return math.sqrt(x)
+}

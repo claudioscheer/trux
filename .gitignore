@@ -7,6 +7,8 @@
 benchmarks/**/server
 benchmarks/digits/digits.txm
 examples/projects/mnist_mlp/model.txm
+examples/projects/tiny_transformer/data/
+examples/projects/tiny_transformer/checkpoint.pt
 
 # Python
 __pycache__/

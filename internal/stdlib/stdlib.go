@@ -32,6 +32,8 @@ const (
 	CallTimeNowUnixMillis     CallKind = "nowUnixMillis"
 	CallTimeMonotonicNanos    CallKind = "monotonicNanos"
 	CallTimeSleepMillis       CallKind = "sleepMillis"
+	CallMathExp               CallKind = "exp"
+	CallMathSqrt              CallKind = "sqrt"
 	CallHTTPListen            CallKind = "listen"
 	CallHTTPServe             CallKind = "serve"
 	CallHTTPUse               CallKind = "use"
@@ -419,6 +421,31 @@ var packages = []Package{
 			{Package: "time", Name: "nowUnixMillis", Kind: CallTimeNowUnixMillis, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "current Unix wall-clock time in milliseconds"},
 			{Package: "time", Name: "monotonicNanos", Kind: CallTimeMonotonicNanos, ReturnType: ast.IntType, ResultOrigin: ResultOwned, Detail: "monotonic timestamp in nanoseconds for elapsed-time measurement"},
 			{Package: "time", Name: "sleepMillis", Kind: CallTimeSleepMillis, Params: []Param{{Name: "ms", Type: ast.IntType}}, ReturnType: ast.StringType, ResultOrigin: ResultUnknown, StatementOnly: true, Detail: "sleep for a number of milliseconds"},
+		},
+	},
+	{
+		Name: "math",
+		Members: []Member{
+			{
+				Package:       "math",
+				Name:          "exp",
+				Kind:          CallMathExp,
+				Params:        []Param{{Name: "x", Type: ast.FloatType}},
+				ReturnType:    ast.FloatType,
+				ResultOrigin:  ResultOwned,
+				SignatureText: "math.exp(x float) float",
+				Detail:        "e raised to the power x",
+			},
+			{
+				Package:       "math",
+				Name:          "sqrt",
+				Kind:          CallMathSqrt,
+				Params:        []Param{{Name: "x", Type: ast.FloatType}},
+				ReturnType:    ast.FloatType,
+				ResultOrigin:  ResultOwned,
+				SignatureText: "math.sqrt(x float) float",
+				Detail:        "square root of x",
+			},
 		},
 	},
 	{

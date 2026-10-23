@@ -24,7 +24,7 @@ Start with [Basics](/docs/examples/basics/), [Control flow](/docs/examples/contr
 [Collections and memory](/docs/examples/collections-memory/), and [Modules](/docs/examples/modules/). Those four cover
 most of the language. Then read [Projects with IO](/docs/examples/projects-io/) and
 [Unit tests](/docs/examples/testing/), look at the [HTTP server](/docs/examples/http-server/), and finish with the
-larger [MNIST MLP](/docs/examples/mnist-mlp/) project.
+larger [MNIST MLP](/docs/examples/mnist-mlp/) and [Tiny transformer](/docs/examples/tiny-transformer/) projects.
 
 {{% /alert %}}
 
@@ -40,6 +40,7 @@ larger [MNIST MLP](/docs/examples/mnist-mlp/) project.
 | [Unit tests](/docs/examples/testing/) | `.test.tx` files and `trux test` |
 | [HTTP server](/docs/examples/http-server/) | three routes on the `http` package |
 | [MNIST MLP](/docs/examples/mnist-mlp/) | a trained model on the GPU, checked value by value against numpy, with CPU vs GPU timings |
+| [Tiny transformer](/docs/examples/tiny-transformer/) | a character-level transformer trained in PyTorch, checked value by value on CPU and GPU |
 | [Performance and GPU](/docs/examples/performance-gpu/) | matrix multiply, stencil, CNN, and image rotation |
 | [Programs that fail on purpose](/docs/examples/failures/) | the `errors/` programs and the messages they produce |
 

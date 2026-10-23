@@ -49,6 +49,7 @@ type Info struct {
 	ValuesCalls   map[*ast.CallExpr]*ast.MapType
 	MapLookups    map[*ast.IndexExpr]*ast.MapType
 	IOCalls       map[*ast.CallExpr]IOCallSig
+	MathCalls     map[*ast.CallExpr]MathCallSig
 	HTTPCalls     map[*ast.CallExpr]HTTPCallSig
 	GPUCalls      map[*ast.CallExpr]GPUCallSig
 	SQLiteCalls   map[*ast.CallExpr]SQLiteCallSig
@@ -101,6 +102,17 @@ const (
 
 type IOCallSig struct {
 	Kind IOCallKind
+}
+
+type MathCallKind string
+
+const (
+	MathCallExp  MathCallKind = MathCallKind(stdlib.CallMathExp)
+	MathCallSqrt MathCallKind = MathCallKind(stdlib.CallMathSqrt)
+)
+
+type MathCallSig struct {
+	Kind MathCallKind
 }
 
 type SQLiteCallKind string
@@ -239,41 +251,42 @@ type HTTPCallSig struct {
 type GPUCallKind string
 
 const (
-	GPUCallAlloc        GPUCallKind = "alloc"
-	GPUCallCopyToDevice GPUCallKind = "copyToDevice"
-	GPUCallCopyToHost   GPUCallKind = "copyToHost"
-	GPUCallFree         GPUCallKind = "free"
-	GPUCallSync         GPUCallKind = "sync"
-	GPUCallLaunch       GPUCallKind = "launch"
-	GPUCallLaunch1D     GPUCallKind = "launch1d"
-	GPUCallLaunch2D     GPUCallKind = "launch2d"
-	GPUCallFrom         GPUCallKind = "from"
-	GPUCallMount        GPUCallKind = "mount"
+	GPUCallAlloc          GPUCallKind = "alloc"
+	GPUCallCopyToDevice   GPUCallKind = "copyToDevice"
+	GPUCallCopyToHost     GPUCallKind = "copyToHost"
+	GPUCallFree           GPUCallKind = "free"
+	GPUCallSync           GPUCallKind = "sync"
+	GPUCallLaunch         GPUCallKind = "launch"
+	GPUCallLaunch1D       GPUCallKind = "launch1d"
+	GPUCallLaunch2D       GPUCallKind = "launch2d"
+	GPUCallFrom           GPUCallKind = "from"
+	GPUCallMount          GPUCallKind = "mount"
 	GPUCallWorkspaceFloat GPUCallKind = "workspaceFloat"
-	GPUCallWorkspaceInt GPUCallKind = "workspaceInt"
-	GPUCallFloats       GPUCallKind = "floats"
-	GPUCallInts         GPUCallKind = "ints"
-	GPUCallDim          GPUCallKind = "dim"
-	GPUCallScalar       GPUCallKind = "scalar"
-	GPUCallHostFloats   GPUCallKind = "hostFloats"
-	GPUCallHostInts     GPUCallKind = "hostInts"
-	GPUCallBorrowFloat  GPUCallKind = "borrowFloat"
-	GPUCallBorrowInt    GPUCallKind = "borrowInt"
-	GPUCallReady        GPUCallKind = "ready"
-	GPUCallFinish       GPUCallKind = "finish"
-	GPUCallExp          GPUCallKind = "exp"
-	GPUCallGlobalX      GPUCallKind = "globalX"
-	GPUCallGlobalY      GPUCallKind = "globalY"
-	GPUCallGlobalZ      GPUCallKind = "globalZ"
-	GPUCallThreadX      GPUCallKind = "threadX"
-	GPUCallThreadY      GPUCallKind = "threadY"
-	GPUCallThreadZ      GPUCallKind = "threadZ"
-	GPUCallBlockX       GPUCallKind = "blockX"
-	GPUCallBlockY       GPUCallKind = "blockY"
-	GPUCallBlockZ       GPUCallKind = "blockZ"
-	GPUCallBlockDimX    GPUCallKind = "blockDimX"
-	GPUCallBlockDimY    GPUCallKind = "blockDimY"
-	GPUCallBlockDimZ    GPUCallKind = "blockDimZ"
+	GPUCallWorkspaceInt   GPUCallKind = "workspaceInt"
+	GPUCallFloats         GPUCallKind = "floats"
+	GPUCallInts           GPUCallKind = "ints"
+	GPUCallDim            GPUCallKind = "dim"
+	GPUCallScalar         GPUCallKind = "scalar"
+	GPUCallHostFloats     GPUCallKind = "hostFloats"
+	GPUCallHostInts       GPUCallKind = "hostInts"
+	GPUCallBorrowFloat    GPUCallKind = "borrowFloat"
+	GPUCallBorrowInt      GPUCallKind = "borrowInt"
+	GPUCallReady          GPUCallKind = "ready"
+	GPUCallFinish         GPUCallKind = "finish"
+	GPUCallExp            GPUCallKind = "exp"
+	GPUCallSqrt           GPUCallKind = "sqrt"
+	GPUCallGlobalX        GPUCallKind = "globalX"
+	GPUCallGlobalY        GPUCallKind = "globalY"
+	GPUCallGlobalZ        GPUCallKind = "globalZ"
+	GPUCallThreadX        GPUCallKind = "threadX"
+	GPUCallThreadY        GPUCallKind = "threadY"
+	GPUCallThreadZ        GPUCallKind = "threadZ"
+	GPUCallBlockX         GPUCallKind = "blockX"
+	GPUCallBlockY         GPUCallKind = "blockY"
+	GPUCallBlockZ         GPUCallKind = "blockZ"
+	GPUCallBlockDimX      GPUCallKind = "blockDimX"
+	GPUCallBlockDimY      GPUCallKind = "blockDimY"
+	GPUCallBlockDimZ      GPUCallKind = "blockDimZ"
 )
 
 type GPUCallSig struct {
@@ -451,6 +464,7 @@ func Check(program *ast.Program) (*Info, error) {
 			ValuesCalls:   map[*ast.CallExpr]*ast.MapType{},
 			MapLookups:    map[*ast.IndexExpr]*ast.MapType{},
 			IOCalls:       map[*ast.CallExpr]IOCallSig{},
+			MathCalls:     map[*ast.CallExpr]MathCallSig{},
 			HTTPCalls:     map[*ast.CallExpr]HTTPCallSig{},
 			GPUCalls:      map[*ast.CallExpr]GPUCallSig{},
 			SQLiteCalls:   map[*ast.CallExpr]SQLiteCallSig{},
@@ -1469,18 +1483,22 @@ func (c *checker) checkKernelExpr(locals *scope, expr ast.Expression) (ast.Type,
 		c.setExpr(expr, buf.Elem, OriginOwned)
 		return buf.Elem, nil
 	case *ast.CallExpr:
-		if expr.Package == "" && expr.Callee == "exp" {
+		if expr.Package == "" && (expr.Callee == "exp" || expr.Callee == "sqrt") {
 			if len(expr.Args) != 1 {
-				return nil, typeError(expr.Start, "exp expects 1 argument, got %d", len(expr.Args))
+				return nil, typeError(expr.Start, "%s expects 1 argument, got %d", expr.Callee, len(expr.Args))
 			}
 			argType, err := c.checkKernelExpr(locals, expr.Args[0])
 			if err != nil {
 				return nil, err
 			}
 			if !ast.TypeEqual(argType, ast.FloatType) {
-				return nil, typeError(expr.Args[0].Pos(), "exp argument has type %s, want float", argType)
+				return nil, typeError(expr.Args[0].Pos(), "%s argument has type %s, want float", expr.Callee, argType)
 			}
-			c.info.GPUCalls[expr] = GPUCallSig{Kind: GPUCallExp}
+			kind := GPUCallExp
+			if expr.Callee == "sqrt" {
+				kind = GPUCallSqrt
+			}
+			c.info.GPUCalls[expr] = GPUCallSig{Kind: kind}
 			c.setExpr(expr, ast.FloatType, OriginOwned)
 			return ast.FloatType, nil
 		}
@@ -2790,6 +2808,8 @@ func (c *checker) checkStdlibCall(expr *ast.CallExpr, member stdlib.Member, argT
 	} else if member.Package == "jwt" {
 		c.info.UsesJWT = true
 		c.info.JWTCalls[expr] = JWTCallSig{Kind: JWTCallKind(member.Kind)}
+	} else if member.Package == "math" {
+		c.info.MathCalls[expr] = MathCallSig{Kind: MathCallKind(member.Kind)}
 	} else {
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallKind(member.Kind)}
 		if member.Kind == stdlib.CallEnv {

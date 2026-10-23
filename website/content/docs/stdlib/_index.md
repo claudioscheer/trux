@@ -19,6 +19,7 @@ import "csv"
 | [`csv`](/docs/stdlib/csv/) | reading and writing CSV files as flat `list[string]` tables |
 | [`image`](/docs/stdlib/image/) | reading and writing plain-text P3 PPM images as flat RGB values |
 | [`time`](/docs/stdlib/time/) | wall-clock timestamps, monotonic timers, and sleeping |
+| [`math`](/docs/stdlib/math/) | `exp` and `sqrt` for float host code; kernels use the built-in `exp` and `sqrt` |
 | [`sqlite`](/docs/stdlib/sqlite/) | embedded relational database with transactions and prepared statements |
 | [`json`](/docs/stdlib/json/) | high-performance JSON parsing, inspection, and generation |
 | [`jwt`](/docs/stdlib/jwt/) | HS256 signing and verification for API authentication |

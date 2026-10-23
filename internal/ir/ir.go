@@ -922,6 +922,31 @@ func (e *GPUExpExpr) Ownership() types.Origin { return e.Origin }
 
 func (*GPUExpExpr) exprNode() {}
 
+type GPUSqrtExpr struct {
+	Arg    Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *GPUSqrtExpr) Type() ast.Type { return e.Typ }
+
+func (e *GPUSqrtExpr) Ownership() types.Origin { return e.Origin }
+
+func (*GPUSqrtExpr) exprNode() {}
+
+type MathCallExpr struct {
+	Kind   types.MathCallKind
+	Arg    Expr
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *MathCallExpr) Type() ast.Type { return e.Typ }
+
+func (e *MathCallExpr) Ownership() types.Origin { return e.Origin }
+
+func (*MathCallExpr) exprNode() {}
+
 type TimeNowExpr struct {
 	Kind   types.IOCallKind
 	Typ    ast.Type
@@ -1605,6 +1630,12 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 					return nil, err
 				}
 				return &GPUExpExpr{Arg: arg, Typ: typ, Origin: origin}, nil
+			case types.GPUCallSqrt:
+				arg, err := b.buildExpr(expr.Args[0])
+				if err != nil {
+					return nil, err
+				}
+				return &GPUSqrtExpr{Arg: arg, Typ: typ, Origin: origin}, nil
 			case types.GPUCallFloats, types.GPUCallInts, types.GPUCallBorrowFloat, types.GPUCallBorrowInt, types.GPUCallHostFloats, types.GPUCallHostInts, types.GPUCallScalar, types.GPUCallReady:
 				name, err := b.buildExpr(expr.Args[0])
 				if err != nil {
@@ -1622,6 +1653,13 @@ func (b builder) buildExpr(expr ast.Expression) (Expr, error) {
 				}
 				return &GPUNameExpr{Kind: gpuSig.Kind, Name: name, Axis: axis, Typ: typ, Origin: origin}, nil
 			}
+		}
+		if mathSig, ok := b.info.MathCalls[expr]; ok {
+			arg, err := b.buildExpr(expr.Args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &MathCallExpr{Kind: mathSig.Kind, Arg: arg, Typ: typ, Origin: origin}, nil
 		}
 		if ioSig, ok := b.info.IOCalls[expr]; ok {
 			return b.buildIOExpr(expr, ioSig, typ, origin)

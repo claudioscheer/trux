@@ -119,9 +119,9 @@ embeddings. Attention is causal; query position `t` may only see keys `0..t`.
 
 ## Prompt and generation
 
-- Prompt: `ROMEO: But soft, what light` (27 characters).
-- Generated tokens: 96.
-- Total sequence: 123 tokens, inside the 128-token context, so the first
+- Prompt: `JULIET:\n` (8 characters).
+- Generated tokens: 108.
+- Total sequence: 116 tokens, inside the 128-token context, so the first
   version does not need a sliding window.
 - Decoding: greedy argmax at every step.
 - The generated string is decoded through the embedded vocabulary.
@@ -141,6 +141,9 @@ take a layer offset.
 | Tensor | Shape | Meaning |
 | --- | --- | --- |
 | `config` | `[6]` int | vocabulary, context, layers, heads, width, MLP width |
+| `inv_width` | `[1]` float | `1 / D`, for layer norm |
+| `attn_scale` | `[1]` float | `1 / sqrt(D / H)` |
+| `ln_eps` | `[1]` float | layer norm epsilon |
 | `tok_emb` | `[V, D]` | token embeddings |
 | `pos_emb` | `[T, D]` | position embeddings |
 | `ln1_g`, `ln1_b` | `[L, D]` | per-layer attention layer norm |
@@ -180,7 +183,7 @@ script and a gitignored `checkpoint.pt` allow regeneration.
   before export.
 - After training, upcasts the best model to float64, evaluates it, and uses
   those float64 weights for both the TXM and the reference logits.
-- Tokenizes the fixed prompt, runs the prompt forward, then generates 96 tokens
+- Tokenizes the fixed prompt, runs the prompt forward, then generates 108 tokens
   greedily. At every step it records the final logits and the chosen token.
 - Checks the top-2 logit margin at every generation step. If the margin is at or
   below `1e-7`, export fails with a clear message; a near-tie would make the
@@ -288,7 +291,7 @@ prints the first few mismatches.
 - GPU: one warm-up generation, then a timed generation with `gpu.sync` before
   stopping the clock; report total and milliseconds per token.
 - Also report a single forward pass over the final full context for each path
-  (the prompt plus generated tokens, 123 tokens) so throughput is visible
+  (the prompt plus generated tokens, 116 tokens) so throughput is visible
   separately from the autoregressive loop.
 - Report the speedup as CPU time divided by GPU time. If the GPU is slower for
   the one-token-at-a-time loop because of launch overhead, print that plainly.

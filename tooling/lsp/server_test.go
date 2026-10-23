@@ -1504,14 +1504,14 @@ func TestCompletionIncludesSourceAutoImportFunctions(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	dir := t.TempDir()
 	mainPath := filepath.Join(dir, "main.tx")
-	mathPath := filepath.Join(dir, "math.tx")
+	calcPath := filepath.Join(dir, "calc.tx")
 	mainSrc := `package main
 
 func main() int {
     return
 }
 `
-	mathSrc := `package math
+	calcSrc := `package calc
 pub func add(a int, b int) int {
     return a + b
 }
@@ -1520,7 +1520,7 @@ func hidden() int {
     return 0
 }
 `
-	if err := os.WriteFile(mathPath, []byte(mathSrc), 0o644); err != nil {
+	if err := os.WriteFile(calcPath, []byte(calcSrc), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	mainURI := uriFromPath(normalizePath(mainPath))
@@ -1535,18 +1535,18 @@ func hidden() int {
 	}
 
 	items := result.(CompletionList).Items
-	item, ok := findCompletionItem(items, "math.add")
+	item, ok := findCompletionItem(items, "calc.add")
 	if !ok {
-		t.Fatalf("missing source auto-import completion math.add in %#v", items)
+		t.Fatalf("missing source auto-import completion calc.add in %#v", items)
 	}
-	if item.InsertText != "math.add" {
-		t.Fatalf("math.add insertText = %q, want math.add", item.InsertText)
+	if item.InsertText != "calc.add" {
+		t.Fatalf("calc.add insertText = %q, want calc.add", item.InsertText)
 	}
-	if item.FilterText != "math.add add" {
-		t.Fatalf("math.add filterText = %q, want math.add add", item.FilterText)
+	if item.FilterText != "calc.add add" {
+		t.Fatalf("calc.add filterText = %q, want calc.add add", item.FilterText)
 	}
-	assertCompletionImportEdit(t, item, 1, `import "math.tx"`+"\n")
-	assertMissingCompletion(t, items, "math.hidden")
+	assertCompletionImportEdit(t, item, 1, `import "calc.tx"`+"\n")
+	assertMissingCompletion(t, items, "calc.hidden")
 	assertMissingCompletion(t, items, "hidden")
 }
 
@@ -1554,14 +1554,14 @@ func TestCompletionSourceAutoImportUsesDeclaredPackageName(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	dir := t.TempDir()
 	mainPath := filepath.Join(dir, "main.tx")
-	calcPath := filepath.Join(dir, "calc.tx")
+	calcPath := filepath.Join(dir, "helpers.tx")
 	mainSrc := `package main
 
 func main() int {
     return
 }
 `
-	calcSrc := `package math
+	calcSrc := `package calc
 pub func add(a int, b int) int {
     return a + b
 }
@@ -1581,31 +1581,31 @@ pub func add(a int, b int) int {
 	}
 
 	items := result.(CompletionList).Items
-	item, ok := findCompletionItem(items, "math.add")
+	item, ok := findCompletionItem(items, "calc.add")
 	if !ok {
-		t.Fatalf("missing source auto-import completion math.add in %#v", items)
+		t.Fatalf("missing source auto-import completion calc.add in %#v", items)
 	}
-	assertCompletionImportEdit(t, item, 1, `import "calc.tx"`+"\n")
-	assertMissingCompletion(t, items, "calc.add")
+	assertCompletionImportEdit(t, item, 1, `import "helpers.tx"`+"\n")
+	assertMissingCompletion(t, items, "helpers.add")
 }
 
 func TestCompletionImportsMissingSourceMembersAfterDot(t *testing.T) {
 	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
 	dir := t.TempDir()
 	mainPath := filepath.Join(dir, "main.tx")
-	mathPath := filepath.Join(dir, "math.tx")
+	calcPath := filepath.Join(dir, "calc.tx")
 	mainSrc := `package main
 
 func main() int {
-    return math.a
+    return calc.a
 }
 `
-	mathSrc := `package math
+	calcSrc := `package calc
 pub func add(a int, b int) int {
     return a + b
 }
 `
-	if err := os.WriteFile(mathPath, []byte(mathSrc), 0o644); err != nil {
+	if err := os.WriteFile(calcPath, []byte(calcSrc), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	mainURI := uriFromPath(normalizePath(mainPath))
@@ -1613,7 +1613,7 @@ pub func add(a int, b int) int {
 
 	result, err := server.handleCompletion(mustJSON(t, map[string]any{
 		"textDocument": map[string]any{"uri": mainURI},
-		"position":     positionOfAfter(t, mainSrc, "math.", "a"),
+		"position":     positionOfAfter(t, mainSrc, "calc.", "a"),
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -1624,8 +1624,8 @@ pub func add(a int, b int) int {
 	if !ok {
 		t.Fatalf("missing source member auto-import completion add in %#v", items)
 	}
-	assertCompletionImportEdit(t, item, 1, `import "math.tx"`+"\n")
-	assertMissingCompletion(t, items, "math.add")
+	assertCompletionImportEdit(t, item, 1, `import "calc.tx"`+"\n")
+	assertMissingCompletion(t, items, "calc.add")
 	assertMissingCompletion(t, items, "print")
 }
 
@@ -1714,12 +1714,12 @@ func main() int {
     return
 }
 `
-	moduleSrc := `package math
+	moduleSrc := `package calc
 pub func add(a int, b int) int {
     return a + b
 }
 `
-	for _, path := range []string{filepath.Join(firstDir, "math.tx"), filepath.Join(secondDir, "math.tx")} {
+	for _, path := range []string{filepath.Join(firstDir, "calc.tx"), filepath.Join(secondDir, "calc.tx")} {
 		if err := os.WriteFile(path, []byte(moduleSrc), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -1736,26 +1736,26 @@ pub func add(a int, b int) int {
 	}
 
 	items := result.(CompletionList).Items
-	if countCompletionLabels(items, "math.add") != 2 {
-		t.Fatalf("math.add completion count = %d, want 2 in %#v", countCompletionLabels(items, "math.add"), items)
+	if countCompletionLabels(items, "calc.add") != 2 {
+		t.Fatalf("calc.add completion count = %d, want 2 in %#v", countCompletionLabels(items, "calc.add"), items)
 	}
 	wantEdits := map[string]struct{}{
-		`import "first/math.tx"` + "\n":  {},
-		`import "second/math.tx"` + "\n": {},
+		`import "first/calc.tx"` + "\n":  {},
+		`import "second/calc.tx"` + "\n": {},
 	}
 	for _, item := range items {
-		if item.Label != "math.add" {
+		if item.Label != "calc.add" {
 			continue
 		}
 		if len(item.AdditionalTextEdits) != 1 {
-			t.Fatalf("math.add additional edits = %#v, want one", item.AdditionalTextEdits)
+			t.Fatalf("calc.add additional edits = %#v, want one", item.AdditionalTextEdits)
 		}
 		if _, ok := wantEdits[item.AdditionalTextEdits[0].NewText]; !ok {
-			t.Fatalf("math.add import edit = %q, want one of %#v", item.AdditionalTextEdits[0].NewText, wantEdits)
+			t.Fatalf("calc.add import edit = %q, want one of %#v", item.AdditionalTextEdits[0].NewText, wantEdits)
 		}
 		delete(wantEdits, item.AdditionalTextEdits[0].NewText)
-		if !strings.Contains(item.Detail, "math.tx") {
-			t.Fatalf("math.add detail = %q, want path-specific detail", item.Detail)
+		if !strings.Contains(item.Detail, "calc.tx") {
+			t.Fatalf("calc.add detail = %q, want path-specific detail", item.Detail)
 		}
 	}
 	if len(wantEdits) != 0 {

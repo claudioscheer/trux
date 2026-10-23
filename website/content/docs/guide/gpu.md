@@ -345,7 +345,7 @@ point.
 
 Inside a kernel, `exp(x)` is the one call you can make. It takes a `float` and returns a `float`.
 
-A request handler copies the input into the borrowed workspace, launches, then calls `gpu.finish(request, continuation)`. The continuation is `func(request int) int`. The worker goes back to the `io_uring` loop while the kernel runs, so other sockets on that worker still accept and receive. One request is in flight per worker. The continuation runs when the kernel finishes, reads `gpu.ready`, and sends the response. `examples/projects/digits_server` is the handwritten-digits SVM on that path. `benchmarks/digits` times it (`make bench-digits` on Linux with liburing and CUDA).
+A request handler copies the input into the borrowed workspace, launches, then calls `gpu.finish(request, continuation)`. The continuation is `func(request int) int`. The worker goes back to the `io_uring` loop while the kernel runs, so other sockets on that worker still accept and receive. One request is in flight per worker. The continuation runs when the kernel finishes, reads `gpu.ready`, and sends the response. `examples/projects/digits_server` is the handwritten-digits SVM on that path. `benchmarks/digits` times it (`make bench-digits` on Linux with liburing and CUDA). The measured run is on the [HTTP + GPU](/docs/benchmarks/http-gpu/) page.
 
 `gpu.to` outside an HTTP worker is still a blocking copy. Existing GPU examples keep using it.
 

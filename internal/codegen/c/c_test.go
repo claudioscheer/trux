@@ -1084,6 +1084,35 @@ func main() int {
 	}
 }
 
+func TestGenerateSplitsDeclsWhenKernelsJumpToReturn(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "gpu"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    if i < 1 {
+        out[i] = 1
+    }
+}
+
+func early(n int) int {
+    if n < 0 {
+        return 0
+    }
+    let x int = n
+    return x
+}
+
+func main() int {
+    return early(1)
+}`)
+	if strings.Contains(cSource, "int64_t trux_v_1_x =") {
+		t.Fatalf("initialized decl was not split for nvcc:\n%s", cSource)
+	}
+	if !strings.Contains(cSource, "int64_t trux_v_1_x;") || !strings.Contains(cSource, "trux_v_1_x = trux_v_1_n;") {
+		t.Fatalf("split decl missing:\n%s", cSource)
+	}
+}
+
 func mustGenerateC(t *testing.T, src string) string {
 	t.Helper()
 

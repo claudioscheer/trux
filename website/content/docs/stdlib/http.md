@@ -11,7 +11,7 @@ import "http"
 
 **What it is.** A native HTTP/1.1 server built directly on Linux **`io_uring`**. It provides declarative routing, path parameter extraction, middleware chains, request context, custom response headers, and zero-allocation networking.
 
-**Why.** Web services written in Trux achieve exceptional throughput and sub-millisecond latencies through an asynchronous, shared-nothing thread-per-core runtime. See [Benchmarks](/docs/benchmarks/) for detailed performance metrics.
+**Why.** Web services written in Trux achieve exceptional throughput and sub-millisecond latencies through an asynchronous, shared-nothing thread-per-core runtime. See [HTTP benchmarks](/docs/benchmarks/http/) for detailed performance metrics.
 
 **When you don't need it.** For TLS/HTTPS, place a reverse proxy (such as Caddy or Nginx) in front. There is no HTTP client.
 

@@ -2414,8 +2414,8 @@ func main() int {
 	}
 
 	log := readFile(t, logPath)
-	if !strings.Contains(log, "-x cu") {
-		t.Fatalf("compiler args = %q, want CUDA source flag", log)
+	if !strings.Contains(log, ".cu ") && !strings.HasSuffix(strings.TrimSpace(log), ".cu") {
+		t.Fatalf("compiler args = %q, want CUDA source path", log)
 	}
 	if strings.Contains(log, "-std=c11") {
 		t.Fatalf("compiler args = %q, did not expect C11 flag for nvcc", log)
@@ -2455,10 +2455,45 @@ func main() int {
 	}
 
 	log := readFile(t, logPath)
-	for _, part := range []string{"-x cu", "-D_GNU_SOURCE", "-pthread", "-luring"} {
+	for _, part := range []string{".cu ", "-D_GNU_SOURCE", "-Xcompiler", "-pthread", "-luring"} {
 		if !strings.Contains(log, part) {
 			t.Fatalf("compiler args = %q, want %s", log, part)
 		}
+	}
+}
+
+func TestBuildFileLinksYYJSONWhenGPUUsesJSON(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+import "json"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    out[i] = 1
+}
+
+func main() int {
+    let doc *json.Doc, err error = json.parse("{\"n\":1}")
+    if err != nil {
+        return 1
+    }
+    let out gpu.Buffer[int] = gpu.alloc(1)
+    gpu.launch(fill, 1, 1, 1, 1, 1, 1, 1, out)
+    gpu.free(out)
+    return 0
+}`)
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "nvcc.log")
+	fakeNVCC := writeFakeCompiler(t, filepath.Join(dir, "fake-nvcc"), logPath)
+	t.Setenv("NVCC", fakeNVCC)
+
+	if err := buildFile(path, outputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	if !strings.Contains(log, "yyjson-0.11.1-") {
+		t.Fatalf("compiler args = %q, want yyjson object", log)
 	}
 }
 

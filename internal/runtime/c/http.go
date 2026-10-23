@@ -17,13 +17,9 @@ const HTTPSource = `
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/types.h>
-#if defined(__cplusplus)
-extern "C" {
-#endif
+/* liburing.h includes <atomic> in C++ before its own extern "C" block.
+   Wrapping the include in extern "C" makes those templates ill-formed. */
 #include <liburing.h>
-#if defined(__cplusplus)
-}
-#endif
 #include <poll.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>

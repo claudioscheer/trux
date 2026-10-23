@@ -1,8 +1,8 @@
 ---
-title: "Benchmarks"
+title: "HTTP"
 description: "HTTP performance and throughput under Linux io_uring across simulated server environments."
-icon: "speed"
-weight: 450
+icon: "dns"
+weight: 10
 ---
 
 Trux features a high-performance HTTP engine engineered specifically for Linux servers. It is built natively on **`io_uring`** and **`liburing`**, departing from legacy `epoll` architectures and goroutine schedulers in favor of a shared-nothing, thread-per-core model.
@@ -145,4 +145,4 @@ The script compiles the Trux HTTP server, builds the runtime Docker container, e
 make bench-digits
 ```
 
-The target needs Linux, liburing, and CUDA. It is separate from `make bench` and from the cgroup matrix above. The harness prints throughput and latency for that machine. Those numbers are not checked in.
+The target needs Linux, liburing, and CUDA. It is separate from `make bench` and from the cgroup matrix above. Measured results for this path are on the [HTTP + GPU](/docs/benchmarks/http-gpu/) page.

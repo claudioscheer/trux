@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -724,6 +725,24 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	return out.String(), nil
 }
 
+// cxxInitializedDecl matches one emitted local: `T name = expr;` or `T* name = expr;`.
+var cxxInitializedDecl = regexp.MustCompile(`^(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*\*\s*|\s+)(trux_[A-Za-z0-9_]+)\s*=\s*(.*);\s*$`)
+
+func splitCXXInitializedDecls(src string) string {
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(src, "\n") {
+		m := cxxInitializedDecl.FindStringSubmatch(strings.TrimRight(line, "\n"))
+		if m == nil {
+			b.WriteString(line)
+			continue
+		}
+		indent, typ, gap, name, expr := m[1], m[2], m[3], m[4], m[5]
+		fmt.Fprintf(&b, "%s%s%s%s;\n", indent, typ, gap, name)
+		fmt.Fprintf(&b, "%s%s = %s;\n", indent, name, expr)
+	}
+	return b.String()
+}
+
 func emitPrototype(out *bytes.Buffer, fn *ir.Func) error {
 	return emitSignature(out, fn, true)
 }
@@ -750,11 +769,20 @@ func emitFunc(out *bytes.Buffer, program *ir.Program, fn *ir.Func, opts Options)
 	}
 	fmt.Fprintf(out, "    %s trux_return_value;\n", returnType)
 	emitter := &funcEmitter{program: program, opts: opts, fn: fn, scratch: scratch}
+	var body bytes.Buffer
 	for _, stmt := range fn.Body {
-		if err := emitter.emitStmt(out, stmt, 1, opts); err != nil {
+		if err := emitter.emitStmt(&body, stmt, 1, opts); err != nil {
 			return err
 		}
 	}
+	// nvcc compiles host code as C++. A goto to trux_return cannot jump over
+	// an initialized declaration. Split `T name = expr;` into a declaration
+	// and an assignment when this program also has kernels.
+	emitted := body.String()
+	if len(program.Kernels) > 0 {
+		emitted = splitCXXInitializedDecls(emitted)
+	}
+	fmt.Fprint(out, emitted)
 	fmt.Fprintln(out, "    rt_runtime_fail(\"missing return\");")
 	fmt.Fprintln(out, "trux_return:")
 	if needsFrame {

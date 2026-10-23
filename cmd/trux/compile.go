@@ -245,9 +245,29 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 		if compiler == "" {
 			compiler = "nvcc"
 		}
-		args = []string{"-x", "cu", sourcePath, "-o", outputPath}
+		// The generated file is .cu, so nvcc treats it as CUDA. A global `-x cu`
+		// would also force later inputs, such as the yyjson object, to be compiled
+		// as source.
+		args = []string{sourcePath, "-o", outputPath}
 		if opts.UsesHTTP {
-			args = append(args, "-D_GNU_SOURCE", "-pthread", "-luring")
+			// nvcc rejects -pthread ("Unknown option '-pthread'" on CUDA 12).
+			// The host compiler accepts it through -Xcompiler.
+			args = append(args, "-D_GNU_SOURCE", "-Xcompiler", "-pthread", "-luring")
+		}
+		if opts.UsesJSON || opts.UsesJWT {
+			host := os.Getenv("CC")
+			if host == "" {
+				host = "cc"
+			}
+			yyjsonObj, err := ensureYYJSONObjectCached(host)
+			if err != nil {
+				return err
+			}
+			args = append(args, yyjsonObj)
+		}
+		if opts.UsesJWT {
+			prefix := jwtPrefix()
+			args = appendJWTLinkArgs(args, prefix)
 		}
 	} else {
 		if opts.UsesHTTP {

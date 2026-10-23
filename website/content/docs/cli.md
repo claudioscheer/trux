@@ -87,7 +87,7 @@ To compile the emitted files yourself, use the same flags `trux` uses:
 ```bash
 cc -std=c11 -O2 out/hello/hello.c -o hello             # normal program
 cc -std=c11 -O2 out/server/server.c -o server -pthread  # program using http
-nvcc -x cu out/matmul/matmul.cu -o matmul               # program with kernels
+nvcc out/matmul/matmul.cu -o matmul                    # program with kernels
 ```
 
 ## `trux fmt`

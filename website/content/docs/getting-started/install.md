@@ -70,7 +70,7 @@ The `Makefile` has small convenience wrappers:
 
 - Normal programs are compiled with `$CC` if it is set, otherwise `cc`, using `-std=c11 -O2` (or `-O0` with `trux run --debug`).
 - Programs that use the `http` package also get `-pthread`.
-- Programs that declare at least one `kernel func` are compiled as CUDA with `$NVCC` if set, otherwise `nvcc`, using `-x cu`.
+- Programs that declare at least one `kernel func` are compiled as CUDA with `$NVCC` if set, otherwise `nvcc`. The generated file ends in `.cu`.
 
 ```bash
 CC=clang trux run examples/hello.tx

@@ -215,7 +215,13 @@ func (s *Server) handleCompletion(raw json.RawMessage) (any, error) {
 		for _, item := range sameFileFunctionCompletionItems(file) {
 			items = appendCompletionItem(items, seen, item)
 		}
+		for _, item := range sameFileStructCompletionItems(file) {
+			items = appendCompletionItem(items, seen, item)
+		}
 		for _, item := range samePackageFunctionCompletionItems(graph, file) {
+			items = appendCompletionItem(items, seen, item)
+		}
+		for _, item := range samePackageStructCompletionItems(graph, file) {
 			items = appendCompletionItem(items, seen, item)
 		}
 	}
@@ -329,6 +335,45 @@ func stdlibImports(program *ast.Program) map[string]struct{} {
 	return imports
 }
 
+func letBindings(stmt *ast.LetStmt) []ast.LetBinding {
+	if len(stmt.Bindings) > 0 {
+		return stmt.Bindings
+	}
+	if stmt.Name == "" {
+		return nil
+	}
+	return []ast.LetBinding{{Pos: stmt.NamePos, Name: stmt.Name, Type: stmt.Type}}
+}
+
+func addLetBindings(locals map[string]localDefinition, stmt *ast.LetStmt, uri string) {
+	for _, binding := range letBindings(stmt) {
+		if binding.Name == "_" {
+			continue
+		}
+		locals[binding.Name] = localDefinition{Name: binding.Name, URI: uri, Pos: binding.Pos}
+	}
+}
+
+func assignTargets(stmt *ast.AssignStmt) []ast.AssignTarget {
+	if len(stmt.Targets) > 0 {
+		return stmt.Targets
+	}
+	if stmt.Name == "" {
+		return nil
+	}
+	return []ast.AssignTarget{{Pos: stmt.Start, Name: stmt.Name}}
+}
+
+func returnExpressions(stmt *ast.ReturnStmt) []ast.Expression {
+	if stmt.Values != nil {
+		return stmt.Values
+	}
+	if stmt.Value != nil {
+		return []ast.Expression{stmt.Value}
+	}
+	return nil
+}
+
 func stdlibMemberCallInBlock(block ast.Block, imports map[string]struct{}, cursor token.Position) (stdlib.Member, bool) {
 	for _, stmt := range block.Statements {
 		if member, ok := stdlibMemberCallInStmt(stmt, imports, cursor); ok {
@@ -343,11 +388,21 @@ func stdlibMemberCallInStmt(stmt ast.Statement, imports map[string]struct{}, cur
 	case *ast.LetStmt:
 		return stdlibMemberCallInExpr(stmt.Value, imports, cursor)
 	case *ast.ReturnStmt:
-		return stdlibMemberCallInExpr(stmt.Value, imports, cursor)
+		return stdlibMemberCallInExprs(returnExpressions(stmt), imports, cursor)
 	case *ast.AssignStmt:
 		return stdlibMemberCallInExpr(stmt.Value, imports, cursor)
 	case *ast.IndexAssignStmt:
 		if member, ok := stdlibMemberCallInExpr(stmt.Target, imports, cursor); ok {
+			return member, true
+		}
+		return stdlibMemberCallInExpr(stmt.Value, imports, cursor)
+	case *ast.FieldAssignStmt:
+		if member, ok := stdlibMemberCallInExpr(stmt.Target.Object, imports, cursor); ok {
+			return member, true
+		}
+		return stdlibMemberCallInExpr(stmt.Value, imports, cursor)
+	case *ast.DerefAssignStmt:
+		if member, ok := stdlibMemberCallInExpr(stmt.Target.Operand, imports, cursor); ok {
 			return member, true
 		}
 		return stdlibMemberCallInExpr(stmt.Value, imports, cursor)
@@ -399,8 +454,27 @@ func stdlibMemberCallInExpr(expr ast.Expression, imports map[string]struct{}, cu
 		return stdlibMemberCallInExprs(expr.Elements, imports, cursor)
 	case *ast.ListLiteral:
 		return stdlibMemberCallInExprs(expr.Elements, imports, cursor)
+	case *ast.StructLiteral:
+		for _, field := range expr.Fields {
+			if member, ok := stdlibMemberCallInExpr(field.Value, imports, cursor); ok {
+				return member, true
+			}
+		}
+	case *ast.MapLiteral:
+		for _, entry := range expr.Entries {
+			if member, ok := stdlibMemberCallInExpr(entry.Key, imports, cursor); ok {
+				return member, true
+			}
+			if member, ok := stdlibMemberCallInExpr(entry.Value, imports, cursor); ok {
+				return member, true
+			}
+		}
 	case *ast.MakeExpr:
 		return stdlibMemberCallInExpr(expr.Len, imports, cursor)
+	case *ast.FieldExpr:
+		return stdlibMemberCallInExpr(expr.Object, imports, cursor)
+	case *ast.UnaryExpr:
+		return stdlibMemberCallInExpr(expr.Operand, imports, cursor)
 	case *ast.BinaryExpr:
 		if member, ok := stdlibMemberCallInExpr(expr.Left, imports, cursor); ok {
 			return member, true
@@ -585,7 +659,7 @@ func packageQualifierInBlock(block ast.Block, packageName string, cursor token.P
 				return true
 			}
 		case *ast.ReturnStmt:
-			if packageQualifierInExpr(stmt.Value, packageName, cursor) {
+			if packageQualifierInExprs(returnExpressions(stmt), packageName, cursor) {
 				return true
 			}
 		case *ast.AssignStmt:
@@ -594,6 +668,14 @@ func packageQualifierInBlock(block ast.Block, packageName string, cursor token.P
 			}
 		case *ast.IndexAssignStmt:
 			if packageQualifierInExpr(stmt.Target, packageName, cursor) || packageQualifierInExpr(stmt.Value, packageName, cursor) {
+				return true
+			}
+		case *ast.FieldAssignStmt:
+			if packageQualifierInExpr(stmt.Target.Object, packageName, cursor) || packageQualifierInExpr(stmt.Value, packageName, cursor) {
+				return true
+			}
+		case *ast.DerefAssignStmt:
+			if packageQualifierInExpr(stmt.Target.Operand, packageName, cursor) || packageQualifierInExpr(stmt.Value, packageName, cursor) {
 				return true
 			}
 		case *ast.IfStmt:
@@ -628,11 +710,15 @@ func packageQualifierInStmt(stmt ast.Statement, packageName string, cursor token
 	case *ast.LetStmt:
 		return packageQualifierInExpr(stmt.Value, packageName, cursor)
 	case *ast.ReturnStmt:
-		return packageQualifierInExpr(stmt.Value, packageName, cursor)
+		return packageQualifierInExprs(returnExpressions(stmt), packageName, cursor)
 	case *ast.AssignStmt:
 		return packageQualifierInExpr(stmt.Value, packageName, cursor)
 	case *ast.IndexAssignStmt:
 		return packageQualifierInExpr(stmt.Target, packageName, cursor) || packageQualifierInExpr(stmt.Value, packageName, cursor)
+	case *ast.FieldAssignStmt:
+		return packageQualifierInExpr(stmt.Target.Object, packageName, cursor) || packageQualifierInExpr(stmt.Value, packageName, cursor)
+	case *ast.DerefAssignStmt:
+		return packageQualifierInExpr(stmt.Target.Operand, packageName, cursor) || packageQualifierInExpr(stmt.Value, packageName, cursor)
 	case *ast.IfStmt:
 		if packageQualifierInExpr(stmt.Condition, packageName, cursor) || packageQualifierInBlock(stmt.Then, packageName, cursor) {
 			return true
@@ -670,8 +756,24 @@ func packageQualifierInExpr(expr ast.Expression, packageName string, cursor toke
 		return packageQualifierInExprs(expr.Elements, packageName, cursor)
 	case *ast.ListLiteral:
 		return packageQualifierInExprs(expr.Elements, packageName, cursor)
+	case *ast.StructLiteral:
+		for _, field := range expr.Fields {
+			if packageQualifierInExpr(field.Value, packageName, cursor) {
+				return true
+			}
+		}
+	case *ast.MapLiteral:
+		for _, entry := range expr.Entries {
+			if packageQualifierInExpr(entry.Key, packageName, cursor) || packageQualifierInExpr(entry.Value, packageName, cursor) {
+				return true
+			}
+		}
 	case *ast.MakeExpr:
 		return packageQualifierInExpr(expr.Len, packageName, cursor)
+	case *ast.FieldExpr:
+		return packageQualifierInExpr(expr.Object, packageName, cursor)
+	case *ast.UnaryExpr:
+		return packageQualifierInExpr(expr.Operand, packageName, cursor)
 	case *ast.BinaryExpr:
 		return packageQualifierInExpr(expr.Left, packageName, cursor) || packageQualifierInExpr(expr.Right, packageName, cursor)
 	case *ast.IndexExpr:
@@ -741,7 +843,7 @@ func visibleLocalsInBlock(block ast.Block, scope map[string]localDefinition, cur
 			if positionBefore(cursor, stmt.NamePos) {
 				return locals
 			}
-			locals[stmt.Name] = localDefinition{Name: stmt.Name, URI: "", Pos: stmt.NamePos}
+			addLetBindings(locals, stmt, "")
 		case *ast.IfStmt:
 			if containsPosition(stmt.Then.Start, stmt.Then.End, cursor) {
 				return visibleLocalsInBlock(stmt.Then, locals, cursor)
@@ -766,7 +868,7 @@ func addForInitLocal(stmt ast.Statement, locals map[string]localDefinition, uri 
 	if !ok {
 		return
 	}
-	locals[letStmt.Name] = localDefinition{Name: letStmt.Name, URI: uri, Pos: letStmt.NamePos}
+	addLetBindings(locals, letStmt, uri)
 }
 
 func completionLabels(items []CompletionItem) map[string]struct{} {
@@ -1155,6 +1257,27 @@ func sameFileFunctionCompletionItems(file *sourceFile) []CompletionItem {
 	return items
 }
 
+func sameFileStructCompletionItems(file *sourceFile) []CompletionItem {
+	items := []CompletionItem{}
+	for _, decl := range file.program.Structs {
+		items = append(items, CompletionItem{Label: decl.Name, Kind: completionKindType, Detail: "struct type"})
+	}
+	return items
+}
+
+func samePackageStructCompletionItems(graph *sourceGraph, file *sourceFile) []CompletionItem {
+	items := []CompletionItem{}
+	for _, packageFile := range samePackageFiles(graph, file) {
+		if packageFile.path == file.path {
+			continue
+		}
+		for _, decl := range packageFile.program.Structs {
+			items = append(items, CompletionItem{Label: decl.Name, Kind: completionKindType, Detail: "struct type from package " + file.program.PackageName})
+		}
+	}
+	return items
+}
+
 func samePackageFunctionCompletionItems(graph *sourceGraph, file *sourceFile) []CompletionItem {
 	items := []CompletionItem{}
 	for _, packageFile := range samePackageFiles(graph, file) {
@@ -1342,6 +1465,19 @@ func qualifiedImportedFunctionCompletionItems(imports []importedPackage) []Compl
 					FilterText: label + " " + fn.Name,
 				})
 			}
+			for _, decl := range file.program.Structs {
+				if !decl.Public {
+					continue
+				}
+				label := pkg.name + "." + decl.Name
+				items = append(items, CompletionItem{
+					Label:      label,
+					Kind:       completionKindType,
+					Detail:     "imported struct type",
+					InsertText: label,
+					FilterText: label + " " + decl.Name,
+				})
+			}
 		}
 	}
 	return items
@@ -1405,6 +1541,17 @@ func packageMemberCompletionItems(pkg importedPackage) []CompletionItem {
 				Kind:       completionKindFunction,
 				Detail:     "function from " + pkg.name,
 				InsertText: fn.Name,
+			})
+		}
+		for _, decl := range file.program.Structs {
+			if !decl.Public {
+				continue
+			}
+			items = append(items, CompletionItem{
+				Label:      decl.Name,
+				Kind:       completionKindType,
+				Detail:     "type from " + pkg.name,
+				InsertText: decl.Name,
 			})
 		}
 	}
@@ -1637,7 +1784,7 @@ func declarationCompletionItems() []CompletionItem {
 	items := []CompletionItem{}
 	for _, item := range baseCompletionItems() {
 		switch item.Label {
-		case "package", "import", "pub", "kernel", "func", "int", "float", "string", "bool", "list":
+		case "package", "import", "pub", "type", "struct", "kernel", "func", "int", "float", "string", "bool", "error", "list", "map":
 			items = append(items, item)
 		}
 	}
@@ -1759,13 +1906,15 @@ func findLocalDefinitionInBlock(uri string, block ast.Block, scope map[string]lo
 	for _, stmt := range block.Statements {
 		switch stmt := stmt.(type) {
 		case *ast.LetStmt:
-			if containsName(cursor, stmt.NamePos, stmt.Name) && word == stmt.Name {
-				return localDefinition{Name: stmt.Name, URI: uri, Pos: stmt.NamePos}, true
+			for _, binding := range letBindings(stmt) {
+				if containsName(cursor, binding.Pos, binding.Name) && word == binding.Name {
+					return localDefinition{Name: binding.Name, URI: uri, Pos: binding.Pos}, true
+				}
 			}
 			if positionBefore(cursor, stmt.NamePos) {
 				return locals[word], locals[word].Name != ""
 			}
-			locals[stmt.Name] = localDefinition{Name: stmt.Name, URI: uri, Pos: stmt.NamePos}
+			addLetBindings(locals, stmt, uri)
 		case *ast.IfStmt:
 			if containsPosition(stmt.Then.Start, stmt.Then.End, cursor) {
 				return findLocalDefinitionInBlock(uri, stmt.Then, locals, word, cursor)
@@ -1776,13 +1925,15 @@ func findLocalDefinitionInBlock(uri string, block ast.Block, scope map[string]lo
 		case *ast.ForStmt:
 			loopLocals := cloneLocalScope(locals)
 			if letStmt, ok := stmt.Init.(*ast.LetStmt); ok {
-				if containsName(cursor, letStmt.NamePos, letStmt.Name) && word == letStmt.Name {
-					return localDefinition{Name: letStmt.Name, URI: uri, Pos: letStmt.NamePos}, true
+				for _, binding := range letBindings(letStmt) {
+					if containsName(cursor, binding.Pos, binding.Name) && word == binding.Name {
+						return localDefinition{Name: binding.Name, URI: uri, Pos: binding.Pos}, true
+					}
 				}
 				if positionBefore(cursor, letStmt.NamePos) {
 					return locals[word], locals[word].Name != ""
 				}
-				loopLocals[letStmt.Name] = localDefinition{Name: letStmt.Name, URI: uri, Pos: letStmt.NamePos}
+				addLetBindings(loopLocals, letStmt, uri)
 			}
 			if containsPosition(stmt.Body.Start, stmt.Body.End, cursor) {
 				return findLocalDefinitionInBlock(uri, stmt.Body, loopLocals, word, cursor)
@@ -1956,11 +2107,19 @@ func collectFunctionReferencesInStmt(uri string, stmt ast.Statement, name string
 	case *ast.LetStmt:
 		collectFunctionReferencesInExpr(uri, stmt.Value, name, locations)
 	case *ast.ReturnStmt:
-		collectFunctionReferencesInExpr(uri, stmt.Value, name, locations)
+		for _, value := range returnExpressions(stmt) {
+			collectFunctionReferencesInExpr(uri, value, name, locations)
+		}
 	case *ast.AssignStmt:
 		collectFunctionReferencesInExpr(uri, stmt.Value, name, locations)
 	case *ast.IndexAssignStmt:
 		collectFunctionReferencesInExpr(uri, stmt.Target, name, locations)
+		collectFunctionReferencesInExpr(uri, stmt.Value, name, locations)
+	case *ast.FieldAssignStmt:
+		collectFunctionReferencesInExpr(uri, stmt.Target.Object, name, locations)
+		collectFunctionReferencesInExpr(uri, stmt.Value, name, locations)
+	case *ast.DerefAssignStmt:
+		collectFunctionReferencesInExpr(uri, stmt.Target.Operand, name, locations)
 		collectFunctionReferencesInExpr(uri, stmt.Value, name, locations)
 	case *ast.IfStmt:
 		collectFunctionReferencesInExpr(uri, stmt.Condition, name, locations)
@@ -1992,8 +2151,21 @@ func collectFunctionReferencesInExpr(uri string, expr ast.Expression, name strin
 		for _, elem := range expr.Elements {
 			collectFunctionReferencesInExpr(uri, elem, name, locations)
 		}
+	case *ast.StructLiteral:
+		for _, field := range expr.Fields {
+			collectFunctionReferencesInExpr(uri, field.Value, name, locations)
+		}
+	case *ast.MapLiteral:
+		for _, entry := range expr.Entries {
+			collectFunctionReferencesInExpr(uri, entry.Key, name, locations)
+			collectFunctionReferencesInExpr(uri, entry.Value, name, locations)
+		}
 	case *ast.MakeExpr:
 		collectFunctionReferencesInExpr(uri, expr.Len, name, locations)
+	case *ast.FieldExpr:
+		collectFunctionReferencesInExpr(uri, expr.Object, name, locations)
+	case *ast.UnaryExpr:
+		collectFunctionReferencesInExpr(uri, expr.Operand, name, locations)
 	case *ast.CallExpr:
 		if expr.Callee == name {
 			*locations = append(*locations, locationFor(uri, callCalleePosition(expr), expr.Callee))
@@ -2067,14 +2239,24 @@ func collectLocalReferencesInBlock(uri string, block ast.Block, name string, loc
 		case *ast.LetStmt:
 			collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
 		case *ast.ReturnStmt:
-			collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
+			for _, value := range returnExpressions(stmt) {
+				collectLocalReferencesInExpr(uri, value, name, locations)
+			}
 		case *ast.AssignStmt:
-			if stmt.Name == name {
-				*locations = append(*locations, locationFor(uri, stmt.Start, stmt.Name))
+			for _, target := range assignTargets(stmt) {
+				if target.Name == name {
+					*locations = append(*locations, locationFor(uri, target.Pos, target.Name))
+				}
 			}
 			collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
 		case *ast.IndexAssignStmt:
 			collectLocalReferencesInExpr(uri, stmt.Target, name, locations)
+			collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
+		case *ast.FieldAssignStmt:
+			collectLocalReferencesInExpr(uri, stmt.Target.Object, name, locations)
+			collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
+		case *ast.DerefAssignStmt:
+			collectLocalReferencesInExpr(uri, stmt.Target.Operand, name, locations)
 			collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
 		case *ast.IfStmt:
 			collectLocalReferencesInExpr(uri, stmt.Condition, name, locations)
@@ -2102,14 +2284,24 @@ func collectLocalReferencesInStmt(uri string, stmt ast.Statement, name string, l
 	case *ast.LetStmt:
 		collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
 	case *ast.ReturnStmt:
-		collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
+		for _, value := range returnExpressions(stmt) {
+			collectLocalReferencesInExpr(uri, value, name, locations)
+		}
 	case *ast.AssignStmt:
-		if stmt.Name == name {
-			*locations = append(*locations, locationFor(uri, stmt.Start, stmt.Name))
+		for _, target := range assignTargets(stmt) {
+			if target.Name == name {
+				*locations = append(*locations, locationFor(uri, target.Pos, target.Name))
+			}
 		}
 		collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
 	case *ast.IndexAssignStmt:
 		collectLocalReferencesInExpr(uri, stmt.Target, name, locations)
+		collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
+	case *ast.FieldAssignStmt:
+		collectLocalReferencesInExpr(uri, stmt.Target.Object, name, locations)
+		collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
+	case *ast.DerefAssignStmt:
+		collectLocalReferencesInExpr(uri, stmt.Target.Operand, name, locations)
 		collectLocalReferencesInExpr(uri, stmt.Value, name, locations)
 	case *ast.IfStmt:
 		collectLocalReferencesInExpr(uri, stmt.Condition, name, locations)
@@ -2145,8 +2337,21 @@ func collectLocalReferencesInExpr(uri string, expr ast.Expression, name string, 
 		for _, elem := range expr.Elements {
 			collectLocalReferencesInExpr(uri, elem, name, locations)
 		}
+	case *ast.StructLiteral:
+		for _, field := range expr.Fields {
+			collectLocalReferencesInExpr(uri, field.Value, name, locations)
+		}
+	case *ast.MapLiteral:
+		for _, entry := range expr.Entries {
+			collectLocalReferencesInExpr(uri, entry.Key, name, locations)
+			collectLocalReferencesInExpr(uri, entry.Value, name, locations)
+		}
 	case *ast.MakeExpr:
 		collectLocalReferencesInExpr(uri, expr.Len, name, locations)
+	case *ast.FieldExpr:
+		collectLocalReferencesInExpr(uri, expr.Object, name, locations)
+	case *ast.UnaryExpr:
+		collectLocalReferencesInExpr(uri, expr.Operand, name, locations)
 	case *ast.CallExpr:
 		for _, arg := range expr.Args {
 			collectLocalReferencesInExpr(uri, arg, name, locations)

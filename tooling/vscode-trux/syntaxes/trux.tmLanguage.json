@@ -95,6 +95,24 @@
               "name": "string.quoted.double.import.trux"
             }
           }
+        },
+        {
+          "name": "meta.type.declaration.trux",
+          "match": "\\b(?:(pub)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+(struct)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.visibility.trux"
+            },
+            "2": {
+              "name": "keyword.declaration.type.trux"
+            },
+            "3": {
+              "name": "entity.name.type.trux"
+            },
+            "4": {
+              "name": "keyword.declaration.struct.trux"
+            }
+          }
         }
       ]
     },
@@ -114,7 +132,7 @@
         },
         {
           "name": "variable.parameter.trux",
-          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s+(?:\\[[0-9]*\\]|list\\s*\\[|int\\b|float\\b|string\\b|bool\\b))"
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s+(?:\\[[0-9]*\\]|list\\s*\\[|map\\s*\\[|gpu\\.Buffer\\s*\\[|int\\b|float\\b|string\\b|bool\\b|error\\b))"
         }
       ]
     },
@@ -137,7 +155,7 @@
         },
         {
           "name": "support.function.builtin.trux",
-          "match": "\\b(print|assert|len|clone|append|make)(?=\\s*\\()"
+          "match": "\\b(print|assert|len|clone|append|make|new|delete|keys|values)(?=\\s*\\()"
         },
         {
           "name": "meta.function-call.qualified.trux",
@@ -168,7 +186,7 @@
         },
         {
           "name": "keyword.declaration.trux",
-          "match": "\\b(package|import|pub|kernel|let|mut)\\b"
+          "match": "\\b(package|import|pub|type|struct|kernel|let|mut)\\b"
         },
         {
           "name": "keyword.operator.word.trux",
@@ -177,6 +195,10 @@
         {
           "name": "constant.language.boolean.trux",
           "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.language.nil.trux",
+          "match": "\\bnil\\b"
         }
       ]
     },
@@ -184,7 +206,15 @@
       "patterns": [
         {
           "name": "storage.type.trux",
-          "match": "\\b(int|float|string|bool|list)\\b"
+          "match": "\\b(int|float|string|bool|error|list|map)\\b"
+        },
+        {
+          "name": "support.type.trux",
+          "match": "\\bBuffer\\b"
+        },
+        {
+          "name": "entity.name.type.trux",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
         }
       ]
     },
@@ -204,7 +234,7 @@
       "patterns": [
         {
           "name": "keyword.operator.trux",
-          "match": "==|!=|<=|>=|&&|\\|\\||[!+%\\-*/=<>]"
+          "match": "==|!=|<=|>=|&&|\\|\\||[!+%&\\-*/=<>]"
         }
       ]
     },

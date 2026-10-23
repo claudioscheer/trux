@@ -1997,6 +1997,425 @@ func main() int {
 	assertRange(t, hover.Range, positionOf(t, src, "../math.tx"), "../math.tx")
 }
 
+func TestCompletionIncludesCurrentLanguageForms(t *testing.T) {
+	items := baseCompletionItems()
+	want := map[string]int{
+		"break":    completionKindKeyword,
+		"continue": completionKindKeyword,
+		"type":     completionKindKeyword,
+		"struct":   completionKindKeyword,
+		"nil":      completionKindKeyword,
+		"error":    completionKindType,
+		"map":      completionKindType,
+		"new":      completionKindFunction,
+		"delete":   completionKindFunction,
+		"keys":     completionKindFunction,
+		"values":   completionKindFunction,
+	}
+	for label, kind := range want {
+		item, ok := findCompletionItem(items, label)
+		if !ok {
+			t.Fatalf("missing completion %q in %#v", label, items)
+		}
+		if item.Kind != kind {
+			t.Fatalf("completion %q kind = %d, want %d", label, item.Kind, kind)
+		}
+	}
+
+	declarations := declarationCompletionItems()
+	for _, label := range []string{"type", "struct", "error", "map"} {
+		if _, ok := findCompletionItem(declarations, label); !ok {
+			t.Fatalf("missing declaration completion %q in %#v", label, declarations)
+		}
+	}
+}
+
+func TestHoverTextCoversCurrentLanguageForms(t *testing.T) {
+	for _, word := range []string{"break", "continue", "type", "struct", "nil", "error", "map"} {
+		if _, ok := hoverText[word]; !ok {
+			t.Fatalf("missing hover text for %q", word)
+		}
+	}
+	for _, word := range []string{"new", "delete", "keys", "values"} {
+		if _, ok := hoverText[word]; !ok {
+			t.Fatalf("missing hover text for %q", word)
+		}
+		if _, ok := builtinFunctionHoverText[word]; !ok {
+			t.Fatalf("missing builtin hover signature for %q", word)
+		}
+	}
+}
+
+func TestHoverReturnsNewBuiltinSignatures(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "keys",
+			src: `package main
+func main() int {
+    let m map[string]int = map[string]int{}
+    return len(keys(m))
+}
+`,
+			want: "`keys(map) list[K]`",
+		},
+		{
+			name: "values",
+			src: `package main
+func main() int {
+    let m map[string]int = map[string]int{}
+    return len(values(m))
+}
+`,
+			want: "`values(map) list[V]`",
+		},
+		{
+			name: "delete",
+			src: `package main
+func main() int {
+    let m map[string]int = map[string]int{}
+    delete(m, "x")
+    return 0
+}
+`,
+			want: "`delete(map, key)`",
+		},
+		{
+			name: "new",
+			src: `package main
+func main() int {
+    let p *int = new(int)
+    return *p
+}
+`,
+			want: "`new(T) *T`",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+			uri := "file:///tmp/main.tx"
+			server.documents[uri] = tc.src
+
+			result, err := server.handleHover(mustJSON(t, map[string]any{
+				"textDocument": map[string]any{"uri": uri},
+				"position":     positionOf(t, tc.src, tc.name+"("),
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			hover := result.(Hover)
+			if hover.Contents.Value != tc.want {
+				t.Fatalf("hover = %#v, want %s signature", hover, tc.name)
+			}
+		})
+	}
+}
+
+func TestDefinitionAndReferencesForMultiReturnBinding(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := roundTripURI(t, "main.tx")
+	src := `package main
+
+func divmod(a int, b int) (int, int) {
+    return a / b, a % b
+}
+
+func main() int {
+    let q int, r int = divmod(14, 3)
+    let _, rem int = divmod(q, r)
+    return q + rem
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleDefinition(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "    return q + ", "rem"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLocation(t, result.(Location), uri, positionOfAfter(t, src, "let _, ", "rem"), "rem")
+
+	references, err := server.handleReferences(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOf(t, src, "q + rem"),
+		"context":      map[string]any{"includeDeclaration": true},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	locations := references.([]Location)
+	if len(locations) != 3 {
+		t.Fatalf("reference count = %d, want 3: %#v", len(locations), locations)
+	}
+	assertLocation(t, locations[0], uri, positionOf(t, src, "q int, r"), "q")
+	assertLocation(t, locations[1], uri, positionOfAfter(t, src, "rem int = divmod(", "q"), "q")
+	assertLocation(t, locations[2], uri, positionOf(t, src, "q + rem"), "q")
+}
+
+func TestReferencesForMultiAssignmentTarget(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := roundTripURI(t, "main.tx")
+	src := `package main
+
+func allocate() (int, int) {
+    return 1, 2
+}
+
+func main() int {
+    let a int = 0
+    let b int = 0
+    a, b = allocate()
+    return a + b
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleReferences(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "allocate()\n    return ", "a"),
+		"context":      map[string]any{"includeDeclaration": true},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	locations := result.([]Location)
+	if len(locations) != 3 {
+		t.Fatalf("reference count = %d, want 3: %#v", len(locations), locations)
+	}
+	assertLocation(t, locations[0], uri, positionOf(t, src, "a int"), "a")
+	assertLocation(t, locations[1], uri, positionOf(t, src, "a, b = allocate"), "a")
+	assertLocation(t, locations[2], uri, positionOfAfter(t, src, "allocate()\n    return ", "a"), "a")
+}
+
+func TestReferencesInsideStructAndMapLiterals(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := roundTripURI(t, "main.tx")
+	src := `package main
+
+type Point struct {
+    x int
+}
+
+func value() int {
+    return 1
+}
+
+func main() int {
+    let point Point = Point{x: value()}
+    let table map[string]int = map[string]int{"value": value()}
+    return value() + point.x + table["value"]
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleReferences(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOf(t, src, "value() + point.x"),
+		"context":      map[string]any{"includeDeclaration": false},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	locations := result.([]Location)
+	if len(locations) != 3 {
+		t.Fatalf("reference count = %d, want 3: %#v", len(locations), locations)
+	}
+	assertLocation(t, locations[0], uri, positionOfAfter(t, src, "Point{x: ", "value"), "value")
+	assertLocation(t, locations[1], uri, positionOfAfter(t, src, "\"value\": ", "value"), "value")
+	assertLocation(t, locations[2], uri, positionOf(t, src, "value() + point.x"), "value")
+}
+
+func TestReferencesInsidePointerAndFieldExpressions(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := roundTripURI(t, "main.tx")
+	src := `package main
+
+type Point struct {
+    x int
+}
+
+func main() int {
+    let seed int = 1
+    let point Point = Point{x: seed}
+    point.x = seed
+    let pointer *int = &seed
+    *pointer = seed
+    let copy int = *pointer
+    let fromField int = point.x
+    return seed + copy + fromField
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleReferences(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "return ", "seed"),
+		"context":      map[string]any{"includeDeclaration": true},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	locations := result.([]Location)
+	if len(locations) != 6 {
+		t.Fatalf("reference count = %d, want 6: %#v", len(locations), locations)
+	}
+	assertLocation(t, locations[0], uri, positionOf(t, src, "seed int"), "seed")
+	assertLocation(t, locations[1], uri, positionOfAfter(t, src, "Point{x: ", "seed"), "seed")
+	assertLocation(t, locations[2], uri, positionOfAfter(t, src, "point.x = ", "seed"), "seed")
+	assertLocation(t, locations[3], uri, positionOfAfter(t, src, "= &", "seed"), "seed")
+	assertLocation(t, locations[4], uri, positionOfAfter(t, src, "*pointer = ", "seed"), "seed")
+	assertLocation(t, locations[5], uri, positionOfAfter(t, src, "return ", "seed"), "seed")
+
+	pointResult, err := server.handleReferences(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "fromField int = ", "point"),
+		"context":      map[string]any{"includeDeclaration": true},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pointLocations := pointResult.([]Location)
+	if len(pointLocations) != 3 {
+		t.Fatalf("point reference count = %d, want 3: %#v", len(pointLocations), pointLocations)
+	}
+	assertLocation(t, pointLocations[0], uri, positionOf(t, src, "point Point"), "point")
+	assertLocation(t, pointLocations[1], uri, positionOf(t, src, "point.x = seed"), "point")
+	assertLocation(t, pointLocations[2], uri, positionOfAfter(t, src, "fromField int = ", "point"), "point")
+
+	pointerResult, err := server.handleReferences(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "let copy int = *", "pointer"),
+		"context":      map[string]any{"includeDeclaration": true},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pointerLocations := pointerResult.([]Location)
+	if len(pointerLocations) != 3 {
+		t.Fatalf("pointer reference count = %d, want 3: %#v", len(pointerLocations), pointerLocations)
+	}
+	assertLocation(t, pointerLocations[0], uri, positionOf(t, src, "pointer *int"), "pointer")
+	assertLocation(t, pointerLocations[1], uri, positionOfAfter(t, src, "*", "pointer = seed"), "pointer")
+	assertLocation(t, pointerLocations[2], uri, positionOfAfter(t, src, "let copy int = *", "pointer"), "pointer")
+}
+
+func TestCompletionIncludesStructTypes(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+
+type Point struct {
+    x int
+}
+
+func main() int {
+    return
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "    return", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	item, ok := findCompletionItem(result.(CompletionList).Items, "Point")
+	if !ok {
+		t.Fatalf("missing struct type completion Point in %#v", result.(CompletionList).Items)
+	}
+	if item.Kind != completionKindType {
+		t.Fatalf("Point kind = %d, want type", item.Kind)
+	}
+}
+
+func TestCompletionIncludesImportedStructTypes(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, "main.tx")
+	shapePath := filepath.Join(dir, "shape.tx")
+	mainSrc := `package main
+import "shape.tx"
+
+func main() int {
+    let value shape.
+    return 0
+}
+`
+	shapeSrc := `package shape
+pub type Rect struct {
+    width int
+    height int
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shapePath, []byte(shapeSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainURI := uriFromPath(normalizePath(mainPath))
+	server.documents[mainURI] = mainSrc
+
+	result, err := server.handleCompletion(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": mainURI},
+		"position":     positionOfAfter(t, mainSrc, "let value shape.", ""),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	item, ok := findCompletionItem(result.(CompletionList).Items, "Rect")
+	if !ok {
+		t.Fatalf("missing imported struct completion Rect in %#v", result.(CompletionList).Items)
+	}
+	if item.Kind != completionKindType {
+		t.Fatalf("Rect kind = %d, want type", item.Kind)
+	}
+}
+
+func TestHoverReturnsNewStandardLibrarySignature(t *testing.T) {
+	server := NewServer(bufio.NewReader(strings.NewReader("")), &bytes.Buffer{})
+	uri := "file:///tmp/main.tx"
+	src := `package main
+import "jwt"
+
+func main() int {
+    let token string, err error = jwt.sign("{}", "secret")
+    return 0
+}
+`
+	server.documents[uri] = src
+
+	result, err := server.handleHover(mustJSON(t, map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     positionOfAfter(t, src, "jwt.", "sign"),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hover := result.(Hover)
+	want := "`jwt.sign(claims string, secret string) (string, error)`"
+	if hover.Contents.Value != want {
+		t.Fatalf("hover = %#v, want jwt.sign signature", hover)
+	}
+	assertRange(t, hover.Range, positionOfAfter(t, src, "jwt.", "sign"), "sign")
+}
+
 func TestReadAndWriteMessage(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
 	wire := "Content-Length: " + strconv.Itoa(len(input)) + "\r\n\r\n" + input

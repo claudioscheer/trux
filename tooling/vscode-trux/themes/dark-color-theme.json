@@ -62,7 +62,7 @@
     },
     {
       "name": "Types",
-      "scope": "storage.type",
+      "scope": ["storage.type", "support.type", "entity.name.type"],
       "settings": {
         "foreground": "#63C4C9"
       }
@@ -117,8 +117,8 @@
       }
     },
     {
-      "name": "Numbers and Booleans",
-      "scope": ["constant.numeric", "constant.language.boolean"],
+      "name": "Numbers, Booleans, and nil",
+      "scope": ["constant.numeric", "constant.language"],
       "settings": {
         "foreground": "#E6B673"
       }

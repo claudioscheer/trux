@@ -14,9 +14,9 @@ reports matches what `trux` does. It provides:
 
 - diagnostics for parse and type errors as you type
 - document formatting (the same formatter as `trux fmt`)
-- completion for keywords, builtins, and standard package members
+- completion for keywords, types, builtins, locals, functions, structs, and standard package members
 - hover text for core language forms, functions, and standard package calls
-- go to definition and find references
+- go to definition and find references, including multi-return bindings and multi-assignment targets
 
 Build it from the repository root and put it on your `PATH`:
 

@@ -9,8 +9,12 @@ This folder contains editor and language tooling for Trux.
 - parse diagnostics for every `.tx` file
 - type diagnostics for single-file `main` programs
 - document formatting through the same formatter used by `trux fmt`
-- keyword and builtin completions
-- hover text for core language forms
+- keyword, type, builtin, local, function, struct, and standard-package completions
+- hover text for core language forms, functions, and standard-package calls
+- go to definition and find references for local bindings, including multi-return bindings and multi-assignment targets
+
+It reads standard packages and their members from `internal/stdlib`, so imports such as `io`, `csv`, `errors`, `time`, `http`,
+`image`, `gpu`, `sqlite`, `json`, and `jwt` complete and hover without a separate tooling list.
 
 Build it from the repository root:
 

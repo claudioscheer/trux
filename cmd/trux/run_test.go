@@ -413,6 +413,51 @@ func main() int {
 	}
 }
 
+func TestRunFileReturnedNewBoxSurvivesLaterAllocation(t *testing.T) {
+	requireCC(t)
+
+	path := writeTempSource(t, `package main
+
+type Box struct {
+    n int
+    label string
+}
+
+func makeBox() (*Box, error) {
+    let b *Box = new(Box)
+    b.n = 7
+    b.label = "hello" + "-box"
+    return b, nil
+}
+
+func wrap() (*Box, error) {
+    let b *Box, err error = makeBox()
+    return b, err
+}
+
+func main() int {
+    let b *Box, err error = wrap()
+    let junk *Box = new(Box)
+    junk.n = 99
+    junk.label = "over" + "write"
+    if err != nil {
+        print("err")
+        return 1
+    }
+    print(b.n)
+    print(b.label)
+    return 0
+}`)
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "7\nhello-box\n" {
+		t.Fatalf("output = %q, want 7\\nhello-box\\n", out.String())
+	}
+}
+
 func TestRunFileReturnedSQLiteHandleIsNotCloned(t *testing.T) {
 	requireCC(t)
 

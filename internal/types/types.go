@@ -2800,14 +2800,27 @@ func originForParam(param ast.Param) Origin {
 	return OriginOwned
 }
 
+// opaqueSQLitePointer reports a sqlite connection or statement. Those values
+// are heap identities. Cloning one copies the struct onto the caller frame
+// and leaves the real handle's statement cache empty.
+func opaqueSQLitePointer(typ ast.Type) bool {
+	ptr, ok := typ.(*ast.PointerType)
+	if !ok {
+		return false
+	}
+	st, ok := ptr.Elem.(*ast.StructType)
+	if !ok {
+		return false
+	}
+	return st.Package == "sqlite" && (st.Name == "DB" || st.Name == "Stmt")
+}
+
 // originForUnpackedValue is the origin of one value taken out of a call's
-// tuple. A string's bytes live in this function's frame, so returning it must
-// copy those bytes into the caller. A pointer is an owned heap identity
-// (a sqlite connection, for example). Cloning it shallow-copies the struct
-// onto the caller frame and splits that identity, so the pointer is returned
-// as-is.
+// tuple. Strings and ordinary pointers live in this function's frame, so
+// returning them must copy them into the caller. sqlite.DB and sqlite.Stmt
+// are the exception: they are returned as the original pointer.
 func originForUnpackedValue(typ ast.Type) Origin {
-	if _, isPtr := typ.(*ast.PointerType); isPtr {
+	if opaqueSQLitePointer(typ) {
 		return OriginOwned
 	}
 	if dynamicType(typ) {

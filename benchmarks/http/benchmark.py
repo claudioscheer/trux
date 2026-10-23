@@ -148,10 +148,12 @@ def main():
 
         # Run container
         run_cmd(f"docker rm -f {container_name} 2>/dev/null || true", check=False)
+        # No published port: loopback traffic to 127.0.0.1:<port> is relayed by the
+        # docker userland proxy, which caps throughput well below the server's
+        # capacity. Talk to the container IP directly instead.
         docker_run_cmd = (
             f"docker run -d --name {container_name} "
             f"--security-opt seccomp=unconfined --ulimit memlock=-1:-1 "
-            f"-p 8080:8080 "
             f"--cpuset-cpus='{profile['cpuset']}' --cpus='{profile['cpus']}' "
             f"--memory='{profile['memory']}' "
             f"trux-http-bench"
@@ -159,8 +161,14 @@ def main():
         run_cmd(docker_run_cmd)
         time.sleep(1.5)
 
+        container_ip = run_cmd(
+            "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "
+            + container_name
+        )
+        base_url = f"http://{container_ip}:8080"
+
         # Warmup
-        run_cmd("curl -s http://127.0.0.1:8080/plaintext > /dev/null")
+        run_cmd(f"curl -s {base_url}/plaintext > /dev/null")
 
         for endpoint in ENDPOINTS:
             for c in CONCURRENCY_LEVELS:
@@ -171,7 +179,7 @@ def main():
                     f"-c{c}",
                     f"-d{DURATION}",
                     "--latency",
-                ] + endpoint["headers"] + [f"http://127.0.0.1:8080{endpoint['path']}"]
+                ] + endpoint["headers"] + [f"{base_url}{endpoint['path']}"]
 
                 print(f"  -> Testing {endpoint['name']} @ c={c} (threads={threads})...", end="", flush=True)
                 raw_wrk = run_cmd(wrk_cmd)

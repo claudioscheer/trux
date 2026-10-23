@@ -1,6 +1,6 @@
 ---
 title: "io"
-description: "Reading stdin and whole text files, and writing files."
+description: "Reading stdin, whole text files, and the environment, and writing files."
 icon: "input"
 weight: 100
 # The old combined "io and csv" page lived here.
@@ -11,8 +11,8 @@ aliases: ["/docs/stdlib/io-csv/"]
 import "io"
 ```
 
-**What it is.** Line-by-line reads from standard input, typed reads (`int`, `float`, `bool`), and whole-file reads and
-writes.
+**What it is.** Line-by-line reads from standard input, typed reads (`int`, `float`, `bool`), whole-file reads and
+writes, and a snapshot of the environment.
 
 **Why.** Programs need input and output. These calls cover stdin and whole files, with no file handles to open or
 close.
@@ -34,6 +34,7 @@ data, use [`csv`](/docs/stdlib/csv/).
 | `io.exists(path string)` | `bool` | Returns `true` if a file or directory exists at `path`. |
 | `io.isFile(path string)` | `bool` | Returns `true` if `path` exists and is a regular file. |
 | `io.isDir(path string)` | `bool` | Returns `true` if `path` exists and is a directory. |
+| `io.env()` | `map[string]string` | Returns a new copy of the environment snapshot. The snapshot is loaded once before `main`. |
 
 ## Reading stdin
 
@@ -50,6 +51,34 @@ $ printf 'Ada\n7\n' | trux run examples/projects/interactive_counter/main.tx
 
 At end of input `io.readLine` returns `""`, the same as for an empty line, so there's no way to tell the two apart.
 The typed reads fail at end of input, because `""` isn't a valid number or boolean.
+
+## Environment
+
+`io.env()` returns a `map[string]string`. In a program that calls it, the runtime builds one snapshot before the first
+line of `main` and keeps it for the process. Each call returns a new copy of that snapshot. Writing into the returned
+map leaves the next call unchanged, and it does not change the operating-system environment. A program that never calls
+`io.env` does not open `.env`.
+
+The snapshot starts as the process environment. A file named `.env` in the directory where the process started then
+overwrites those keys. A missing file is skipped. An empty file leaves the process environment as it is.
+
+Lines are `KEY=VALUE`, split on the first `=`. Blank lines are skipped, and so is a line whose first non-whitespace
+character is `#`. A trailing `\r` is discarded. The key is trimmed and must match `[A-Za-z_][A-Za-z0-9_]*`. The value
+is the rest of the line, unchanged, so `KEY=` is an empty string and `KEY=a=b` has the value `a=b`. The same key later
+in the file keeps its slot and takes the later value. A key that was not already present is added at the end, in file
+order. Spelling is exact, so `PATH` and `Path` are different keys.
+
+```trux
+import "io"
+
+let env map[string]string = io.env()
+let port string = env["PORT"]
+```
+
+A missing key reads as `""`. `let port string, ok bool = env["PORT"]` reports whether that key was loaded.
+
+A bad line, a bad key, or a `.env` that exists but cannot be read stops the program before user code, with exit status
+`1`.
 
 ## Reading and writing files
 
@@ -102,6 +131,11 @@ Input parsing failures stop the program with exit status `1`:
 | `trux runtime error: invalid float input` | `io.readFloat` got a line that isn't a number |
 | `trux runtime error: invalid bool input` | `io.readBool` got anything other than `true` or `false` |
 | `trux runtime error: file path contains NUL byte` | a path contained a `\0` character |
+| `trux runtime error: .env:N: invalid line` | a `.env` line is not blank, not a comment, and has no `=` |
+| `trux runtime error: .env:N: invalid key` | a `.env` key is outside `[A-Za-z_][A-Za-z0-9_]*` |
+| `trux runtime error: .env: cannot open` | `.env` exists but cannot be opened |
+| `trux runtime error: .env: not a regular file` | `.env` exists and is not a regular file |
+| `trux runtime error: .env: cannot read` | `.env` could not be read |
 
 File operations (`io.readFile`, `io.writeFile`) return explicit `error` values instead of stopping the program directly:
 

@@ -21,6 +21,7 @@ io.readDir(path string) (list[string], error)
 io.exists(path string) bool
 io.isFile(path string) bool
 io.isDir(path string) bool
+io.env() map[string]string
 ```
 
 CSV:
@@ -47,6 +48,8 @@ Dynamic IO results allocate into the caller's current arena. `io.readLine`, `io.
 File, directory, and CSV operations return explicit `error` values rather than aborting the process on filesystem or parse failures. On success, `readFile`, `readDir`, and `csv.read` return the data paired with `nil`, while `writeFile`, `createDir`, `remove`, and `csv.write` return `nil`. On failure, they return an error created with a descriptive message (`readDir` pairs it with an empty list). Inspection operations (`io.exists`, `io.isFile`, `io.isDir`) return `bool` directly. `readDir` returns directory entry base names sorted lexicographically, omitting `.` and `..`. Callers must bind or discard returned errors; Trux rejects bare statements that return an unhandled error or multiple values.
 
 The old global names such as `readLine`, `readFile`, `readCsv`, and `writeCsv` are not part of the language surface. Use `io.readLine`, `io.readFile`, `csv.read`, and `csv.write`.
+
+`io.env` returns a copy of one process snapshot. The runtime builds that snapshot once, before the first line of `main`, and only when the program calls `io.env`. The snapshot starts as the process environment. A file named `.env` in the process's starting directory overwrites matching keys. Each call returns a new map, so writes in one call leave the next call unchanged, and the operating-system environment stays as it was. A missing `.env` is skipped. A bad line, a bad key, or a `.env` that exists and cannot be read stops the process with `trux runtime error` before user code runs. Blank lines and `#` comments are skipped. Other lines are `KEY=VALUE`, split on the first `=`. The key is trimmed and must match `[A-Za-z_][A-Za-z0-9_]*`. The value is the rest of the line, so `KEY=` is empty. A trailing `\r` is discarded. Repeated keys keep their slot and take the later value. New file keys are appended in file order. Key spelling is exact.
 
 ## Tradeoff
 

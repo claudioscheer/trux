@@ -15,7 +15,7 @@ import "csv"
 
 | Package | What it's for |
 | --- | --- |
-| [`io`](/docs/stdlib/io/) | reading stdin line by line, reading and writing whole text files |
+| [`io`](/docs/stdlib/io/) | reading stdin line by line, reading and writing whole text files, and reading the environment |
 | [`csv`](/docs/stdlib/csv/) | reading and writing CSV files as flat `list[string]` tables |
 | [`image`](/docs/stdlib/image/) | reading and writing plain-text P3 PPM images as flat RGB values |
 | [`time`](/docs/stdlib/time/) | wall-clock timestamps, monotonic timers, and sleeping |

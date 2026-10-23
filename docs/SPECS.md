@@ -174,6 +174,7 @@ io.readLine()
 io.readInt()
 io.readFloat()
 io.readBool()
+io.env()
 io.readFile(path)
 io.writeFile(path, contents)
 csv.read(path, columns)
@@ -466,6 +467,7 @@ let entries list[string], dirErr error = io.readDir("output")
 let exists bool = io.exists("output")
 let isF bool = io.isFile("copy.txt")
 let isD bool = io.isDir("output")
+let env map[string]string = io.env()
 
 let cells list[string], csvErr error = csv.read("input.csv", 2)
 let writeCsvErr error = csv.write("copy.csv", cells, 2)
@@ -479,6 +481,8 @@ let writePpmErr error = image.writePpm("copy.ppm", pixels, width, height)
 `io.readLine` reads one line from stdin without the trailing newline. `io.readInt`, `io.readFloat`, and `io.readBool` read one line from stdin and parse it as the requested scalar type. Invalid typed input is a runtime error.
 
 `io.readFile` returns `(string, error)` with the complete file contents or a descriptive error. `io.writeFile` writes the target path with the provided contents and returns `error` (`nil` on success). `io.createDir` creates a directory and returns `error` (`nil` on success). `io.remove` removes a file or empty directory and returns `error` (`nil` on success). `io.readDir` returns `(list[string], error)` with directory entry base names sorted lexicographically (omitting `.` and `..`), or an empty list and an error on failure. `io.exists`, `io.isFile`, and `io.isDir` inspect the path and return `bool`.
+
+`io.env` returns `map[string]string`. The runtime loads the snapshot once before `main` in a program that calls `io.env`, then each call returns a new copy. The snapshot is the process environment with keys from `.env` in the starting directory written over it. A missing `.env` is skipped. A `.env` line that is not `KEY=VALUE`, a key outside `[A-Za-z_][A-Za-z0-9_]*`, or a `.env` that exists but cannot be read is `trux runtime error` and exit status 1, before user code runs. Blank lines and lines whose first non-whitespace character is `#` are ignored. The value is everything after the first `=`, unchanged. A trailing `\r` is discarded. A repeated key keeps its place and takes the later value. Keys introduced by the file are appended in file order. Matching is case-sensitive. `io.env` does not change the operating-system environment.
 
 `csv.read` returns `(list[string], error)` as flat row-major cells. The `columns` argument must be positive and each CSV row must have exactly that many columns. `csv.write` writes a flat row-major `list[string]` using the same column count and returns `error` (`nil` on success).
 

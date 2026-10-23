@@ -661,6 +661,35 @@ func main() int {
 	}
 }
 
+func TestBuildEnvCall(t *testing.T) {
+	program := mustLoadProgram(t, `package main
+import "io"
+
+func main() int {
+    let env map[string]string = io.env()
+    print(env["PORT"])
+    return 0
+}`)
+	info, err := semtypes.Check(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	irProgram, err := Build(program, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !irProgram.UsesEnv {
+		t.Fatal("UsesEnv = false")
+	}
+	env, ok := irProgram.Functions[0].Body[0].(*LetStmt).Value.(*EnvExpr)
+	if !ok {
+		t.Fatalf("env value = %T, want EnvExpr", irProgram.Functions[0].Body[0].(*LetStmt).Value)
+	}
+	if !ast.TypeEqual(env.Type(), &ast.MapType{Key: ast.StringType, Value: ast.StringType}) {
+		t.Fatalf("env type = %s", env.Type())
+	}
+}
+
 func mustParse(t *testing.T, src string) *ast.Program {
 	t.Helper()
 

@@ -2,6 +2,7 @@ package c
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1193,3 +1194,387 @@ int main(void) {
 }
 `)
 }
+
+type envPair struct {
+	key   string
+	value string
+}
+
+func TestEnvParseFileAndProcessEntries(t *testing.T) {
+	exe := compileRuntimeC(t, Source+envParseDriver)
+
+	t.Run("file bytes", func(t *testing.T) {
+		input, want := envFileFixture()
+		got := parseEnvFixture(t, exe, input, false)
+		assertEnvPairs(t, got, want)
+	})
+	t.Run("empty", func(t *testing.T) {
+		got := parseEnvFixture(t, exe, nil, false)
+		assertEnvPairs(t, got, nil)
+	})
+	t.Run("comments and whitespace", func(t *testing.T) {
+		got := parseEnvFixture(t, exe, []byte("# hidden=1\n\n  \n\t\n  # x\n"), false)
+		assertEnvPairs(t, got, nil)
+	})
+	t.Run("carriage return is not a line break", func(t *testing.T) {
+		got := parseEnvFixture(t, exe, []byte("OK=1\rBAD=2"), false)
+		assertEnvPairs(t, got, []envPair{{"OK", "1\rBAD=2"}})
+	})
+	t.Run("nul in value", func(t *testing.T) {
+		input := append([]byte("NUL="), 'a', 0, 'b')
+		input = append(input, '\n', 'N', 'E', 'X', 'T', '=', 'z')
+		got := parseEnvFixture(t, exe, input, false)
+		assertEnvPairs(t, got, []envPair{{"NUL", string([]byte{'a', 0, 'b'})}, {"NEXT", "z"}})
+	})
+	t.Run("process entries", func(t *testing.T) {
+		got := parseEnvFixture(t, exe, nil, true)
+		assertEnvPairs(t, got, syntheticEnvPairs())
+	})
+	t.Run("file overlays process slot", func(t *testing.T) {
+		input := []byte("# comment\n\nBOTH=from-file\nNEW=new\n")
+		got := parseEnvFixture(t, exe, input, true)
+		want := append(append([]envPair{}, syntheticEnvPairs()...), envPair{"NEW", "new"})
+		want[1].value = "from-file"
+		assertEnvPairs(t, got, want)
+	})
+
+	rejects := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "no equals", body: "not valid\n", want: ".env:1: invalid line"},
+		{name: "export", body: "export FOO=bar\n", want: ".env:1: invalid key"},
+		{name: "digit", body: "1FOO=bar\n", want: ".env:1: invalid key"},
+		{name: "hyphen", body: "FOO-BAR=1\n", want: ".env:1: invalid key"},
+		{name: "dot", body: "FOO.BAR=1\n", want: ".env:1: invalid key"},
+		{name: "empty key", body: "=value\n", want: ".env:1: invalid key"},
+		{name: "blank key", body: "   =x\n", want: ".env:1: invalid key"},
+		{name: "space in key", body: "FOO BAR=1\n", want: ".env:1: invalid key"},
+		{name: "tab in key", body: "FOO\tBAR=1\n", want: ".env:1: invalid key"},
+		{name: "quoted key", body: "\"FOO\"=bar\n", want: ".env:1: invalid key"},
+		{name: "unicode key", body: "Ä=1\n", want: ".env:1: invalid key"},
+		{name: "later line", body: "# comment\n\nOK=1\nnot valid\n", want: ".env:4: invalid line"},
+		{name: "crlf line", body: "OK=1\r\n\r\nnot valid\r\n", want: ".env:3: invalid line"},
+		{name: "key on line 2", body: "OK=1\n1NO=x\n", want: ".env:2: invalid key"},
+	}
+	for _, tt := range rejects {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, err := runEnvFixture(t, exe, []byte(tt.body), false)
+			if err == nil {
+				t.Fatalf("parse succeeded, want %s\n%s", tt.want, stdout)
+			}
+			if len(stdout) != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout)
+			}
+			if !strings.Contains(err.Error(), "exit status 1") {
+				t.Fatalf("error = %q, want exit status 1", err.Error())
+			}
+			if !bytes.Contains(stderr, []byte("trux runtime error: "+tt.want)) {
+				t.Fatalf("stderr = %q, want %q", stderr, tt.want)
+			}
+		})
+	}
+}
+
+func syntheticEnvPairs() []envPair {
+	return []envPair{
+		{"PATH", "from-proc"},
+		{"BOTH", "from-proc"},
+		{"ProgramFiles(x86)", `C:\PF`},
+		{"EMPTYPROC", ""},
+		{"EQ", "a=b"},
+		{"A B", "kept"},
+	}
+}
+
+func envFileFixture() ([]byte, []envPair) {
+	lines := []string{
+		"# comment",
+		"",
+		"  # indented",
+		"   ",
+		"\t",
+		"\tTAB\t=tabbed",
+		"CLEAR=",
+		`QUOTED="hello"`,
+		"DOLLAR=$PROC",
+		"A1=a1",
+		"_UNDER=under",
+		"_=blank",
+		"EQS===",
+		"TRAIL=end" + "  ",
+		"PAD = spaced",
+		"HASH=#value",
+		"UTF=caf\u00e9",
+		"PRE=short",
+		"PRE_FIX=long",
+		"LONG=" + strings.Repeat("x", 300),
+		"N0=old",
+	}
+	want := []envPair{
+		{"TAB", "tabbed"},
+		{"CLEAR", ""},
+		{"QUOTED", `"hello"`},
+		{"DOLLAR", "$PROC"},
+		{"A1", "a1"},
+		{"_UNDER", "under"},
+		{"_", "blank"},
+		{"EQS", "=="},
+		{"TRAIL", "end  "},
+		{"PAD", " spaced"},
+		{"HASH", "#value"},
+		{"UTF", "caf\u00e9"},
+		{"PRE", "short"},
+		{"PRE_FIX", "long"},
+		{"LONG", strings.Repeat("x", 300)},
+		{"N0", "v0"},
+	}
+	for i := 1; i <= 9; i++ {
+		lines = append(lines, fmt.Sprintf("N%d=v%d", i, i))
+	}
+	lines = append(lines, "N0=v0", "SPACES="+strings.Repeat(" ", 3))
+	for i := 1; i <= 9; i++ {
+		want = append(want, envPair{fmt.Sprintf("N%d", i), fmt.Sprintf("v%d", i)})
+	}
+	want = append(want, envPair{"SPACES", "   "}, envPair{"CR", "cr"}, envPair{"END", "end"})
+	body := strings.Join(lines, "\n") + "\n" + "CR=cr\r\n" + "END=end\r"
+	return []byte(body), want
+}
+
+func parseEnvFixture(t *testing.T, exe string, input []byte, entries bool) []envPair {
+	t.Helper()
+	stdout, stderr, err := runEnvFixture(t, exe, input, entries)
+	if err != nil {
+		t.Fatalf("parse failed: %v\n%s", err, stderr)
+	}
+	if len(stderr) != 0 {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	return parseEnvDump(t, stdout)
+}
+
+func runEnvFixture(t *testing.T, exe string, input []byte, entries bool) ([]byte, []byte, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fixture")
+	if err := os.WriteFile(path, input, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{path}
+	if entries {
+		args = append(args, "entries")
+	}
+	cmd := exec.Command(exe, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			err = fmt.Errorf("execute fixture: %w", err)
+		} else {
+			err = fmt.Errorf("execute fixture: %w\n%s", err, msg)
+		}
+	}
+	return stdout.Bytes(), stderr.Bytes(), err
+}
+
+func parseEnvDump(t *testing.T, stdout []byte) []envPair {
+	t.Helper()
+	rest := stdout
+	line, rest, ok := cutEnvLine(rest)
+	if !ok {
+		t.Fatalf("dump missing count: %q", stdout)
+	}
+	count, err := strconv.Atoi(line)
+	if err != nil {
+		t.Fatalf("count %q: %v", line, err)
+	}
+	entries := make([]envPair, 0, count)
+	for i := 0; i < count; i++ {
+		line, rest, ok = cutEnvLine(rest)
+		if !ok {
+			t.Fatalf("dump missing lengths at %d", i)
+		}
+		parts := strings.Fields(line)
+		if len(parts) != 2 {
+			t.Fatalf("lengths %q", line)
+		}
+		klen, err := strconv.Atoi(parts[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		vlen, err := strconv.Atoi(parts[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if klen < 0 || vlen < 0 || len(rest) < klen+vlen {
+			t.Fatalf("short dump at %d: key %d value %d remaining %d", i, klen, vlen, len(rest))
+		}
+		entries = append(entries, envPair{string(rest[:klen]), string(rest[klen : klen+vlen])})
+		rest = rest[klen+vlen:]
+	}
+	if len(rest) != 0 {
+		t.Fatalf("trailing dump bytes %q", rest)
+	}
+	return entries
+}
+
+func cutEnvLine(b []byte) (string, []byte, bool) {
+	i := bytes.IndexByte(b, '\n')
+	if i < 0 {
+		return "", nil, false
+	}
+	line := b[:i]
+	if len(line) > 0 && line[len(line)-1] == '\r' {
+		line = line[:len(line)-1]
+	}
+	return string(line), b[i+1:], true
+}
+
+func assertEnvPairs(t *testing.T, got []envPair, want []envPair) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("entries:\n%s\nwant:\n%s", formatEnvPairs(got), formatEnvPairs(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("entry %d:\n%s\nwant:\n%s", i, formatEnvPairs(got), formatEnvPairs(want))
+		}
+	}
+}
+
+func formatEnvPairs(entries []envPair) string {
+	var b strings.Builder
+	for _, entry := range entries {
+		fmt.Fprintf(&b, "%q=%q\n", entry.key, entry.value)
+	}
+	return b.String()
+}
+
+const envParseDriver = `
+static void load_synthetic(rt_arena* arena) {
+    const char* entries[] = {
+        "PATH=from-proc",
+        "BOTH=from-proc",
+        "=C:=C:\\Users\\ada",
+        "NOEQUALS",
+        "=justvalue",
+        "ProgramFiles(x86)=C:\\PF",
+        "EMPTYPROC=",
+        "EQ=a=b",
+        "A B=kept",
+        NULL
+    };
+    for (size_t i = 0; entries[i] != NULL; i++) {
+        rt_env_add_entry(arena, entries[i], strlen(entries[i]));
+    }
+}
+
+static int read_fixture(const char* path, uint8_t** out, size_t* out_len) {
+    FILE* file = fopen(path, "rb");
+    if (file == NULL) {
+        return 1;
+    }
+    uint8_t* data = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    for (;;) {
+        if (len == cap) {
+            size_t next = cap == 0 ? 256 : cap * 2;
+            if (next < cap) {
+                free(data);
+                fclose(file);
+                return 1;
+            }
+            uint8_t* grown = (uint8_t*)realloc(data, next);
+            if (grown == NULL) {
+                free(data);
+                fclose(file);
+                return 1;
+            }
+            data = grown;
+            cap = next;
+        }
+        size_t n = fread(data + len, 1, cap - len, file);
+        len += n;
+        if (n == 0) {
+            break;
+        }
+    }
+    int failed = ferror(file) != 0;
+    if (fclose(file) != 0) {
+        failed = 1;
+    }
+    if (failed) {
+        free(data);
+        return 1;
+    }
+    *out = data;
+    *out_len = len;
+    return 0;
+}
+
+static int dump_env(void) {
+    if (printf("%" PRId64 "\n", rt_env_len()) < 0) {
+        return 1;
+    }
+    for (int64_t i = 0; i < rt_env_len(); i++) {
+        rt_string key = rt_env_key(i);
+        rt_string value = rt_env_value(i);
+        if (printf("%" PRId64 " %" PRId64 "\n", (int64_t)key.len, (int64_t)value.len) < 0) {
+            return 1;
+        }
+        if (key.len > 0 && fwrite(key.data, 1, key.len, stdout) != key.len) {
+            return 1;
+        }
+        if (value.len > 0 && fwrite(value.data, 1, value.len, stdout) != value.len) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int main(int argc, char** argv) {
+#ifdef _WIN32
+    if (_setmode(_fileno(stdout), _O_BINARY) == -1) {
+        fprintf(stderr, "setmode failed\n");
+        return 1;
+    }
+#endif
+    if (argc < 2) {
+        fprintf(stderr, "missing fixture\n");
+        return 2;
+    }
+    int with_entries = 0;
+    if (argc > 2) {
+        if (strcmp(argv[2], "entries") != 0) {
+            fprintf(stderr, "unknown mode\n");
+            return 2;
+        }
+        with_entries = 1;
+    }
+    rt_arena arena;
+    rt_arena_init(&arena);
+    if (with_entries) {
+        load_synthetic(&arena);
+    }
+    uint8_t* data = NULL;
+    size_t len = 0;
+    if (read_fixture(argv[1], &data, &len) != 0) {
+        fprintf(stderr, "cannot read fixture\n");
+        return 1;
+    }
+    if (len > 0) {
+        rt_env_parse(&arena, data, len);
+    }
+    free(data);
+    if (dump_env() != 0) {
+        fprintf(stderr, "dump failed\n");
+        return 1;
+    }
+    rt_arena_deinit(&arena);
+    return 0;
+}
+`

@@ -3329,3 +3329,608 @@ func main() int {
 		t.Fatalf("expected compiler args to contain -ljwt, got: %s", log)
 	}
 }
+
+func TestRunFileEnvSnapshot(t *testing.T) {
+	requireCC(t)
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("TRUX_DOTENV_9F3C_PROC", "proc")
+	t.Setenv("TRUX_DOTENV_9F3C_BOTH", "from-proc")
+	t.Setenv("TRUX_DOTENV_9F3C_CLEAR", "was-set")
+	t.Setenv("TRUX_DOTENV_9F3C_(x86)", "parens")
+	lines := []string{
+		"# comment",
+		"",
+		"  # indented comment",
+		"TRUX_DOTENV_9F3C_FILE_A=first",
+		"TRUX_DOTENV_9F3C_FILE_A=second",
+		"TRUX_DOTENV_9F3C_FILE_B=b",
+		"TRUX_DOTENV_9F3C_EMPTY=",
+		"TRUX_DOTENV_9F3C_EQ=a=b",
+		"  TRUX_DOTENV_9F3C_TRIM=kept",
+		"TRUX_DOTENV_9F3C_SP= kept",
+		"TRUX_DOTENV_9F3C_HASH=a # b",
+		"TRUX_DOTENV_9F3C_CASE=upper",
+		"TRUX_DOTENV_9F3C_case=lower",
+		"TRUX_DOTENV_9F3C_BOTH=from-file",
+		"TRUX_DOTENV_9F3C_CLEAR=",
+	}
+	writeEnvFile(t, dir, strings.Join(lines, "\r\n")+"\r\n")
+
+	path := writeTempSource(t, `package main
+import "io"
+
+func load() map[string]string {
+    return io.env()
+}
+
+func countKey(names list[string], name string) int {
+    let n int = 0
+    for let i int = 0; i < len(names); i = i + 1 {
+        if names[i] == name {
+            n = n + 1
+        }
+    }
+    return n
+}
+
+func indexOf(names list[string], name string) int {
+    for let i int = 0; i < len(names); i = i + 1 {
+        if names[i] == name {
+            return i
+        }
+    }
+    return -1
+}
+
+func emptyKeyCount(names list[string]) int {
+    let n int = 0
+    for let i int = 0; i < len(names); i = i + 1 {
+        if names[i] == "" {
+            n = n + 1
+        }
+    }
+    return n
+}
+
+func main() int {
+    let loaded map[string]string = load()
+    let env map[string]string = io.env()
+    print("proc=", env["TRUX_DOTENV_9F3C_PROC"])
+    print("loaded=", loaded["TRUX_DOTENV_9F3C_PROC"])
+    print("both=", env["TRUX_DOTENV_9F3C_BOTH"])
+    print("clear=[", env["TRUX_DOTENV_9F3C_CLEAR"], "]")
+    print("parens=", env["TRUX_DOTENV_9F3C_(x86)"])
+    print("a=", env["TRUX_DOTENV_9F3C_FILE_A"])
+    print("b=", env["TRUX_DOTENV_9F3C_FILE_B"])
+    print("empty=[", env["TRUX_DOTENV_9F3C_EMPTY"], "]")
+    print("eq=", env["TRUX_DOTENV_9F3C_EQ"])
+    print("trim=", env["TRUX_DOTENV_9F3C_TRIM"])
+    print("sp=[", env["TRUX_DOTENV_9F3C_SP"], "]")
+    print("hash=", env["TRUX_DOTENV_9F3C_HASH"])
+    print("missing=[", env["TRUX_DOTENV_9F3C_MISSING"], "]")
+    print("case=", env["TRUX_DOTENV_9F3C_CASE"])
+    print("lower=", env["TRUX_DOTENV_9F3C_case"])
+    let names list[string] = keys(env)
+    print("count=", countKey(names, "TRUX_DOTENV_9F3C_FILE_A"))
+    print("count-both=", countKey(names, "TRUX_DOTENV_9F3C_BOTH"))
+    print("count-clear=", countKey(names, "TRUX_DOTENV_9F3C_CLEAR"))
+    print("empty-keys=", emptyKeyCount(names))
+    print("ipa=", indexOf(names, "TRUX_DOTENV_9F3C_PROC"))
+    print("ipb=", indexOf(names, "TRUX_DOTENV_9F3C_BOTH"))
+    print("ic=", indexOf(names, "TRUX_DOTENV_9F3C_CLEAR"))
+    print("ix=", indexOf(names, "TRUX_DOTENV_9F3C_(x86)"))
+    print("ia=", indexOf(names, "TRUX_DOTENV_9F3C_FILE_A"))
+    print("ib=", indexOf(names, "TRUX_DOTENV_9F3C_FILE_B"))
+    env["TRUX_DOTENV_9F3C_FILE_A"] = "changed"
+    let again map[string]string = io.env()
+    print("again=", again["TRUX_DOTENV_9F3C_FILE_A"])
+    return 0
+}`)
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"proc=proc\n",
+		"loaded=proc\n",
+		"both=from-file\n",
+		"a=second\n",
+		"b=b\n",
+		"empty=[]\n",
+		"eq=a=b\n",
+		"trim=kept\n",
+		"sp=[ kept]\n",
+		"hash=a # b\n",
+		"clear=[]\n",
+		"parens=parens\n",
+		"missing=[]\n",
+		"case=upper\n",
+		"lower=lower\n",
+		"count=1\n",
+		"count-both=1\n",
+		"count-clear=1\n",
+		"empty-keys=0\n",
+		"again=second\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
+	}
+	ipa := envIndex(t, got, "ipa=")
+	ipb := envIndex(t, got, "ipb=")
+	ic := envIndex(t, got, "ic=")
+	ix := envIndex(t, got, "ix=")
+	ia := envIndex(t, got, "ia=")
+	ib := envIndex(t, got, "ib=")
+	if ipa < 0 || ipb < 0 || ic < 0 || ix < 0 || ia < 0 || ib < 0 {
+		t.Fatalf("missing key in snapshot indexes ipa=%d ipb=%d ic=%d ix=%d ia=%d ib=%d\n%s", ipa, ipb, ic, ix, ia, ib, got)
+	}
+	if !(ipa < ia && ipb < ia && ic < ia && ix < ia && ia < ib) {
+		t.Fatalf("key order ipa=%d ipb=%d ic=%d ix=%d ia=%d ib=%d, want process slots before new file keys\n%s", ipa, ipb, ic, ix, ia, ib, got)
+	}
+}
+
+func TestRunFileEnvRejectsBadFileBeforeMain(t *testing.T) {
+	requireCC(t)
+
+	exe := buildEnvProgram(t, `package main
+import "io"
+
+func main() int {
+    print("started")
+    let env map[string]string = io.env()
+    print(env["A"])
+    return 0
+}`)
+
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "invalid line", body: "not valid\n", want: ".env:1: invalid line"},
+		{name: "invalid key", body: "export FOO=bar\n", want: ".env:1: invalid key"},
+		{name: "digit key", body: "1FOO=bar\n", want: ".env:1: invalid key"},
+		{name: "later line", body: "# comment\n\nTRUX_DOTENV_9F3C_OK=1\nnot valid\n", want: ".env:4: invalid line"},
+		{name: "crlf line number", body: "TRUX_DOTENV_9F3C_OK=1\r\n\r\nnot valid\r\n", want: ".env:3: invalid line"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			writeEnvFile(t, dir, tt.body)
+			assertBuiltEnvFailure(t, exe, tt.want)
+		})
+	}
+	t.Run("directory", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		if err := os.Mkdir(filepath.Join(dir, ".env"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		assertBuiltEnvFailure(t, exe, ".env: not a regular file")
+	})
+	t.Run("unused function still loads", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		writeEnvFile(t, dir, "not valid\n")
+		unused := buildEnvProgram(t, `package main
+import "io"
+
+func hidden() map[string]string {
+    return io.env()
+}
+
+func main() int {
+    print("started")
+    return 0
+}`)
+		assertBuiltEnvFailure(t, unused, ".env:1: invalid line")
+	})
+}
+
+func TestRunFileEnvSkipsHarmlessFile(t *testing.T) {
+	requireCC(t)
+
+	exe := buildEnvProgram(t, `package main
+import "io"
+
+func emptyKeyCount(names list[string]) int {
+    let n int = 0
+    for let i int = 0; i < len(names); i = i + 1 {
+        if names[i] == "" {
+            n = n + 1
+        }
+    }
+    return n
+}
+
+func main() int {
+    let env map[string]string = io.env()
+    let proc string, procOK bool = env["TRUX_DOTENV_9F3C_PROC"]
+    let hidden string, hiddenOK bool = env["TRUX_DOTENV_9F3C_HIDDEN"]
+    print("proc=", proc)
+    print("proc-ok=", procOK)
+    print("hidden=[", hidden, "]")
+    print("hidden-ok=", hiddenOK)
+    let names list[string] = keys(env)
+    print("empty-keys=", emptyKeyCount(names))
+    return 0
+}`)
+	want := "proc=proc\nproc-ok=true\nhidden=[]\nhidden-ok=false\nempty-keys=0\n"
+	cases := []struct {
+		name  string
+		write bool
+		body  string
+	}{
+		{name: "missing"},
+		{name: "empty", write: true},
+		{name: "comments and whitespace", write: true, body: "# TRUX_DOTENV_9F3C_HIDDEN=no\n\n  \n\t\n  # still hidden\n"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			t.Setenv("TRUX_DOTENV_9F3C_PROC", "proc")
+			if tt.write {
+				writeEnvFile(t, dir, tt.body)
+			}
+			got, err := runBuiltProgram(exe)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Fatalf("output = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestRunFileEnvAccess(t *testing.T) {
+	requireCC(t)
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("TRUX_DOTENV_9F3C_PROC", "proc")
+	t.Setenv("TRUX_DOTENV_9F3C_BOTH", "from-proc")
+	writeEnvFile(t, dir, "TRUX_DOTENV_9F3C_FILE=file-value\nTRUX_DOTENV_9F3C_BOTH=from-file\n")
+
+	path := writeTempSource(t, `package main
+import "io"
+
+func readKey(env map[string]string, name string) string {
+    let value string, ok bool = env[name]
+    if ok {
+        return value
+    }
+    return ""
+}
+
+func indexOf(names list[string], name string) int {
+    for let i int = 0; i < len(names); i = i + 1 {
+        if names[i] == name {
+            return i
+        }
+    }
+    return -1
+}
+
+func countKey(names list[string], name string) int {
+    let n int = 0
+    for let i int = 0; i < len(names); i = i + 1 {
+        if names[i] == name {
+            n = n + 1
+        }
+    }
+    return n
+}
+
+func main() int {
+    let env map[string]string = io.env()
+    let procName string = "TRUX_DOTENV_9F3C_PROC"
+    let fileName string = "TRUX_DOTENV_9F3C_FILE"
+    let bothName string = "TRUX_DOTENV_9F3C_BOTH"
+    let missingName string = "TRUX_DOTENV_9F3C_MISSING"
+    let proc string, procOK bool = env[procName]
+    let file string, fileOK bool = env[fileName]
+    let both string, bothOK bool = env[bothName]
+    let missing string, missingOK bool = env[missingName]
+    print("proc=", proc)
+    print("proc-ok=", procOK)
+    print("file=", file)
+    print("file-ok=", fileOK)
+    print("both=", both)
+    print("both-ok=", bothOK)
+    print("missing=[", missing, "]")
+    print("missing-ok=", missingOK)
+    print("read-proc=", readKey(env, procName))
+    print("read-file=", readKey(env, fileName))
+    print("read-missing=[", readKey(env, missingName), "]")
+    if proc == "proc" && file == "file-value" && both == "from-file" {
+        print("compare=yes")
+    } else {
+        print("compare=no")
+    }
+    let names list[string] = keys(env)
+    let vals list[string] = values(env)
+    if len(env) == len(names) && len(names) == len(vals) {
+        print("len=match")
+    } else {
+        print("len=mismatch")
+    }
+    print("file-at=", vals[indexOf(names, fileName)])
+    print("proc-at=", vals[indexOf(names, procName)])
+    print("count-both=", countKey(names, bothName))
+    print("ib=", indexOf(names, bothName))
+    print("if=", indexOf(names, fileName))
+    let before int = len(env)
+    delete(env, fileName)
+    let after string, afterOK bool = env[fileName]
+    print("after-ok=", afterOK)
+    print("after=[", after, "]")
+    print("deleted=", before - len(env))
+    let fresh map[string]string = io.env()
+    let again string, againOK bool = fresh[fileName]
+    print("again=", again)
+    print("again-ok=", againOK)
+    print("still=", fresh[procName])
+    if len(fresh) == before {
+        print("fresh-len=same")
+    } else {
+        print("fresh-len=different")
+    }
+    return 0
+}`)
+
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"proc=proc\n",
+		"proc-ok=true\n",
+		"file=file-value\n",
+		"file-ok=true\n",
+		"both=from-file\n",
+		"both-ok=true\n",
+		"missing=[]\n",
+		"missing-ok=false\n",
+		"read-proc=proc\n",
+		"read-file=file-value\n",
+		"read-missing=[]\n",
+		"compare=yes\n",
+		"len=match\n",
+		"file-at=file-value\n",
+		"proc-at=proc\n",
+		"count-both=1\n",
+		"after-ok=false\n",
+		"after=[]\n",
+		"deleted=1\n",
+		"again=file-value\n",
+		"again-ok=true\n",
+		"still=proc\n",
+		"fresh-len=same\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q:\n%s", want, got)
+		}
+	}
+	ib := envIndex(t, got, "ib=")
+	ifile := envIndex(t, got, "if=")
+	if !(ib < ifile) {
+		t.Fatalf("overlay index %d, file index %d, want the process slot kept ahead of the new file key\n%s", ib, ifile, got)
+	}
+}
+
+func TestRunFileEnvLoadsOnce(t *testing.T) {
+	requireCC(t)
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("TRUX_DOTENV_9F3C_PROC", "proc")
+	writeEnvFile(t, dir, "TRUX_DOTENV_9F3C_FILE=first\n")
+	path := writeTempSource(t, `package main
+import "io"
+
+func main() int {
+    let env map[string]string = io.env()
+    print("first=", env["TRUX_DOTENV_9F3C_FILE"])
+    print("proc=", env["TRUX_DOTENV_9F3C_PROC"])
+    let err error = io.writeFile(".env", "not valid\n")
+    if err != nil {
+        print("write-failed")
+        return 1
+    }
+    let again map[string]string = io.env()
+    print("second=", again["TRUX_DOTENV_9F3C_FILE"])
+    print("proc2=", again["TRUX_DOTENV_9F3C_PROC"])
+    return 0
+}`)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "first=first\nproc=proc\nsecond=first\nproc2=proc\n" {
+		t.Fatalf("output = %q", out.String())
+	}
+	if got := readFile(t, filepath.Join(dir, ".env")); got != "not valid\n" {
+		t.Fatalf(".env after run = %q, want the rewritten file", got)
+	}
+}
+
+func TestRunFileEnvReadsOnlyStartDirectory(t *testing.T) {
+	requireCC(t)
+
+	exe := buildEnvProgram(t, `package main
+import "io"
+
+func main() int {
+    let env map[string]string = io.env()
+    let where string, whereOK bool = env["TRUX_DOTENV_9F3C_WHERE"]
+    let file string, fileOK bool = env["TRUX_DOTENV_9F3C_FILE"]
+    let nested string, nestedOK bool = env["TRUX_DOTENV_9F3C_NESTED"]
+    print("proc=", env["TRUX_DOTENV_9F3C_PROC"])
+    print("where=", where)
+    print("where-ok=", whereOK)
+    print("file=", file)
+    print("file-ok=", fileOK)
+    print("nested=[", nested, "]")
+    print("nested-ok=", nestedOK)
+    return 0
+}`)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(exe), ".env"), []byte("not valid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("cwd file wins", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		t.Setenv("TRUX_DOTENV_9F3C_PROC", "proc")
+		t.Setenv("TRUX_DOTENV_9F3C_WHERE", "from-proc")
+		writeEnvFile(t, dir, "TRUX_DOTENV_9F3C_WHERE=from-cwd\nTRUX_DOTENV_9F3C_FILE=cwd\n")
+		nested := filepath.Join(dir, "nested")
+		if err := os.Mkdir(nested, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(nested, ".env"), []byte("TRUX_DOTENV_9F3C_NESTED=yes\nTRUX_DOTENV_9F3C_WHERE=from-nested\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		beside := filepath.Join(dir, "src")
+		if err := os.Mkdir(beside, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(beside, ".env"), []byte("not valid\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := runBuiltProgram(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "proc=proc\nwhere=from-cwd\nwhere-ok=true\nfile=cwd\nfile-ok=true\nnested=[]\nnested-ok=false\n"
+		if got != want {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+	})
+	t.Run("bad file outside cwd is ignored", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Chdir(dir)
+		t.Setenv("TRUX_DOTENV_9F3C_PROC", "proc")
+		t.Setenv("TRUX_DOTENV_9F3C_WHERE", "from-proc")
+		nested := filepath.Join(dir, "nested")
+		if err := os.Mkdir(nested, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(nested, ".env"), []byte("not valid\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := runBuiltProgram(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "proc=proc\nwhere=from-proc\nwhere-ok=true\nfile=\nfile-ok=false\nnested=[]\nnested-ok=false\n"
+		if got != want {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestRunFileWithoutEnvIgnoresBadDotenv(t *testing.T) {
+	requireCC(t)
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeEnvFile(t, dir, "not valid\n")
+	path := writeTempSource(t, `package main
+func main() int {
+    print("ok")
+    return 0
+}`)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "ok\n" {
+		t.Fatalf("output = %q, want ok", out.String())
+	}
+}
+
+func buildEnvProgram(t *testing.T, src string) string {
+	t.Helper()
+	requireCC(t)
+
+	path := writeTempSource(t, src)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cPath, err := writeGeneratedFiles(dir, "main", result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(dir, "main")
+	if err := compileGenerated(cPath, exe, generatedCompileOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	return exe
+}
+
+func runBuiltProgram(exe string) (string, error) {
+	cmd := exec.Command(exe)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			return stdout.String(), fmt.Errorf("execute %s: %w", exe, err)
+		}
+		return stdout.String(), fmt.Errorf("execute %s: %w\n%s", exe, err, msg)
+	}
+	return stdout.String(), nil
+}
+
+func assertBuiltEnvFailure(t *testing.T, exe string, want string) {
+	t.Helper()
+	out, err := runBuiltProgram(exe)
+	if err == nil {
+		t.Fatal("expected env load to fail")
+	}
+	if out != "" {
+		t.Fatalf("output = %q, want empty output before main", out)
+	}
+	if !strings.Contains(err.Error(), "exit status 1") {
+		t.Fatalf("error = %q, want exit status 1", err.Error())
+	}
+	if !strings.Contains(err.Error(), "trux runtime error: "+want) {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func writeEnvFile(t *testing.T, dir string, contents string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func envIndex(t *testing.T, out string, prefix string) int {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			n, err := strconv.Atoi(strings.TrimPrefix(line, prefix))
+			if err != nil {
+				t.Fatalf("index %q: %v", line, err)
+			}
+			return n
+		}
+	}
+	t.Fatalf("output missing %q:\n%s", prefix, out)
+	return -1
+}

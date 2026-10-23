@@ -19,6 +19,7 @@ type Program struct {
 	UsesSQLite  bool
 	UsesJSON    bool
 	UsesJWT     bool
+	UsesEnv     bool
 	UsedTypes   []ast.Type
 }
 
@@ -718,6 +719,17 @@ func (e *ReadDirExpr) Ownership() types.Origin { return e.Origin }
 
 func (*ReadDirExpr) exprNode() {}
 
+type EnvExpr struct {
+	Typ    ast.Type
+	Origin types.Origin
+}
+
+func (e *EnvExpr) Type() ast.Type { return e.Typ }
+
+func (e *EnvExpr) Ownership() types.Origin { return e.Origin }
+
+func (*EnvExpr) exprNode() {}
+
 type PathQueryExpr struct {
 	Kind   types.IOCallKind
 	Path   Expr
@@ -1070,7 +1082,7 @@ func (b builder) buildProgram(program *ast.Program) (*Program, error) {
 	for k, v := range b.info.Structs {
 		structs[k] = v
 	}
-	out := &Program{PackageName: program.PackageName, Structs: structs, UsesHTTP: len(b.info.HTTPCalls) > 0, UsesSQLite: b.info.UsesSQLite, UsesJSON: b.info.UsesJSON, UsesJWT: b.info.UsesJWT}
+	out := &Program{PackageName: program.PackageName, Structs: structs, UsesHTTP: len(b.info.HTTPCalls) > 0, UsesSQLite: b.info.UsesSQLite, UsesJSON: b.info.UsesJSON, UsesJWT: b.info.UsesJWT, UsesEnv: b.info.UsesEnv}
 	for _, fn := range program.Functions {
 		irFn, err := b.buildFunc(fn)
 		if err != nil {
@@ -1728,6 +1740,8 @@ func (b builder) buildIOExpr(expr *ast.CallExpr, sig types.IOCallSig, typ ast.Ty
 			return nil, err
 		}
 		return &ReadDirExpr{Path: path, Typ: typ, Origin: origin}, nil
+	case types.IOCallEnv:
+		return &EnvExpr{Typ: typ, Origin: origin}, nil
 	case types.IOCallExists, types.IOCallIsFile, types.IOCallIsDir:
 		path, err := b.buildExpr(expr.Args[0])
 		if err != nil {

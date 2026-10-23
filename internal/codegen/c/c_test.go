@@ -969,6 +969,39 @@ func main() int {
 	}
 }
 
+func TestGenerateLoadsEnvBeforeMain(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "io"
+
+func main() int {
+    let env map[string]string = io.env()
+    print(env["PORT"])
+    return 0
+}`)
+	load := strings.Index(cSource, "rt_env_load(&trux_arena);")
+	exitCall := strings.Index(cSource, "int64_t trux_exit_code")
+	if load < 0 || exitCall < 0 || load > exitCall {
+		t.Fatalf("env load at %d, user main at %d", load, exitCall)
+	}
+	if !strings.Contains(cSource, "rt_map_string_string_clone(") {
+		t.Fatal("generated C missing env clone")
+	}
+	if !strings.Contains(cSource, "static rt_map_string_string* trux_env_snapshot;") {
+		t.Fatal("generated C missing env snapshot")
+	}
+	if strings.Count(cSource, "rt_env_load(") != 1 {
+		t.Fatalf("rt_env_load count = %d, want 1", strings.Count(cSource, "rt_env_load("))
+	}
+
+	plain := mustGenerateC(t, `package main
+func main() int {
+    return 0
+}`)
+	if strings.Contains(plain, "rt_env_load") {
+		t.Fatal("program that does not call io.env still loads .env")
+	}
+}
+
 func TestGenerateCreatesCForAssert(t *testing.T) {
 	cSource := mustGenerateC(t, `package main
 func main() int {

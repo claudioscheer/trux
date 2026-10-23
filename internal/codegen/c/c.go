@@ -140,7 +140,7 @@ func exprNeedsFrame(expr ir.Expr) bool {
 		return exprNeedsFrame(expr.Path)
 	case *ir.PathQueryExpr:
 		return exprNeedsFrame(expr.Path)
-	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.KeysExpr, *ir.ValuesExpr, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr:
+	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.KeysExpr, *ir.ValuesExpr, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.EnvExpr:
 		return true
 	case *ir.FieldExpr:
 		return exprNeedsFrame(expr.Object)
@@ -404,7 +404,7 @@ func exprPublishesFrame(expr ir.Expr, declared map[string]bool, tainted map[stri
 		return false
 	}
 	switch expr := expr.(type) {
-	case *ir.IdentExpr, *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.NilLiteral, *ir.NewExpr, *ir.GPUCoordExpr, *ir.TimeNowExpr, *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr:
+	case *ir.IdentExpr, *ir.IntLiteral, *ir.FloatLiteral, *ir.StringLiteral, *ir.BoolLiteral, *ir.NilLiteral, *ir.NewExpr, *ir.GPUCoordExpr, *ir.TimeNowExpr, *ir.ReadLineExpr, *ir.ReadIntExpr, *ir.ReadFloatExpr, *ir.ReadBoolExpr, *ir.EnvExpr:
 		return false
 	case *ir.FieldExpr:
 		return exprPublishesFrame(expr.Object, declared, tainted)
@@ -538,7 +538,7 @@ func valueReferencesFrame(expr ir.Expr, tainted map[string]bool) bool {
 		return expr.Operator == "&" || isDynamicType(expr.Type())
 	case *ir.LenExpr, *ir.PathQueryExpr:
 		return false
-	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.KeysExpr, *ir.ValuesExpr, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr:
+	case *ir.ArrayLiteral, *ir.ListLiteral, *ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.KeysExpr, *ir.ValuesExpr, *ir.MakeExpr, *ir.CloneExpr, *ir.ReadLineExpr, *ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ReadPPMExpr, *ir.HTTPRequestStringExpr, *ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.EnvExpr:
 		return true
 	case *ir.FieldExpr:
 		if !isDynamicType(expr.Type()) && !ast.TypeEqual(expr.Type(), ast.StringType) {
@@ -627,6 +627,16 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 		return "", err
 	}
 
+	envMap := ""
+	if program.UsesEnv {
+		name, err := mapRuntimeName(&ast.MapType{Key: ast.StringType, Value: ast.StringType})
+		if err != nil {
+			return "", err
+		}
+		envMap = name
+		fmt.Fprintf(&out, "static rt_map_%s* trux_env_snapshot;\n", envMap)
+	}
+
 	tuples, err := collectTupleTypes(program)
 	if err != nil {
 		return "", err
@@ -695,6 +705,13 @@ func GenerateWithOptions(program *ir.Program, opts Options) (string, error) {
 	fmt.Fprintln(&out, "    rt_arena trux_arena;")
 	fmt.Fprintln(&out, "    rt_arena_init(&trux_arena);")
 	fmt.Fprintln(&out, "    rt_context trux_ctx = {&trux_arena, NULL};")
+	if program.UsesEnv {
+		fmt.Fprintln(&out, "    rt_env_load(&trux_arena);")
+		fmt.Fprintf(&out, "    trux_env_snapshot = rt_map_%s_new(&trux_arena, rt_env_len());\n", envMap)
+		fmt.Fprintln(&out, "    for (int64_t trux_env_i = 0; trux_env_i < rt_env_len(); trux_env_i++) {")
+		fmt.Fprintf(&out, "        rt_map_%s_set(trux_env_snapshot, rt_env_key(trux_env_i), rt_env_value(trux_env_i));\n", envMap)
+		fmt.Fprintln(&out, "    }")
+	}
 	fmt.Fprintf(&out, "    int64_t trux_exit_code = %s(&trux_ctx, &trux_arena);\n", mangleFunc("main"))
 	if program.UsesSQLite {
 		fmt.Fprintln(&out, "    rt_sqlite_cleanup_all();")
@@ -2522,7 +2539,7 @@ func exprHasSideEffect(expr ir.Expr) bool {
 		*ir.ReadFileExpr, *ir.ReadCSVExpr, *ir.ImageDimensionExpr, *ir.ReadPPMExpr,
 		*ir.TimeNowExpr, *ir.HTTPRequestStringExpr, *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.CallExpr, *ir.SQLiteCallExpr, *ir.JSONCallExpr, *ir.JWTCallExpr,
 		*ir.ErrorsNewExpr, *ir.WriteFileExpr, *ir.WriteCSVExpr, *ir.WritePPMExpr,
-		*ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.PathQueryExpr,
+		*ir.CreateDirExpr, *ir.RemoveExpr, *ir.ReadDirExpr, *ir.PathQueryExpr, *ir.EnvExpr,
 		*ir.StructLiteral, *ir.MapLiteral, *ir.NewExpr, *ir.MapLookupExpr, *ir.KeysExpr, *ir.ValuesExpr:
 		return true
 	case *ir.FieldExpr:
@@ -2656,6 +2673,12 @@ func emitExpr(expr ir.Expr, targetArena string) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("rt_read_dir(%s, %s)", targetArena, path), nil
+	case *ir.EnvExpr:
+		mapName, err := mapRuntimeName(&ast.MapType{Key: ast.StringType, Value: ast.StringType})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("rt_map_%s_clone(%s, trux_env_snapshot)", mapName, targetArena), nil
 	case *ir.PathQueryExpr:
 		path, err := emitExpr(expr.Path, frameArena)
 		if err != nil {

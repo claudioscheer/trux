@@ -1357,6 +1357,17 @@ func main() int {
 			want: `io.readLine expects 0 arguments, got 1`,
 		},
 		{
+			name: "env arity",
+			src: `package main
+import "io"
+
+func main() int {
+    let env map[string]string = io.env("PORT")
+    return 0
+}`,
+			want: `io.env expects 0 arguments, got 1`,
+		},
+		{
 			name: "readFile path type",
 			src: `package main
 import "io"

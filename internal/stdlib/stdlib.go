@@ -22,6 +22,7 @@ const (
 	CallExists                CallKind = "exists"
 	CallIsFile                CallKind = "isFile"
 	CallIsDir                 CallKind = "isDir"
+	CallEnv                   CallKind = "env"
 	CallReadCSV               CallKind = "readCsv"
 	CallWriteCSV              CallKind = "writeCsv"
 	CallImageWidth            CallKind = "imageWidth"
@@ -330,6 +331,14 @@ var packages = []Package{
 				ReturnType:   ast.BoolType,
 				ResultOrigin: ResultOwned,
 				Detail:       "check if path is a directory",
+			},
+			{
+				Package:      "io",
+				Name:         "env",
+				Kind:         CallEnv,
+				ReturnType:   &ast.MapType{Key: ast.StringType, Value: ast.StringType},
+				ResultOrigin: ResultFrameOwned,
+				Detail:       "copy of the process environment with .env overlaid",
 			},
 		},
 	},

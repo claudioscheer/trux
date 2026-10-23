@@ -58,6 +58,7 @@ type Info struct {
 	UsesSQLite    bool
 	UsesJSON      bool
 	UsesJWT       bool
+	UsesEnv       bool
 }
 
 type AppendSig struct {
@@ -84,6 +85,7 @@ const (
 	IOCallExists             IOCallKind = IOCallKind(stdlib.CallExists)
 	IOCallIsFile             IOCallKind = IOCallKind(stdlib.CallIsFile)
 	IOCallIsDir              IOCallKind = IOCallKind(stdlib.CallIsDir)
+	IOCallEnv                IOCallKind = IOCallKind(stdlib.CallEnv)
 	IOCallReadCSV            IOCallKind = IOCallKind(stdlib.CallReadCSV)
 	IOCallWriteCSV           IOCallKind = IOCallKind(stdlib.CallWriteCSV)
 	IOCallImageWidth         IOCallKind = IOCallKind(stdlib.CallImageWidth)
@@ -2611,6 +2613,9 @@ func (c *checker) checkStdlibCall(expr *ast.CallExpr, member stdlib.Member, argT
 		c.info.JWTCalls[expr] = JWTCallSig{Kind: JWTCallKind(member.Kind)}
 	} else {
 		c.info.IOCalls[expr] = IOCallSig{Kind: IOCallKind(member.Kind)}
+		if member.Kind == stdlib.CallEnv {
+			c.info.UsesEnv = true
+		}
 	}
 	return member.ReturnType, originForStdlibResult(member.ResultOrigin), nil
 }

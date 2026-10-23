@@ -2141,5 +2141,273 @@ static RT_UNUSED trux_tuple_list_string_error rt_read_dir(rt_arena* arena, rt_st
 #endif
 }
 
+#if defined(__CUDA_ARCH__)
+static RT_UNUSED void rt_env_load(rt_arena* arena) {
+    (void)arena;
+}
+
+static RT_UNUSED int64_t rt_env_len(void) {
+    return 0;
+}
+
+static RT_UNUSED rt_string rt_env_key(int64_t index) {
+    (void)index;
+    return RT_LIT(rt_string, NULL, 0);
+}
+
+static RT_UNUSED rt_string rt_env_value(int64_t index) {
+    (void)index;
+    return RT_LIT(rt_string, NULL, 0);
+}
+#else
+typedef struct {
+    rt_string* keys;
+    rt_string* values;
+    int64_t len;
+    int64_t cap;
+} rt_env_table;
+
+static rt_env_table trux_env_table;
+
+static RT_UNUSED void rt_env_fail(const char* message) {
+    fprintf(stderr, "trux runtime error: %s\n", message);
+    exit(1);
+}
+
+static RT_UNUSED void rt_env_fail_line(int64_t line, const char* message) {
+    fprintf(stderr, "trux runtime error: .env:%" PRId64 ": %s\n", line, message);
+    exit(1);
+}
+
+static RT_UNUSED rt_string rt_env_copy(rt_arena* arena, const uint8_t* data, size_t len) {
+    if (len == 0) {
+        return RT_LIT(rt_string, NULL, 0);
+    }
+    uint8_t* copy = (uint8_t*)rt_arena_alloc(arena, len);
+    memcpy(copy, data, len);
+    return RT_LIT(rt_string, copy, len);
+}
+
+static RT_UNUSED void rt_env_grow(void) {
+    if (trux_env_table.len < trux_env_table.cap) {
+        return;
+    }
+    int64_t cap = trux_env_table.cap == 0 ? 8 : trux_env_table.cap * 2;
+    if (cap < trux_env_table.cap) {
+        rt_runtime_fail("allocation failed");
+    }
+    rt_string* keys = (rt_string*)realloc(trux_env_table.keys, (size_t)cap * sizeof(rt_string));
+    if (keys == NULL) {
+        rt_runtime_fail("allocation failed");
+    }
+    trux_env_table.keys = keys;
+    rt_string* values = (rt_string*)realloc(trux_env_table.values, (size_t)cap * sizeof(rt_string));
+    if (values == NULL) {
+        rt_runtime_fail("allocation failed");
+    }
+    trux_env_table.values = values;
+    trux_env_table.cap = cap;
+}
+
+static RT_UNUSED void rt_env_upsert(rt_arena* arena, const uint8_t* key, size_t key_len, const uint8_t* value, size_t value_len) {
+    rt_string key_view = RT_LIT(rt_string, key_len == 0 ? NULL : key, key_len);
+    for (int64_t i = 0; i < trux_env_table.len; i++) {
+        if (rt_string_equal(trux_env_table.keys[i], key_view)) {
+            trux_env_table.values[i] = rt_env_copy(arena, value, value_len);
+            return;
+        }
+    }
+    rt_env_grow();
+    trux_env_table.keys[trux_env_table.len] = rt_env_copy(arena, key, key_len);
+    trux_env_table.values[trux_env_table.len] = rt_env_copy(arena, value, value_len);
+    trux_env_table.len++;
+}
+
+static RT_UNUSED void rt_env_add_entry(rt_arena* arena, const char* entry, size_t len) {
+    size_t eq = 0;
+    while (eq < len && (unsigned char)entry[eq] != '=') {
+        eq++;
+    }
+    if (eq == len || eq == 0) {
+        return;
+    }
+    rt_env_upsert(arena, (const uint8_t*)entry, eq, (const uint8_t*)entry + eq + 1, len - eq - 1);
+}
+
+static RT_UNUSED void rt_env_load_process(rt_arena* arena) {
+#if defined(_WIN32)
+    char* block = GetEnvironmentStringsA();
+    if (block == NULL) {
+        rt_env_fail("cannot read environment");
+    }
+    char* cursor = block;
+    while (*cursor != '\0') {
+        size_t len = strlen(cursor);
+        rt_env_add_entry(arena, cursor, len);
+        cursor += len + 1;
+    }
+    FreeEnvironmentStringsA(block);
+#else
+    extern char** environ;
+    if (environ == NULL) {
+        return;
+    }
+    for (char** cursor = environ; *cursor != NULL; cursor++) {
+        rt_env_add_entry(arena, *cursor, strlen(*cursor));
+    }
+#endif
+}
+
+static RT_UNUSED bool rt_env_space(unsigned char c) {
+    return c == ' ' || c == '\t';
+}
+
+static RT_UNUSED bool rt_env_key_ok(const uint8_t* data, size_t len) {
+    if (len == 0) {
+        return false;
+    }
+    unsigned char first = data[0];
+    if (!((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z') || first == '_')) {
+        return false;
+    }
+    for (size_t i = 1; i < len; i++) {
+        unsigned char c = data[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static RT_UNUSED void rt_env_parse_line(rt_arena* arena, const uint8_t* data, size_t len, int64_t line_no) {
+    size_t start = 0;
+    while (start < len && rt_env_space(data[start])) {
+        start++;
+    }
+    if (start == len || data[start] == '#') {
+        return;
+    }
+    size_t eq = start;
+    while (eq < len && data[eq] != '=') {
+        eq++;
+    }
+    if (eq == len) {
+        rt_env_fail_line(line_no, "invalid line");
+    }
+    size_t key_end = eq;
+    while (key_end > start && rt_env_space(data[key_end - 1])) {
+        key_end--;
+    }
+    if (!rt_env_key_ok(data + start, key_end - start)) {
+        rt_env_fail_line(line_no, "invalid key");
+    }
+    rt_env_upsert(arena, data + start, key_end - start, data + eq + 1, len - (eq + 1));
+}
+
+static RT_UNUSED void rt_env_parse(rt_arena* arena, const uint8_t* data, size_t len) {
+    size_t i = 0;
+    int64_t line_no = 1;
+    while (i < len) {
+        size_t start = i;
+        while (i < len && data[i] != '\n') {
+            i++;
+        }
+        size_t end = i;
+        if (i < len && data[i] == '\n') {
+            i++;
+        }
+        if (end > start && data[end - 1] == '\r') {
+            end--;
+        }
+        rt_env_parse_line(arena, data + start, end - start, line_no);
+        line_no++;
+    }
+}
+
+static RT_UNUSED void rt_env_load_file(rt_arena* arena) {
+    const char* path = ".env";
+#if defined(_WIN32)
+    DWORD attr = GetFileAttributesA(path);
+    if (attr == INVALID_FILE_ATTRIBUTES) {
+        DWORD err = GetLastError();
+        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) {
+            return;
+        }
+        rt_env_fail(".env: cannot open");
+    }
+    if ((attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        rt_env_fail(".env: not a regular file");
+    }
+#else
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        if (errno == ENOENT) {
+            return;
+        }
+        rt_env_fail(".env: cannot open");
+    }
+    if (!S_ISREG(st.st_mode)) {
+        rt_env_fail(".env: not a regular file");
+    }
+#endif
+    FILE* file = fopen(path, "rb");
+    if (file == NULL) {
+        rt_env_fail(".env: cannot open");
+    }
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        rt_env_fail(".env: cannot read");
+    }
+    long file_size = ftell(file);
+    if (file_size < 0) {
+        fclose(file);
+        rt_env_fail(".env: cannot read");
+    }
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        rt_env_fail(".env: cannot read");
+    }
+    size_t size = (size_t)file_size;
+    uint8_t* data = NULL;
+    if (size > 0) {
+        data = (uint8_t*)malloc(size);
+        if (data == NULL) {
+            fclose(file);
+            rt_runtime_fail("allocation failed");
+        }
+        if (fread(data, 1, size, file) != size) {
+            free(data);
+            fclose(file);
+            rt_env_fail(".env: cannot read");
+        }
+    }
+    if (fclose(file) != 0) {
+        free(data);
+        rt_env_fail(".env: cannot read");
+    }
+    if (size > 0) {
+        rt_env_parse(arena, data, size);
+    }
+    free(data);
+}
+
+static RT_UNUSED void rt_env_load(rt_arena* arena) {
+    rt_env_load_process(arena);
+    rt_env_load_file(arena);
+}
+
+static RT_UNUSED int64_t rt_env_len(void) {
+    return trux_env_table.len;
+}
+
+static RT_UNUSED rt_string rt_env_key(int64_t index) {
+    return trux_env_table.keys[index];
+}
+
+static RT_UNUSED rt_string rt_env_value(int64_t index) {
+    return trux_env_table.values[index];
+}
+#endif
+
 #endif
 `

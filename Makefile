@@ -7,7 +7,7 @@ BINARY := trux
 CMD := ./cmd/trux
 RUN_BIN := ./bin/$(BINARY)
 
-.PHONY: build run test bench bench-digits fmt emit-c lsp clean
+.PHONY: build run test bench bench-digits mnist fmt emit-c lsp clean
 
 build:
 	$(GO) build -o $(RUN_BIN) $(CMD)
@@ -49,6 +49,12 @@ bench: build
 # Handwritten-digits HTTP+GPU. Linux, liburing, and CUDA. Not part of `bench`.
 bench-digits:
 	$(GO) run ./benchmarks/digits/
+
+# MNIST MLP. Needs CUDA. Falls back to the committed two-row fixture when no
+# trained model.txm is present; python3 export_mlp.py writes the real one.
+mnist: build
+	@cd examples/projects/mnist_mlp && if [ ! -f model.txm ]; then cp sample.txm model.txm; echo "using sample.txm; run export_mlp.py for the trained model"; fi
+	@cd examples/projects/mnist_mlp && ../../../bin/$(BINARY) run main.tx
 
 fmt: build
 	./bin/$(BINARY) fmt -r

@@ -1,0 +1,136 @@
+# MNIST MLP
+
+A 784 → 128 → 64 → 10 ReLU network trained in scikit-learn, exported to a TXM1
+file, and run in Trux. The whole 10,000-row test set is classified in three
+`gpu.launch1d` calls, then argmax runs on the host.
+
+Running it needs an NVIDIA GPU and `nvcc`, because the layers are CUDA kernels.
+The export does not need a GPU.
+
+This is the end-to-end model example: real data, real weights, and the last
+layer's ten values for every test row that the program has to reproduce.
+
+## Run
+
+```console
+$ make mnist                    # from the repository root
+```
+
+That uses the committed `sample.txm` fixture when no `model.txm` exists, so it
+runs without training. To build the real model:
+
+```console
+$ cd examples/projects/mnist_mlp
+$ python3 export_mlp.py
+```
+
+The first run downloads `mnist_784` from OpenML into scikit-learn's cache (a
+15 MB compressed file) and needs `numpy` and `scikit-learn`:
+
+```console
+$ python3 -m venv .venv && . .venv/bin/activate
+$ pip install numpy scikit-learn
+```
+
+`export_mlp.py` trains, writes `model.txm` next to this README, and checks every
+test row against `clf.predict` before the file is written. The file carries the
+last-layer values and the class for every row, so the Trux run can compare both.
+`model.txm` is generated and gitignored.
+
+## Output
+
+```
+rows 10000
+errors 237
+expected errors 237
+predictions mismatched 0
+logits compared 100000
+max logit difference 1.77635683940025e-14
+logits outside 1e-9 0
+accuracy 0.9763
+millis 95
+```
+
+That run is a 784 → 128 → 64 → 10 network trained for 12 epochs, on a GTX
+1660. The ~100 ms covers the three launches, the sync, and the copy of the
+10,000 × 10 logits back to the host. It is the whole test set, not one image.
+
+The last layer is checked value by value. The file stores numpy's ten outputs
+for every row as `expected_logits`, and the program compares all 100,000 of
+them with a 1e-9 absolute tolerance. The largest difference here is 1.78e-14,
+which is float64 rounding: numpy's matrix multiply and the kernel add the 784
+products in a different order, and the compiler may fuse a multiply and an add
+into one FMA. A transposed weight or a bias on the wrong layer changes the
+values by many orders of magnitude more than that, so the check catches real
+mistakes rather than double rounding.
+
+`predictions mismatched` is the check on the decision. The program compares its
+own argmax with `expected_predictions` for every row; 0 means all 10,000
+classes match. The smallest top-2 logit margin in the test set is 0.00434632,
+so a difference of 1.78e-14 cannot flip any row.
+
+As a check on the check, setting one output weight to 1e6 produces
+`predictions mismatched 2327`, `max logit difference 9983023`, and
+`logits outside 1e-9 2408`, then exits 1. Restoring the weight returns the
+mismatches and the outside count to zero, and the maximum difference to
+1.78e-14.
+
+`sample.txm` has two rows and one deliberate error, so a run without a trained
+file still exercises both checks. Its logits match exactly, not just within
+1e-9.
+
+## Tensor layout
+
+Weights are stored `[out, in]` so the kernel's inner loop walks the weight row
+and the input row in the same order. scikit-learn stores `[in, out]`, so the
+exporter transposes.
+
+| Name | Shape | Dtype | Meaning |
+| --- | --- | --- | --- |
+| `w1` | `[128, 784]` | float | layer 1 weights |
+| `b1` | `[128]` | float | layer 1 bias |
+| `w2` | `[64, 128]` | float | layer 2 weights |
+| `b2` | `[64]` | float | layer 2 bias |
+| `w3` | `[10, 64]` | float | output weights |
+| `b3` | `[10]` | float | output bias |
+| `test_images` | `[N, 784]` | float | pixels, already divided by 255 |
+| `test_labels` | `[N]` | int | digits 0 through 9 |
+| `expected_logits` | `[N, 10]` | float | last layer from numpy, before softmax |
+| `expected_predictions` | `[N]` | int | class per row from the numpy check |
+
+`main.tx` reads every size from the file with `gpu.dim`, including the hidden
+widths, so `sample.txm` can use an 8/4 network without changing the program.
+
+The pixels live in the same file as the weights because `gpu.mount` accepts one
+file per process, and a batched launch needs them on the device anyway. The
+exporter divides by 255 before writing, because that is what the model was
+trained on. Feeding raw 0 through 255 pixels to the same weights would produce
+confident nonsense.
+
+There is no softmax kernel. Argmax of the logits is the same class as argmax of
+the softmax. The exporter still writes the raw last-layer values as
+`expected_logits`, because those are what the program compares. Softmax would
+only rescale them and hide absolute differences.
+
+## Files
+
+| File | |
+| --- | --- |
+| `main.tx` | mount, three launches, host argmax, compare every logit and prediction |
+| `export_mlp.py` | train, check against sklearn, write TXM1 |
+| `sample.txm` | committed fixture: 8/4 hidden, two rows, one known error |
+| `model.txm` | generated by `export_mlp.py`, gitignored |
+
+`export_mlp.py --sample` rebuilds `sample.txm` with only the Python standard
+library. It uses deterministic weights and picks a seed whose top two logits are
+far enough apart that the fixture cannot flip on rounding.
+
+## Notes
+
+- The file stores float64, so the weights are twice the size and the kernels run
+  at a fraction of float32 throughput on consumer cards. A 1660 class GPU still
+  classifies the whole test set in milliseconds because the network is small.
+- `--hidden 128,64 --max-iter 20` changes the training run. `--rows 1000` caps
+  the test set for a quicker export.
+- `--data mnist.npz` reads a local file with `x` and `y` arrays instead of
+  downloading.

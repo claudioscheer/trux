@@ -81,3 +81,5 @@ txm.pack("model.txm", [
 ```
 
 `python3 python/txm.py info model.txm` prints the tensor table, and `txm.verify` checks names and shapes after a write. The module is one file and needs only the Python standard library. numpy arrays are accepted when numpy is available.
+
+`examples/projects/mnist_mlp` is a complete export: a scikit-learn MLP, three kernels that classify the MNIST test set, and the last-layer values and class for every row, which the Trux program must reproduce.

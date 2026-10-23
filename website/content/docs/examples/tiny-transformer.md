@@ -99,10 +99,12 @@ From the repository root, after [building `trux`](/docs/getting-started/install/
 
 ```bash
 make transformer
+make transformer PROMPT="what is your name?\n" TOKENS=60
 ```
 
 That uses the committed `model.txm` and needs an NVIDIA GPU and `nvcc` (because `gpu.mount` is the TXM reader), but no
-Python.
+Python. When `PROMPT` or `TOKENS` differs from the committed `"JULIET:\n"` fixture, the GPU run is still checked value
+by value (`1e-9`) and token by token against the CPU run.
 
 To retrain from scratch or re-export from an existing checkpoint:
 

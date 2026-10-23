@@ -63,9 +63,10 @@ mnist-bench: build
 	@cd examples/projects/mnist_mlp && ../../../bin/$(BINARY) run bench.tx
 
 # Tiny character-level transformer. Needs CUDA; uses the committed model.txm
-# and does not require Python or PyTorch.
+# and does not require Python or PyTorch. Optional overrides:
+#   make transformer PROMPT="what is your name?\n" TOKENS=60
 transformer: build
-	@cd examples/projects/tiny_transformer && ../../../bin/$(BINARY) run main.tx
+	@cd examples/projects/tiny_transformer && PROMPT=$(if $(PROMPT),"$(PROMPT)",) TOKENS=$(if $(TOKENS),"$(TOKENS)",) ../../../bin/$(BINARY) run main.tx
 
 # Train and re-export the tiny transformer in Python/PyTorch.
 transformer-train:

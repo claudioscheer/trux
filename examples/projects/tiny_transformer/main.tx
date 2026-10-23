@@ -2,6 +2,7 @@ package main
 
 import "gpu"
 import "hostmath.tx"
+import "io"
 import "time"
 
 // The Tiny Shakespeare model is trained only in Python. This program loads the
@@ -93,7 +94,10 @@ type CpuScratch struct {
   scores[]float
   h[]float
   logits[]float
+  promptLogits[]float
+  stepLogits[]float
   tokens[]int
+  genTokens[]int
 }
 
 type DeviceScratch struct {
@@ -253,6 +257,48 @@ func findToken(vocab string, ch string) int {
     }
   }
   return -1
+}
+
+func unescapePrompt(raw string) string {
+  let out string = ""
+  let i int = 0
+  for; i < len(raw); i = i + 1 {
+    if raw[i] == "\\" && i + 1 < len(raw) && raw[i + 1] == "n" {
+      out = out + "\n"
+      i = i + 1
+    } else {
+      out = out + raw[i]
+    }
+  }
+  return out
+}
+
+func findDigit(ch string) int {
+  let digits string = "0123456789"
+  for let i int = 0; i < 10; i = i + 1 {
+    if digits[i] == ch {
+      return i
+    }
+  }
+  return -1
+}
+
+func parsePositiveInt(raw string) int {
+  if len(raw) == 0 {
+    return -1
+  }
+  let value int = 0
+  for let i int = 0; i < len(raw); i = i + 1 {
+    let digit int = findDigit(raw[i])
+    if digit < 0 {
+      return -1
+    }
+    value = value * 10 + digit
+  }
+  if value < 1 {
+    return -1
+  }
+  return value
 }
 
 func tokenizePrompt(vocab string, prompt string, mut out []int) int {
@@ -500,6 +546,10 @@ func generateCpu(m HostModel, s CpuScratch, check int) Stats {
   let n int = m.promptLen
   forwardCpu(m, s, n)
 
+  for let i int = 0; i < n * m.vocabSize; i = i + 1 {
+    s.promptLogits[i] = s.logits[i]
+  }
+
   if check == 1 {
     let d Diff = compareValues(s.logits, m.expectedPromptLogits, 0, 0, n *m.vocabSize)
     outside = outside + d.outside
@@ -514,6 +564,10 @@ func generateCpu(m HostModel, s CpuScratch, check int) Stats {
 
   for let step int = 0; step < m.genLen; step = step + 1 {
     let logitBase int = (n - 1) * m.vocabSize
+
+    for let i int = 0; i < m.vocabSize; i = i + 1 {
+      s.stepLogits[step * m.vocabSize + i] = s.logits[logitBase + i]
+    }
 
     if check == 1 {
       let d Diff = compareValues(s.logits, m.expectedStepLogits, logitBase, step *m.vocabSize, m.vocabSize)
@@ -536,6 +590,7 @@ func generateCpu(m HostModel, s CpuScratch, check int) Stats {
       tokenMismatch = tokenMismatch + 1
     }
 
+    s.genTokens[step] = id
     s.tokens[n] = id
     n = n + 1
 
@@ -696,16 +751,41 @@ func main() int {
   let hidden int = config[5]
 
   let vocab string = "\n !$&',-.3:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  let fixturePromptLen int = gpu.dim("prompt_tokens", 0)
+  let fixtureGenLen int = gpu.dim("expected_tokens", 0)
+
+  // Default prompt and token count. Override either one here or pass
+  // PROMPT="..." and TOKENS=N on the command line (for example:
+  // `make transformer PROMPT="ROMEO:\n" TOKENS=80`).
   let prompt string = "JULIET:\n"
-  let promptLen int = gpu.dim("prompt_tokens", 0)
-  let genLen int = gpu.dim("expected_tokens", 0)
+  let genLen int = fixtureGenLen
+
+  let env map[string]string = io.env()
+  let envPrompt string, hasEnvPrompt bool = env["PROMPT"]
+  if hasEnvPrompt && len(envPrompt) > 0 {
+    prompt = unescapePrompt(envPrompt)
+  }
+  let envTokens string, hasEnvTokens bool = env["TOKENS"]
+  if hasEnvTokens && len(envTokens) > 0 {
+    let parsedTokens int = parsePositiveInt(envTokens)
+    if parsedTokens < 1 {
+      print("TOKENS must be a positive integer, got ", envTokens)
+      return 1
+    }
+    genLen = parsedTokens
+  }
+
+  let promptLen int = len(prompt)
+  if promptLen < 1 {
+    print("prompt must not be empty")
+    return 1
+  }
+  if (!hasEnvTokens || len(envTokens) == 0) && promptLen + genLen > blockSize && promptLen < blockSize {
+    genLen = blockSize - promptLen
+  }
 
   if vocabSize != len(vocab) {
     print("vocab size mismatch: model ", vocabSize, " program ", len(vocab))
-    return 1
-  }
-  if promptLen != len(prompt) {
-    print("prompt length mismatch: model ", promptLen, " program ", len(prompt))
     return 1
   }
   if layers < 1 || heads < 1 || width < 1 || hidden < 1 || blockSize < 1 {
@@ -716,8 +796,8 @@ func main() int {
     print("width must be divisible by heads")
     return 1
   }
-  if promptLen + genLen > blockSize {
-    print("prompt plus generated tokens exceed the context")
+  if genLen < 1 || promptLen + genLen > blockSize {
+    print("prompt length (", promptLen, ") plus generated tokens (", genLen, ") exceeds context (", blockSize, ")")
     return 1
   }
   if gpu.dim("tok_emb", 0) != vocabSize || gpu.dim("tok_emb", 1) != width {
@@ -736,13 +816,30 @@ func main() int {
     print("wout shape mismatch")
     return 1
   }
-  if gpu.dim("expected_prompt_logits", 0) != promptLen || gpu.dim("expected_prompt_logits", 1) != vocabSize {
+  if gpu.dim("expected_prompt_logits", 0) != fixturePromptLen || gpu.dim("expected_prompt_logits", 1) != vocabSize {
     print("expected prompt logits shape mismatch")
     return 1
   }
-  if gpu.dim("expected_step_logits", 0) != genLen || gpu.dim("expected_step_logits", 1) != vocabSize {
+  if gpu.dim("expected_step_logits", 0) != fixtureGenLen || gpu.dim("expected_step_logits", 1) != vocabSize {
     print("expected step logits shape mismatch")
     return 1
+  }
+
+  let promptCheckTokens []int = make([]int, blockSize)
+  if tokenizePrompt(vocab, prompt, promptCheckTokens) != promptLen {
+    print("prompt contains a character outside the 65-character Tiny Shakespeare vocabulary")
+    return 1
+  }
+
+  let fixturePromptTokens []int = gpu.hostInts("prompt_tokens")
+  let matchesFixture int = 0
+  if promptLen == fixturePromptLen && genLen <= fixtureGenLen {
+    matchesFixture = 1
+    for let i int = 0; i < promptLen; i = i + 1 {
+      if promptCheckTokens[i] != fixturePromptTokens[i]{
+        matchesFixture = 0
+      }
+    }
   }
 
   let invWidth float = gpu.hostFloats("inv_width")[0]
@@ -835,7 +932,10 @@ func main() int {
     scores: make([]float, heads *blockSize *blockSize),
     h: make([]float, blockSize *hidden),
     logits: make([]float, blockSize *vocabSize),
+    promptLogits: make([]float, blockSize *vocabSize),
+    stepLogits: make([]float, blockSize *vocabSize),
     tokens: make([]int, blockSize),
+    genTokens: make([]int, blockSize),
   }
 
   let dTokens gpu.Buffer[int] = gpu.alloc(blockSize)
@@ -868,24 +968,72 @@ func main() int {
   // the same arithmetic in the same order inside each layer.
   generateCpu(hm, cpuScratch, 0)
   let cpuStarted int = time.monotonicNanos()
-  let cpuStats Stats = generateCpu(hm, cpuScratch, 1)
+  let cpuStats Stats = generateCpu(hm, cpuScratch, matchesFixture)
   let cpuFinished int = time.monotonicNanos()
 
-  generateGpu(dm, gpuScratch, hm, 0)
+  let gpuRefModel HostModel = hm
+  if matchesFixture == 0 {
+    gpuRefModel = HostModel{
+      tokEmb: hm.tokEmb,
+      posEmb: hm.posEmb,
+      ln1G: hm.ln1G,
+      ln1B: hm.ln1B,
+      wq: hm.wq,
+      bq: hm.bq,
+      wk: hm.wk,
+      bk: hm.bk,
+      wv: hm.wv,
+      bv: hm.bv,
+      wo: hm.wo,
+      bo: hm.bo,
+      ln2G: hm.ln2G,
+      ln2B: hm.ln2B,
+      w1: hm.w1,
+      b1: hm.b1,
+      w2: hm.w2,
+      b2: hm.b2,
+      lnfG: hm.lnfG,
+      lnfB: hm.lnfB,
+      wout: hm.wout,
+      bout: hm.bout,
+      promptTokens: cpuScratch.tokens,
+      expectedPromptLogits: cpuScratch.promptLogits,
+      expectedStepLogits: cpuScratch.stepLogits,
+      expectedTokens: cpuScratch.genTokens,
+      vocab: vocab,
+      prompt: prompt,
+      vocabSize: vocabSize,
+      blockSize: blockSize,
+      layers: layers,
+      heads: heads,
+      width: width,
+      hidden: hidden,
+      promptLen: promptLen,
+      genLen: genLen,
+      invWidth: invWidth,
+      attnScale: attnScale,
+      lnEps: lnEps,
+    }
+  }
+
+  generateGpu(dm, gpuScratch, gpuRefModel, 0)
   let gpuStarted int = time.monotonicNanos()
-  let gpuStats Stats = generateGpu(dm, gpuScratch, hm, 1)
+  let gpuStats Stats = generateGpu(dm, gpuScratch, gpuRefModel, 1)
   let gpuFinished int = time.monotonicNanos()
 
   let cpuText string = prompt + decodeTokens(vocab, cpuScratch.tokens, promptLen, genLen)
   let gpuText string = prompt + decodeTokens(vocab, gpuScratch.hostTokens, promptLen, genLen)
-  let expectedText string = prompt + decodeTokens(vocab, hm.expectedTokens, 0, genLen)
 
   let textMismatch int = 0
   if cpuText != gpuText {
     textMismatch = textMismatch + 1
   }
-  if cpuText != expectedText {
-    textMismatch = textMismatch + 1
+  let expectedText string = ""
+  if matchesFixture == 1 {
+    expectedText = prompt + decodeTokens(vocab, hm.expectedTokens, 0, genLen)
+    if cpuText != expectedText {
+      textMismatch = textMismatch + 1
+    }
   }
 
   // One full-context forward measures prefill separately from the
@@ -910,14 +1058,18 @@ func main() int {
   print("model: layers ", layers, " heads ", heads, " width ", width, " mlp ", hidden, " vocab ", vocabSize, " context ", blockSize)
   print("prompt:")
   print(prompt)
-  print("reference text:")
-  print(expectedText)
+  if matchesFixture == 1 {
+    print("reference text:")
+    print(expectedText)
+  }
   print("cpu text:")
   print(cpuText)
   print("gpu text:")
   print(gpuText)
   print("")
-  printStats("cpu", cpuStats)
+  if matchesFixture == 1 {
+    printStats("cpu", cpuStats)
+  }
   printStats("gpu", gpuStats)
   print("text mismatches ", textMismatch)
   print("")
@@ -943,7 +1095,7 @@ func main() int {
 
   let failures int = cpuStats.failures + gpuStats.failures + textMismatch
   if failures != 0 {
-    print("Trux and the Python exporter disagree")
+    print("Trux CPU and GPU or the Python exporter disagree")
     return 1
   }
 

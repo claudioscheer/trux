@@ -17,16 +17,20 @@ kernels. Python is only needed to retrain or re-export.
 ## Run
 
 ```console
-$ make transformer          # from the repository root
-$ make transformer-train    # optional: train and export again
+$ make transformer                                           # default prompt ("JULIET:\n", 108 tokens)
+$ make transformer PROMPT="what is your name?\n" TOKENS=60   # custom prompt and token count
+$ make transformer-train                                     # optional: train and export again
 ```
 
-`make transformer` builds the compiler and runs `main.tx`. To train from
-scratch, `train.py` needs `numpy` and `torch`; it downloads Tiny Shakespeare
-(about 1.1 MB) into `data/` on the first run, trains 8,000 steps, and writes
-`checkpoint.pt` and `model.txm`. `data/` and `checkpoint.pt` are gitignored;
-`model.txm` is committed so the inference example runs without a Python
-environment.
+`make transformer` builds the compiler and runs `main.tx`. You can pass
+`PROMPT` and `TOKENS` on the command line (or edit `prompt` and `genLen` in
+`main.tx`); when they differ from the committed `"JULIET:\n"` fixture, the GPU
+path is checked value-by-value (`1e-9`) and token-by-token against the CPU
+path. To train from scratch, `train.py` needs `numpy` and `torch`; it downloads
+Tiny Shakespeare (about 1.1 MB) into `data/` on the first run, trains 8,000
+steps, and writes `checkpoint.pt` and `model.txm`. `data/` and `checkpoint.pt`
+are gitignored; `model.txm` is committed so the inference example runs without
+a Python environment.
 
 To export from an existing checkpoint without training:
 

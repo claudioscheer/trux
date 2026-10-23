@@ -165,6 +165,9 @@ def main():
             "docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "
             + container_name
         )
+        if not container_ip:
+            logs = run_cmd(f"docker logs {container_name} 2>&1", check=False)
+            raise RuntimeError(f"Failed to obtain container IP for {container_name}. Container logs:\n{logs}")
         base_url = f"http://{container_ip}:8080"
 
         # Warmup

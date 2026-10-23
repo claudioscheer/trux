@@ -4,7 +4,7 @@
     {{ partial "docs/page-markdown-actions.html" . }}
     {{ with .Content }}
     <div data-prismjs-copy="" data-prismjs-copy-success="" data-prismjs-copy-error="">
-        {{ . }}
+        {{ partial "docs/repo-file-links.html" (dict "content" . "page" $) }}
     </div>
     {{ end }}
     {{- /* Set "cards: false" in front matter when the page already links to its children. */}}

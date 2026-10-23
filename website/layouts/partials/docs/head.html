@@ -69,6 +69,10 @@
         {{- $style = $style | minify | fingerprint "sha384" }}
     {{- end -}}
     <link rel="stylesheet" href="{{ $style.RelPermalink }}" {{ if hugo.IsProduction }}integrity="{{ $style.Data.Integrity }}"{{ end -}} crossorigin="anonymous">
+    <style>
+      a > code.repo, a.repo-file { text-decoration: underline; text-underline-offset: 0.15em; }
+      a.repo-file { display: inline-block; margin: 0.25rem 0 1rem; font-family: var(--bs-font-monospace, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.875rem; }
+    </style>
     <!-- Katex CSS -->
     {{- if .Params.katex -}}
     {{- $options := dict "enableSourceMap" true }}

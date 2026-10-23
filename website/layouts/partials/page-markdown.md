@@ -44,6 +44,35 @@
 {{- $md = replaceRE `\]\(/docs/` (printf "](%sdocs/" site.BaseURL) $md -}}
 {{- $md = replaceRE `\n{3,}` "\n\n" $md | strings.TrimSpace -}}
 
+{{- /* Inline repo paths become links to the latest main branch. Fenced code stays fenced, and a path that is already a link stays as written. */ -}}
+{{- $fences := slice -}}
+{{- $fencePat := printf "(?s)%s.*?%s" "```" "```" -}}
+{{- range $i, $fence := findRE $fencePat $md 5000 -}}
+  {{- $token := printf "TRUXFENCE%dTOKEN" $i -}}
+  {{- $fences = $fences | append (dict "token" $token "text" $fence) -}}
+  {{- $md = replace $md $fence $token 1 -}}
+{{- end -}}
+{{- $links := slice -}}
+{{- range $i, $link := findRE `(?s)\[[^]]*\]\([^)]*\)` $md 5000 -}}
+  {{- $token := printf "TRUXLINK%dTOKEN" $i -}}
+  {{- $links = $links | append (dict "token" $token "text" $link) -}}
+  {{- $md = replace $md $link $token 1 -}}
+{{- end -}}
+{{- $inlinePat := printf "`(%s)`" (partial "docs/repo-path-re.html" .) -}}
+{{- range findRE $inlinePat $md 5000 -}}
+  {{- $raw := replaceRE "^`|`$" "" . -}}
+  {{- $url := partial "docs/repo-file-url.html" (dict "path" $raw "page" $) -}}
+  {{- if $url -}}
+    {{- $md = replace $md (printf "`%s`" $raw) (printf "[%s](%s)" $raw $url) -}}
+  {{- end -}}
+{{- end -}}
+{{- range $links -}}
+  {{- $md = replace $md .token .text 1 -}}
+{{- end -}}
+{{- range $fences -}}
+  {{- $md = replace $md .token .text 1 -}}
+{{- end -}}
+
 {{- /* Fail the build on shortcode syntax that no pattern above handled. */ -}}
 {{- $leftover := replaceRE "`[^`\n]*`" "" $md -}}
 {{- with findRE `\{\{[<%]` $leftover 1 -}}

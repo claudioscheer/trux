@@ -1,0 +1,5 @@
+{{- /*
+  Repo paths cited in prose. The same expression is used for HTML <code> and
+  for Markdown backticks. Keep the two call sites on this partial.
+*/ -}}
+{{- return `(?:(?:benchmarks|examples|docs|cmd|internal|tooling|website|assets|resources|\.github)/[A-Za-z0-9_./+-]+|README\.md|go\.mod|Makefile)` -}}

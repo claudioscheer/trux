@@ -46,6 +46,48 @@ disableKinds = ["taxonomy", "term"]
   [[module.mounts]]
     source = "outputs"
     target = "assets/outputs"
+  # Repository paths cited on the site. Layouts turn those into links to the
+  # latest main branch, and only when the path exists here. website/ is the
+  # Hugo project itself, so it is not mounted again.
+  [[module.mounts]]
+    source = "../benchmarks"
+    target = "assets/repo/benchmarks"
+  [[module.mounts]]
+    source = "../examples"
+    target = "assets/repo/examples"
+  [[module.mounts]]
+    source = "../docs"
+    target = "assets/repo/docs"
+  [[module.mounts]]
+    source = "../cmd"
+    target = "assets/repo/cmd"
+  [[module.mounts]]
+    source = "../internal"
+    target = "assets/repo/internal"
+  [[module.mounts]]
+    source = "../tooling"
+    target = "assets/repo/tooling"
+  [[module.mounts]]
+    source = "../assets"
+    target = "assets/repo/assets"
+  [[module.mounts]]
+    source = "../resources"
+    target = "assets/repo/resources"
+  [[module.mounts]]
+    source = "../.github"
+    target = "assets/repo/.github"
+  [[module.mounts]]
+    source = "../README.md"
+    target = "assets/repo/README.md"
+  [[module.mounts]]
+    source = "../go.mod"
+    target = "assets/repo/go.mod"
+  [[module.mounts]]
+    source = "../Makefile"
+    target = "assets/repo/Makefile"
+  [[module.mounts]]
+    source = "../LICENSE"
+    target = "assets/repo/LICENSE"
 
 [markup]
   defaultMarkdownHandler = "goldmark"

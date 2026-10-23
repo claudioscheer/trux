@@ -40,3 +40,7 @@
   escapes it below.
 */ -}}
 <pre id="{{ substr (sha1 (printf "%s%d" $spec .Ordinal)) 0 7 }}" class="language-{{ $lang }}"><code>{{ $text }}</code></pre>
+{{- $fileURL := partial "docs/repo-file-url.html" (dict "path" $path "page" .Page) -}}
+{{- if $fileURL }}
+<a class="repo-file" href="{{ $fileURL }}" rel="noopener noreferrer" target="_blank">{{ $path }} on main</a>
+{{- end }}

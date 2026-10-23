@@ -1,0 +1,34 @@
+{{- /*
+  URL of a repository path on the latest main branch, or empty when the path
+  is not a file or directory in the repo. Pass dict "path" "page".
+
+  os.Stat only sees the Hugo project (website/). Other paths are read through
+  the assets/repo mounts in hugo.toml. A mounted directory is a resource with
+  children; a file is a resource with none.
+*/ -}}
+{{- $lookup := strings.TrimSuffix "/" .path -}}
+{{- $kind := "" -}}
+{{- if hasPrefix $lookup "website/" -}}
+  {{- $rel := strings.TrimPrefix "website/" $lookup -}}
+  {{- $tried := try (os.Stat $rel) -}}
+  {{- if and (not $tried.Err) $tried.Value -}}
+    {{- $kind = "blob" -}}
+    {{- if $tried.Value.IsDir }}{{ $kind = "tree" }}{{ end -}}
+  {{- end -}}
+{{- else -}}
+  {{- $mounted := printf "repo/%s" $lookup -}}
+  {{- if resources.Get $mounted -}}
+    {{- if gt (len (resources.Match (printf "%s/*" $mounted))) 0 -}}
+      {{- $kind = "tree" -}}
+    {{- else -}}
+      {{- $kind = "blob" -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $url := "" -}}
+{{- if $kind -}}
+  {{- $repo := strings.TrimSuffix "/" .page.Site.Params.docs.repoURL -}}
+  {{- $branch := .page.Site.Params.docs.repoBranch | default "main" -}}
+  {{- $url = printf "%s/%s/%s/%s" $repo $kind $branch $lookup -}}
+{{- end -}}
+{{- return $url -}}

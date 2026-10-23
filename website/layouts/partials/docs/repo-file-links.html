@@ -1,0 +1,27 @@
+{{- /*
+  Turns inline code that is a real repository path into a link to that path
+  on the latest main branch. Fenced code is <code class="..."> and is left
+  alone. An existing anchor is left alone, so a link that already points at
+  main is not wrapped a second time. Pass dict "content" "page".
+*/ -}}
+{{- $html := .content -}}
+{{- $page := .page -}}
+{{- $anchors := slice -}}
+{{- range $i, $anchor := findRE `(?s)<a\b.*?</a>` $html 5000 -}}
+  {{- $token := printf "TRUXANCHOR%dTOKEN" $i -}}
+  {{- $anchors = $anchors | append (dict "token" $token "text" $anchor) -}}
+  {{- $html = replace $html $anchor $token 1 -}}
+{{- end -}}
+{{- $pat := printf `<code>(%s)</code>` (partial "docs/repo-path-re.html" .) -}}
+{{- range findRE $pat $html 5000 -}}
+  {{- $raw := replaceRE `^<code>|</code>$` "" . -}}
+  {{- $url := partial "docs/repo-file-url.html" (dict "path" $raw "page" $page) -}}
+  {{- if $url -}}
+    {{- $html = replace $html (printf "<code>%s</code>" $raw) (printf `<a href="%s" rel="noopener noreferrer" target="_blank"><code class="repo">%s</code></a>` $url $raw) -}}
+  {{- end -}}
+{{- end -}}
+{{- range $anchors -}}
+  {{- $html = replace $html .token .text 1 -}}
+{{- end -}}
+{{- $out := $html | safeHTML -}}
+{{- return $out -}}

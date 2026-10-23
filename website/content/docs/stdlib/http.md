@@ -11,7 +11,7 @@ import "http"
 
 **What it is.** A native plaintext HTTP/1.1 server built directly on Linux **`io_uring`**. It provides declarative routing, path parameter extraction, middleware chains, request context, custom response headers, and zero-allocation networking.
 
-**Why.** Web services written in Trux achieve exceptional throughput and sub-millisecond latencies through an asynchronous, shared-nothing thread-per-core runtime. See [Benchmarks](/docs/benchmarks/) for detailed performance metrics.
+**Why.** Web services written in Trux achieve exceptional throughput and sub-millisecond latencies through an asynchronous, shared-nothing thread-per-core runtime. See [HTTP benchmarks](/docs/benchmarks/http/) for detailed performance metrics.
 
 **When you don't need it.** This package does not speak HTTPS. See [HTTPS](#https). There is no HTTP client.
 
@@ -137,10 +137,8 @@ func handle(request int) int
 
 ## Limits
 
-- Linux server environment required for `io_uring` networking. Windows/macOS stubs fail gracefully at runtime.
+- Linux is required. The HTTP runtime uses `io_uring`. Other systems stop with `http is supported on Linux only`.
 - In Docker containers, specify `--security-opt seccomp=unconfined --ulimit memlock=-1:-1` so the kernel can allocate buffer rings.
 - No HTTPS in the server. Terminate TLS at a reverse proxy and forward plaintext HTTP to this process. See [HTTPS](#https).
 - Request bodies are read using `Content-Length` and are capped at 1 MiB. Chunked request bodies are rejected.
-- A program cannot use `http` together with GPU kernels yet:
-
-    {{< include "website/outputs/errors/gpu_with_http.txt" "text" >}}
+- A handler may call `gpu.finish` after launching a kernel. The worker keeps accepting and reading other sockets while that kernel runs. The continuation sends the response. See [GPU programming](/docs/guide/gpu/#models).

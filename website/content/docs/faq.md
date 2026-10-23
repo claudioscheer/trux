@@ -103,10 +103,6 @@ rejected the generated code. The second case is a compiler bug. Two are known: c
 [GPU coordinate helper in host code](/docs/guide/gpu/#coordinate-helpers), and using
 [GPU buffers in a program without a kernel](/docs/guide/gpu/#device-buffers).
 
-### `http and gpu cannot be used in the same program yet`
-
-That combination isn't supported. Split the work into two programs.
-
 ## Runtime errors
 
 All runtime errors start with `trux runtime error:` and exit with status `1`.

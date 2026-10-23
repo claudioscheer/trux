@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -106,12 +105,6 @@ func compileLoaded(path string, loaded *modules.Result, opts compileOptions) (*c
 	typedIR, err := ir.Build(program, info)
 	if err != nil {
 		return nil, err
-	}
-	if typedIR.UsesHTTP && len(typedIR.Kernels) > 0 {
-		return nil, fmt.Errorf("http and gpu cannot be used in the same program yet")
-	}
-	if typedIR.UsesJWT && len(typedIR.Kernels) > 0 {
-		return nil, fmt.Errorf("jwt and gpu cannot be used in the same program yet")
 	}
 	if debug != nil {
 		if err := debug.writeJSON("04-ir.json", typedIR); err != nil {
@@ -248,7 +241,30 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 		if compiler == "" {
 			compiler = "nvcc"
 		}
-		args = []string{"-x", "cu", sourcePath, "-o", outputPath}
+		// The generated file is .cu, so nvcc treats it as CUDA. A global `-x cu`
+		// would also force later inputs, such as the yyjson object, to be compiled
+		// as source.
+		args = []string{sourcePath, "-o", outputPath}
+		if opts.UsesHTTP {
+			// nvcc rejects -pthread ("Unknown option '-pthread'" on CUDA 12).
+			// The host compiler accepts it through -Xcompiler.
+			args = append(args, "-D_GNU_SOURCE", "-Xcompiler", "-pthread", "-luring")
+		}
+		if opts.UsesJSON || opts.UsesJWT {
+			host := os.Getenv("CC")
+			if host == "" {
+				host = "cc"
+			}
+			yyjsonObj, err := ensureYYJSONObjectCached(host)
+			if err != nil {
+				return err
+			}
+			args = append(args, yyjsonObj)
+		}
+		if opts.UsesJWT {
+			prefix := jwtPrefix()
+			args = appendJWTLinkArgs(args, prefix, true)
+		}
 	} else {
 		if opts.UsesHTTP {
 			args = append(args, "-D_GNU_SOURCE", "-pthread", "-luring")
@@ -269,7 +285,7 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 		}
 		if opts.UsesJWT {
 			prefix := jwtPrefix()
-			args = appendJWTLinkArgs(args, prefix)
+			args = appendJWTLinkArgs(args, prefix, false)
 		}
 	}
 
@@ -287,11 +303,6 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 			return fmt.Errorf("%w\n\njwt programs need libjwt 3, jansson, and OpenSSL. Install them, or set TRUX_LIBJWT_PREFIX to a directory with include/jwt.h and lib/libjwt.a.", compileErr)
 		}
 		return compileErr
-	}
-	if opts.UsesJWT {
-		if err := copyJWTRuntimeDLLs(jwtPrefix(), outputPath); err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -317,58 +328,28 @@ func jwtPrefix() string {
 	return p
 }
 
-func appendJWTLinkArgs(args []string, prefix string) []string {
+func appendJWTLinkArgs(args []string, prefix string, nvcc bool) []string {
 	if prefix != "" {
 		args = append(args,
 			"-I"+filepath.Join(prefix, "include"),
 			"-L"+filepath.Join(prefix, "lib"),
 			"-DJWT_STATIC_DEFINE",
 		)
-		if runtime.GOOS != "windows" {
-			args = append(args, "-Wl,-rpath,"+filepath.Join(prefix, "lib"))
+		rpath := "-rpath," + filepath.Join(prefix, "lib")
+		if nvcc {
+			// nvcc rejects -Wl,... ("Unknown option"). -Xlinker forwards one
+			// option to the host linker.
+			args = append(args, "-Xlinker", rpath)
+		} else {
+			args = append(args, "-Wl,"+rpath)
 		}
 	}
-	args = append(args, "-Wl,-Bstatic", "-ljwt", "-Wl,-Bdynamic", "-ljansson", "-lcrypto")
-	if runtime.GOOS == "windows" {
-		args = append(args, "-lws2_32", "-lgdi32", "-lcrypt32", "-lbcrypt")
+	if nvcc {
+		args = append(args, "-Xlinker", "-Bstatic", "-ljwt", "-Xlinker", "-Bdynamic", "-ljansson", "-lcrypto")
+	} else {
+		args = append(args, "-Wl,-Bstatic", "-ljwt", "-Wl,-Bdynamic", "-ljansson", "-lcrypto")
 	}
 	return args
-}
-
-func copyJWTRuntimeDLLs(prefix string, outputPath string) error {
-	if prefix == "" || runtime.GOOS != "windows" {
-		return nil
-	}
-	destDir := filepath.Dir(outputPath)
-	bin := filepath.Join(prefix, "bin")
-	for _, name := range []string{"libcrypto-3-x64.dll", "libssl-3-x64.dll", "libjansson-4.dll"} {
-		src := filepath.Join(bin, name)
-		info, err := os.Stat(src)
-		if err != nil || info.IsDir() {
-			continue
-		}
-		if err := copyFile(src, filepath.Join(destDir, name)); err != nil {
-			return fmt.Errorf("copy %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
-func copyFile(src string, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
 }
 
 func runExecutable(out io.Writer, in io.Reader, executablePath string) error {

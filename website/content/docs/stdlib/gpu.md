@@ -39,7 +39,20 @@ This page is the reference. For explanations, examples, and common mistakes, rea
 | `gpu.launch2d(kernel, width int, height int, args...)` | | Runs `kernel` over a `height` x `width` grid; the first two `int` parameters receive row and column. 16 x 16 blocks (statement only). |
 | `gpu.launch(kernel, gridX, gridY, gridZ, blockX, blockY, blockZ, args...)` | | Launches with an explicit CUDA grid and block. No coordinates are injected and no bounds check is added (statement only). |
 | `gpu.sync()` | | Host-side `cudaDeviceSynchronize`: waits until all queued GPU work has finished (statement only). Not a barrier between kernel threads; see [`gpu.sync`](/docs/guide/gpu/#gpu-sync). |
-| `gpu.free(device)` | | Frees a device buffer (statement only). |
+| `gpu.free(device)` | | Frees a device buffer (statement only). Fails for a mounted tensor or a workspace. |
+| `gpu.mount(path string)` | | Loads a TXM1 file once and copies each tensor to the device (statement only). |
+| `gpu.workspaceFloat(name string, n int)` | | Allocates one reused float workspace per worker (statement only). Call it before `http.listen`. |
+| `gpu.workspaceInt(name string, n int)` | | Same for `int` (statement only). |
+| `gpu.floats(name string)` | `gpu.Buffer[float]` | Device memory of a mounted float tensor. |
+| `gpu.ints(name string)` | `gpu.Buffer[int]` | Device memory of a mounted int tensor. |
+| `gpu.dim(name string, axis int)` | `int` | One dimension of a mounted tensor. |
+| `gpu.scalar(name string)` | `float` | The value of a one-element float tensor. |
+| `gpu.hostFloats(name string)` | `[]float` | Host copy of a mounted float tensor. |
+| `gpu.hostInts(name string)` | `[]int` | Host copy of a mounted int tensor. |
+| `gpu.borrowFloat(name string)` | `gpu.Buffer[float]` | This worker's float workspace. |
+| `gpu.borrowInt(name string)` | `gpu.Buffer[int]` | This worker's int workspace. |
+| `gpu.ready(name string)` | `[]float` | Pinned host mirror of a float workspace. Read it from the `gpu.finish` continuation. |
+| `gpu.finish(request int, continuation)` | | Queues the copy back and runs `continuation` when the GPU work finishes (statement only). |
 
 `T` is `int` or `float`, and host and device element types must match. The first argument of a launch must be the name of
 a `kernel func`, and the remaining arguments must match the kernel's (remaining) parameters exactly.

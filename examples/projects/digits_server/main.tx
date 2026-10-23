@@ -1,0 +1,117 @@
+package main
+
+import "gpu"
+import "http"
+import "json"
+
+// One RBF evaluation per support vector.
+// k[sv] = exp(-gamma * ||x - support[sv]||^2)
+kernel func score(sv int, support gpu.Buffer[float], input gpu.Buffer[float], out gpu.Buffer[float], gamma float, features int) {
+  let dist float = 0.0
+  for let i int = 0; i < features; i = i + 1 {
+    let d float = support[sv * features + i] - input[i]
+    dist = dist + d * d
+  }
+  out[sv] = exp(0.0 - gamma * dist)
+}
+
+func pixelsFrom(request int) []float {
+  let body string = http.body(request)
+  let doc *json.Doc, err error = json.parse(body)
+  if err != nil {
+    return make([]float, 0)
+  }
+  let root *json.Val = json.root(doc)
+  let arr *json.Val = root
+  if json.isObject(root) {
+    arr = json.get(root, "pixels")
+  }
+  if !json.isArray(arr) {
+    return make([]float, 0)
+  }
+  if json.len(arr) != 64 {
+    return make([]float, 0)
+  }
+  let out []float = make([]float, 64)
+  for let i int = 0; i < 64; i = i + 1 {
+    out[i] = json.getFloat(json.at(arr, i))
+  }
+  return out
+}
+
+func digitJson(digit int) string {
+  let doc *json.MutDoc = json.newDoc()
+  let obj *json.MutVal = json.newObject(doc)
+  json.setRoot(doc, obj)
+  json.addInt(doc, obj, "digit", digit)
+  return json.write(doc)
+}
+
+func vote(request int) int {
+  let scores []float = gpu.ready("scores")
+  let dual []float = gpu.hostFloats("dual")
+  let intercept []float = gpu.hostFloats("intercept")
+  let nSupport []int = gpu.hostInts("n_support")
+  let nSv int = gpu.dim("support", 0)
+  let nClasses int = 10
+  let start []int = make([]int, nClasses)
+  let acc int = 0
+  for let c int = 0; c < nClasses; c = c + 1 {
+    start[c] = acc
+    acc = acc + nSupport[c]
+  }
+  let votes []int = make([]int, nClasses)
+  let p int = 0
+  for let i int = 0; i < nClasses; i = i + 1 {
+    for let j int = i + 1; j < nClasses; j = j + 1 {
+      let sum float = intercept[p]
+      let row1 int = j - 1
+      let row2 int = i
+      for let k int = 0; k < nSupport[i]; k = k + 1 {
+        let idx int = start[i] + k
+        sum = sum + dual[row1 * nSv + idx] * scores[idx]
+      }
+      for let k int = 0; k < nSupport[j]; k = k + 1 {
+        let idx int = start[j] + k
+        sum = sum + dual[row2 * nSv + idx] * scores[idx]
+      }
+      if sum > 0.0 {
+        votes[i] = votes[i] + 1
+      } else {
+        votes[j] = votes[j] + 1
+      }
+      p = p + 1
+    }
+  }
+  let best int = votes[0]
+  let digit int = 0
+  for let c int = 1; c < nClasses; c = c + 1 {
+    if votes[c] > best {
+      best = votes[c]
+      digit = c
+    }
+  }
+  http.json(request, 200, digitJson(digit))
+  return 0
+}
+
+func predict(request int) int {
+  let pixels []float = pixelsFrom(request)
+  if len(pixels) != 64 {
+    http.text(request, 400, "expected 64 pixels\n")
+    return 0
+  }
+  gpu.copyToDevice(pixels, gpu.borrowFloat("input"))
+  gpu.launch1d(score, gpu.dim("support", 0), gpu.floats("support"), gpu.borrowFloat("input"), gpu.borrowFloat("scores"), gpu.scalar("gamma"), gpu.dim("support", 1))
+  gpu.finish(request, vote)
+  return 0
+}
+
+func main() int {
+  gpu.mount("sample.txm")
+  gpu.workspaceFloat("input", 64)
+  gpu.workspaceFloat("scores", gpu.dim("support", 0))
+  http.post("/predict", predict)
+  http.listen(8080)
+  return 0
+}

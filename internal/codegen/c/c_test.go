@@ -362,18 +362,79 @@ func main() int {
 		"__global__ void trux_k_4_fill(int64_t trux_dim_x, int64_t* trux_v_3_out)",
 		"int64_t trux_v_1_i = ((int64_t)(blockIdx.x * blockDim.x + threadIdx.x));",
 		"if (trux_v_1_i < trux_dim_x)",
-		"trux_k_4_fill<<<dim3((unsigned int)(((4) + 255) / 256), 1u, 1u), dim3(256u, 1u, 1u)>>>(4, trux_v_6_device.data)",
+		"trux_k_4_fill<<<dim3((unsigned int)(((4) + 255) / 256), 1u, 1u), dim3(256u, 1u, 1u), 0, rt_gpu_launch_stream()>>>(4, trux_v_6_device.data)",
 		"__global__ void trux_k_5_paint(int64_t trux_dim_x, int64_t trux_dim_y, int64_t* trux_v_3_out, int64_t trux_v_5_width)",
 		"int64_t trux_v_3_row = ((int64_t)(blockIdx.y * blockDim.y + threadIdx.y));",
 		"int64_t trux_v_3_col = ((int64_t)(blockIdx.x * blockDim.x + threadIdx.x));",
 		"if (trux_v_3_row < trux_dim_y && trux_v_3_col < trux_dim_x)",
-		"trux_k_5_paint<<<dim3((unsigned int)(((2) + 15) / 16), (unsigned int)(((2) + 15) / 16), 1u), dim3(16u, 16u, 1u)>>>(2, 2, trux_v_6_device.data, 2)",
+		"trux_k_5_paint<<<dim3((unsigned int)(((2) + 15) / 16), (unsigned int)(((2) + 15) / 16), 1u), dim3(16u, 16u, 1u), 0, rt_gpu_launch_stream()>>>(2, 2, trux_v_6_device.data, 2)",
 		"rt_gpu_copy_to_device_int(",
 		"rt_gpu_copy_to_host_int(",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+}
+
+func TestGenerateGPUFinishDoesNotSynchronize(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "gpu"
+import "http"
+
+kernel func score(sv int, support gpu.Buffer[float], input gpu.Buffer[float], out gpu.Buffer[float], gamma float) {
+    out[sv] = exp(0.0 - gamma * input[0])
+}
+
+func vote(request int) int {
+    let scores []float = gpu.ready("scores")
+    if scores[0] > 0.0 {
+        http.text(request, 200, "ok")
+    } else {
+        http.text(request, 200, "no")
+    }
+    return 0
+}
+
+func predict(request int) int {
+    let pixels []float = make([]float, 1)
+    gpu.copyToDevice(pixels, gpu.borrowFloat("input"))
+    gpu.launch1d(score, 1, gpu.floats("support"), gpu.borrowFloat("input"), gpu.borrowFloat("scores"), gpu.scalar("gamma"))
+    gpu.finish(request, vote)
+    return 0
+}
+
+func main() int {
+    gpu.mount("model.txm")
+    gpu.workspaceFloat("input", 1)
+    gpu.workspaceFloat("scores", 1)
+    http.post("/predict", predict)
+    http.listen(8080)
+    return 0
+}`)
+
+	for _, part := range []string{
+		"rt_gpu_mount(",
+		"rt_gpu_workspace_float(",
+		"rt_gpu_borrow_float(",
+		"rt_gpu_floats(",
+		"rt_gpu_scalar(",
+		"rt_http_gpu_finish(",
+		"rt_gpu_launch_stream()",
+		"exp(",
+	} {
+		if !strings.Contains(cSource, part) {
+			t.Fatalf("generated C missing %q:\n%s", part, cSource)
+		}
+	}
+	for _, part := range []string{
+		"cudaDeviceSynchronize",
+		"rt_gpu_sync(",
+		"rt_gpu_alloc_",
+	} {
+		if strings.Contains(cSource, part) {
+			t.Fatalf("generated C contains %q:\n%s", part, cSource)
 		}
 	}
 }
@@ -1020,6 +1081,35 @@ func main() int {
 		if !strings.Contains(cSource, part) {
 			t.Fatalf("generated C missing %q:\n%s", part, cSource)
 		}
+	}
+}
+
+func TestGenerateSplitsDeclsWhenKernelsJumpToReturn(t *testing.T) {
+	cSource := mustGenerateC(t, `package main
+import "gpu"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    if i < 1 {
+        out[i] = 1
+    }
+}
+
+func early(n int) int {
+    if n < 0 {
+        return 0
+    }
+    let x int = n
+    return x
+}
+
+func main() int {
+    return early(1)
+}`)
+	if strings.Contains(cSource, "int64_t trux_v_1_x =") {
+		t.Fatalf("initialized decl was not split for nvcc:\n%s", cSource)
+	}
+	if !strings.Contains(cSource, "int64_t trux_v_1_x;") || !strings.Contains(cSource, "trux_v_1_x = trux_v_1_n;") {
+		t.Fatalf("split decl missing:\n%s", cSource)
 	}
 }
 

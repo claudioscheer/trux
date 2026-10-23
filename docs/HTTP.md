@@ -86,6 +86,7 @@ The generated C includes `trux_http_runtime.h` when HTTP calls are used. On Linu
 3. **Kernel Buffer Rings (`io_uring_register_buf_ring`)**: The kernel selects receive buffers on packet arrival (`IOSQE_BUFFER_SELECT`), eliminating user-space memory allocations and read system calls.
 4. **Multishot Operations**: Single SQEs handle continuous `accept` and `recv` operations across connections.
 5. **Memory Isolation**: Each request receives its own arena and `rt_context`, isolating allocations between requests and worker threads.
+6. **GPU requests**: A handler may call `gpu.finish` instead of responding. The arena stays alive until the continuation copies the response into the connection buffer. The worker keeps polling the ring while that kernel runs. See [GPU.md](GPU.md) and [TXM.md](TXM.md).
 
 ## HTTPS
 
@@ -107,7 +108,7 @@ http.serve("127.0.0.1", 8080, 0)
 
 ## Limits
 
-- Linux server environment required for `io_uring` networking. Windows/macOS stubs fail gracefully at runtime.
+- Linux is required. The HTTP runtime uses `io_uring`. Other systems stop with `http is supported on Linux only`.
 - In Docker containers, require `--security-opt seccomp=unconfined --ulimit memlock=-1:-1` for kernel buffer ring allocation.
 - No HTTPS in the server. Terminate TLS at a reverse proxy and forward plaintext HTTP to this process. See [HTTPS](#https).
 - `port` must be between `1` and `65535`.

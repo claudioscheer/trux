@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -816,9 +815,6 @@ func TestRunFileCompilesAndExecutesModuleExamples(t *testing.T) {
 }
 
 func TestBuildCommandCompilesAndRunsHTTPServer(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("http runtime is POSIX-only")
-	}
 	requireCC(t)
 
 	port := freeTCPPort(t)
@@ -921,9 +917,6 @@ func main() int {
 }
 
 func TestBuildCommandCompilesAndRunsHTTPMultiFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("http runtime is POSIX-only")
-	}
 	requireCC(t)
 
 	port := freeTCPPort(t)
@@ -2821,14 +2814,186 @@ func main() int {
 	}
 
 	log := readFile(t, logPath)
-	if !strings.Contains(log, "-x cu") {
-		t.Fatalf("compiler args = %q, want CUDA source flag", log)
+	if !strings.Contains(log, ".cu ") && !strings.HasSuffix(strings.TrimSpace(log), ".cu") {
+		t.Fatalf("compiler args = %q, want CUDA source path", log)
 	}
 	if strings.Contains(log, "-std=c11") {
 		t.Fatalf("compiler args = %q, did not expect C11 flag for nvcc", log)
 	}
 	if !strings.Contains(log, "-o "+outputPath) {
 		t.Fatalf("compiler args = %q, want output path", log)
+	}
+}
+
+func TestBuildFileLinksLiburingWhenHTTPUsesGPU(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+import "http"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    out[i] = 1
+}
+
+func handle(request int) int {
+    http.text(request, 200, "ok")
+    return 0
+}
+
+func main() int {
+    http.get("/", handle)
+    http.listen(8080)
+    return 0
+}`)
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "nvcc.log")
+	fakeNVCC := writeFakeCompiler(t, filepath.Join(dir, "fake-nvcc"), logPath)
+	t.Setenv("NVCC", fakeNVCC)
+
+	if err := buildFile(path, outputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	for _, part := range []string{".cu ", "-D_GNU_SOURCE", "-Xcompiler", "-pthread", "-luring"} {
+		if !strings.Contains(log, part) {
+			t.Fatalf("compiler args = %q, want %s", log, part)
+		}
+	}
+}
+
+func TestBuildFileLinksYYJSONWhenGPUUsesJSON(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+import "json"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    out[i] = 1
+}
+
+func main() int {
+    let doc *json.Doc, err error = json.parse("{\"n\":1}")
+    if err != nil {
+        return 1
+    }
+    let out gpu.Buffer[int] = gpu.alloc(1)
+    gpu.launch(fill, 1, 1, 1, 1, 1, 1, 1, out)
+    gpu.free(out)
+    return 0
+}`)
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "nvcc.log")
+	fakeNVCC := writeFakeCompiler(t, filepath.Join(dir, "fake-nvcc"), logPath)
+	t.Setenv("NVCC", fakeNVCC)
+
+	if err := buildFile(path, outputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	if !strings.Contains(log, "yyjson-0.11.1-") {
+		t.Fatalf("compiler args = %q, want yyjson object", log)
+	}
+}
+
+func TestBuildFileLinksJWTWhenGPUUsesJWT(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+import "jwt"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    out[i] = 1
+}
+
+func main() int {
+    let token string, err error = jwt.sign("{\"sub\":\"ada\"}", "0123456789abcdef0123456789abcdef")
+    if err != nil {
+        return 1
+    }
+    let out gpu.Buffer[int] = gpu.alloc(1)
+    gpu.launch(fill, 1, 1, 1, 1, 1, 1, 1, out)
+    gpu.free(out)
+    if len(token) < 1 {
+        return 1
+    }
+    return 0
+}`)
+	result, err := compileFile(path, compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.UsesCUDA || !result.UsesJWT {
+		t.Fatalf("UsesCUDA=%v UsesJWT=%v, want both", result.UsesCUDA, result.UsesJWT)
+	}
+
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "nvcc.log")
+	fakeNVCC := writeFakeCompiler(t, filepath.Join(dir, "fake-nvcc"), logPath)
+	t.Setenv("NVCC", fakeNVCC)
+
+	if err := buildFile(path, outputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	for _, part := range []string{".cu ", "-Xlinker", "-ljwt", "-ljansson", "-lcrypto", "yyjson-0.11.1-"} {
+		if !strings.Contains(log, part) {
+			t.Fatalf("compiler args = %q, want %s", log, part)
+		}
+	}
+}
+
+func TestRunFileJWTAndGPU(t *testing.T) {
+	requireNVCCAndCUDA(t)
+	if jwtPrefix() == "" {
+		t.Skip("libjwt prefix not found")
+	}
+
+	path := writeTempSource(t, `package main
+import "gpu"
+import "jwt"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    out[i] = 7
+}
+
+func main() int {
+    let token string, err error = jwt.sign("{\"sub\":\"ada\"}", "0123456789abcdef0123456789abcdef")
+    if err != nil {
+        return 1
+    }
+    let parsed *jwt.Claims, verr error = jwt.verify(token, "0123456789abcdef0123456789abcdef")
+    if verr != nil {
+        return 1
+    }
+    print(jwt.getString(parsed, "sub"))
+    let out gpu.Buffer[int] = gpu.alloc(1)
+    gpu.launch(fill, 1, 1, 1, 1, 1, 1, 0, out)
+    gpu.sync()
+    let host []int = make([]int, 1)
+    gpu.to(out, host)
+    gpu.free(out)
+    print(host[0])
+    return 0
+}`)
+	var out bytes.Buffer
+	if err := runFile(&out, path); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "ada\n7\n" {
+		t.Fatalf("got output %q, want ada and 7", out.String())
+	}
+}
+
+func TestDigitsHTTPBenchmarkProgramUsesHTTPAndGPU(t *testing.T) {
+	result, err := compileFile("../../benchmarks/digits/server.tx", compileOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.UsesCUDA || !result.UsesHTTP {
+		t.Fatalf("UsesCUDA=%v UsesHTTP=%v, want both", result.UsesCUDA, result.UsesHTTP)
 	}
 }
 
@@ -2936,11 +3101,6 @@ func requireNVCCAndCUDA(t *testing.T) {
 	if _, err := exec.LookPath("nvidia-smi"); err != nil {
 		t.Skip("nvidia-smi not found")
 	}
-	if runtime.GOOS == "windows" {
-		if _, err := exec.LookPath("cl"); err != nil {
-			t.Skip("nvcc host compiler cl.exe not found")
-		}
-	}
 	cmd := exec.Command("nvidia-smi")
 	if err := cmd.Run(); err != nil {
 		t.Skipf("CUDA device unavailable: %v", err)
@@ -2949,15 +3109,6 @@ func requireNVCCAndCUDA(t *testing.T) {
 
 func writeFakeCompiler(t *testing.T, path string, logPath string) string {
 	t.Helper()
-
-	if runtime.GOOS == "windows" {
-		path += ".cmd"
-		script := fmt.Sprintf("@echo off\r\nsetlocal\r\necho %%* > \"%s\"\r\n:loop\r\nif \"%%~1\"==\"\" exit /b 2\r\nif \"%%~1\"==\"-o\" goto writeout\r\nshift\r\ngoto loop\r\n:writeout\r\nshift\r\ntype nul > \"%%~1\"\r\nexit /b 0\r\n", logPath)
-		if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return path
-	}
 
 	script := fmt.Sprintf(`#!/bin/sh
 echo "$@" > %q

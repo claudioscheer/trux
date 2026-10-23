@@ -162,7 +162,9 @@ Things to notice:
 | --- | --- |
 | no kernels | `$CC -std=c11 -O2 main.c -o main` (`-O0` with `--debug`; default `CC=cc`) |
 | uses `http` | the same, plus `-pthread`; `trux_http_runtime.h` is included |
-| declares a `kernel func` | `$NVCC -x cu main.cu -o main` (default `NVCC=nvcc`) |
+| declares a `kernel func` | `$NVCC main.cu -o main` (default `NVCC=nvcc`) |
+| kernel and `http` | the CUDA command, plus `-D_GNU_SOURCE -Xcompiler -pthread -luring`. `nvcc` does not accept `-pthread` itself |
+| kernel and `json` or `jwt` | the CUDA command also links the cached `yyjson` object built with `$CC`. `jwt` adds the same `-ljwt`, jansson, and OpenSSL flags as a CPU build |
 
 The runtime itself is a single header, `trux_runtime.h`, stored as a Go string constant in `internal/runtime/c/rt.go`
 (and `http.go` for the HTTP runtime). It's written next to the generated source on every build, so there is nothing to

@@ -5,13 +5,9 @@
 GO := go
 BINARY := trux
 CMD := ./cmd/trux
-ifeq ($(OS),Windows_NT)
-RUN_BIN := bin/$(BINARY).exe
-else
 RUN_BIN := ./bin/$(BINARY)
-endif
 
-.PHONY: build run test bench fmt emit-c lsp clean
+.PHONY: build run test bench bench-digits fmt emit-c lsp clean
 
 build:
 	$(GO) build -o $(RUN_BIN) $(CMD)
@@ -40,7 +36,6 @@ test:
 	$(GO) test $(if $(filter 1,$(VERBOSE)),-v )$(GO_TEST_FLAGS) ./...
 
 # Integer workload, GPU matrix multiply, Jacobi stencil, and a four-layer conv net.
-# On Windows, run `vs` in this shell first so nvcc can find cl.exe.
 bench: build
 	@echo ===== examples/performance_integer.tx =====
 	$(RUN_BIN) run examples/performance_integer.tx
@@ -50,6 +45,10 @@ bench: build
 	$(RUN_BIN) run examples/performance_stencil.tx
 	@echo ===== examples/performance_cnn.tx =====
 	$(RUN_BIN) run examples/performance_cnn.tx
+
+# Handwritten-digits HTTP+GPU. Linux, liburing, and CUDA. Not part of `bench`.
+bench-digits:
+	$(GO) run ./benchmarks/digits/
 
 fmt: build
 	./bin/$(BINARY) fmt -r

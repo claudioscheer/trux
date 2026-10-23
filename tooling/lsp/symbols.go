@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -2294,8 +2293,5 @@ func normalizePath(path string) string {
 
 func uriFromPath(path string) string {
 	path = filepath.Clean(path)
-	if runtime.GOOS == "windows" {
-		path = "/" + strings.ReplaceAll(path, "\\", "/")
-	}
 	return (&url.URL{Scheme: "file", Path: path}).String()
 }

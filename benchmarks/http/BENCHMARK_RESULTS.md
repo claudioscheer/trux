@@ -1,51 +1,51 @@
 # Trux HTTP io_uring Benchmark Results
 
-*Kernel: 6.18.54.1-microsoft-standard-WSL2*
-*Docker Engine: 29.1.3*
+*Kernel: 7.0.0-38-generic*
+*Docker Engine: 29.9.0*
 *Duration per test: 6s*
 
 ### Micro Edge (1 vCPU, 256MB)
 
 | Endpoint | Concurrency | Throughput (req/s) | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Plaintext Baseline (/plaintext) | 100 | **150,124** | 697.42us | 610.00us | 763.00us | 1.44ms | 7.441MiB |
-| Plaintext Baseline (/plaintext) | 1000 | **114,305** | 8.73ms | 8.41ms | 9.83ms | 12.58ms | 15.1MiB |
-| JSON Serialization (/json/serialize) | 100 | **149,968** | 632.82us | 608.00us | 775.00us | 1.21ms | 14.77MiB |
-| JSON Serialization (/json/serialize) | 1000 | **121,905** | 8.13ms | 8.06ms | 8.92ms | 10.50ms | 14.86MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **63,155** | 3.08ms | 1.24ms | 8.32ms | 24.22ms | 31.05MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **57,662** | 17.39ms | 15.21ms | 23.37ms | 42.12ms | 33.28MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **126,580** | 753.03us | 724.00us | 0.91ms | 1.35ms | 34.31MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **100,104** | 9.87ms | 9.63ms | 10.96ms | 13.72ms | 34.16MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **66,870** | 2.84ms | 1.16ms | 8.18ms | 22.14ms | 34.17MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **61,824** | 16.55ms | 13.74ms | 25.86ms | 43.35ms | 34.14MiB |
+| Plaintext Baseline (/plaintext) | 100 | **140,731** | 693.87us | 655.00us | 805.00us | 1.11ms | 6.043MiB |
+| Plaintext Baseline (/plaintext) | 1000 | **118,127** | 8.45ms | 8.19ms | 9.72ms | 12.72ms | 13.96MiB |
+| JSON Serialization (/json/serialize) | 100 | **137,110** | 697.92us | 684.00us | 787.00us | 1.04ms | 13.77MiB |
+| JSON Serialization (/json/serialize) | 1000 | **120,816** | 8.20ms | 7.99ms | 9.70ms | 12.51ms | 13.62MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **42,425** | 3.87ms | 1.92ms | 8.32ms | 29.93ms | 24.57MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **39,821** | 24.91ms | 21.66ms | 40.37ms | 52.57ms | 31.19MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **105,662** | 0.90ms | 0.90ms | 0.99ms | 1.19ms | 31.31MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **85,923** | 11.53ms | 11.35ms | 13.13ms | 16.78ms | 31.38MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **44,721** | 3.83ms | 1.81ms | 9.27ms | 29.61ms | 31.8MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **40,099** | 24.92ms | 21.46ms | 48.27ms | 54.93ms | 32.63MiB |
 
 ### Cloud Standard (2 vCPUs, 1GB)
 
 | Endpoint | Concurrency | Throughput (req/s) | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Plaintext Baseline (/plaintext) | 100 | **278,853** | 388.13us | 317.00us | 480.00us | 1.05ms | 12.07MiB |
-| Plaintext Baseline (/plaintext) | 1000 | **228,951** | 4.36ms | 4.15ms | 5.27ms | 6.71ms | 20.33MiB |
-| JSON Serialization (/json/serialize) | 100 | **266,365** | 367.63us | 330.00us | 506.00us | 1.00ms | 20.73MiB |
-| JSON Serialization (/json/serialize) | 1000 | **226,984** | 4.37ms | 4.22ms | 5.22ms | 6.41ms | 24.89MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **85,280** | 4.50ms | 0.90ms | 15.59ms | 47.50ms | 27.25MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **76,184** | 18.38ms | 10.27ms | 50.26ms | 89.85ms | 31.87MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **193,071** | 497.80us | 463.00us | 690.00us | 1.24ms | 32MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **180,777** | 5.49ms | 5.25ms | 6.69ms | 8.49ms | 32.92MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **90,254** | 4.79ms | 827.00us | 17.95ms | 48.56ms | 33.61MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **87,907** | 14.28ms | 9.27ms | 34.37ms | 69.39ms | 33.92MiB |
+| Plaintext Baseline (/plaintext) | 100 | **252,505** | 409.74us | 371.00us | 445.00us | 558.00us | 10.33MiB |
+| Plaintext Baseline (/plaintext) | 1000 | **247,527** | 4.06ms | 3.92ms | 4.73ms | 6.10ms | 18.76MiB |
+| JSON Serialization (/json/serialize) | 100 | **246,800** | 385.59us | 374.00us | 456.00us | 579.00us | 18.75MiB |
+| JSON Serialization (/json/serialize) | 1000 | **240,009** | 4.14ms | 4.06ms | 4.78ms | 6.03ms | 23.19MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **50,121** | 4.89ms | 1.57ms | 8.46ms | 53.90ms | 26.16MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **47,623** | 24.59ms | 17.92ms | 51.95ms | 101.11ms | 28.73MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **170,164** | 570.58us | 559.00us | 757.00us | 1.05ms | 28.74MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **162,594** | 6.10ms | 5.95ms | 7.16ms | 9.14ms | 28.86MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **50,665** | 6.35ms | 1.51ms | 19.34ms | 70.40ms | 29.14MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **51,285** | 21.45ms | 16.75ms | 36.53ms | 76.06ms | 30.85MiB |
 
 ### Compute Node (4 vCPUs, 2GB)
 
 | Endpoint | Concurrency | Throughput (req/s) | Avg Latency | p50 | p90 | p99 | Memory |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| Plaintext Baseline (/plaintext) | 100 | **690,048** | 206.87us | 106.00us | 226.00us | 538.00us | 20.03MiB |
-| Plaintext Baseline (/plaintext) | 1000 | **703,956** | 1.39ms | 1.26ms | 2.08ms | 3.66ms | 29.3MiB |
-| JSON Serialization (/json/serialize) | 100 | **675,776** | 143.42us | 111.00us | 221.00us | 467.00us | 29.8MiB |
-| JSON Serialization (/json/serialize) | 1000 | **695,237** | 1.39ms | 1.28ms | 2.04ms | 3.30ms | 36.12MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **59,584** | 3.75ms | 1.36ms | 4.56ms | 43.06ms | 38.04MiB |
-| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **70,082** | 16.00ms | 12.30ms | 28.60ms | 63.43ms | 45.67MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **250,387** | 378.30us | 330.00us | 642.00us | 1.01ms | 45.27MiB |
-| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **254,878** | 3.89ms | 3.71ms | 5.52ms | 7.92ms | 48.28MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **59,644** | 3.88ms | 1.36ms | 4.74ms | 44.85ms | 49.11MiB |
-| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **76,429** | 15.08ms | 11.09ms | 30.38ms | 60.99ms | 55.93MiB |
+| Plaintext Baseline (/plaintext) | 100 | **469,148** | 215.19us | 195.00us | 263.00us | 342.00us | 18.9MiB |
+| Plaintext Baseline (/plaintext) | 1000 | **466,623** | 2.12ms | 2.06ms | 2.58ms | 3.18ms | 27.46MiB |
+| JSON Serialization (/json/serialize) | 100 | **463,319** | 206.95us | 199.00us | 270.00us | 342.00us | 28.57MiB |
+| JSON Serialization (/json/serialize) | 1000 | **456,498** | 2.17ms | 2.15ms | 2.61ms | 3.08ms | 34.04MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 100 | **44,199** | 5.73ms | 1.85ms | 8.69ms | 63.92ms | 37.39MiB |
+| SQLite File Insert & Query (/sqlite/insert-and-query) | 1000 | **46,802** | 23.93ms | 18.61ms | 42.61ms | 92.56ms | 43.45MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 100 | **271,051** | 370.44us | 340.00us | 436.00us | 1.45ms | 42.9MiB |
+| SQLite File Prepared Query (/sqlite/query-by-id/1024) | 1000 | **267,936** | 3.70ms | 3.61ms | 4.60ms | 7.88ms | 46.43MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 100 | **46,239** | 6.75ms | 1.75ms | 19.49ms | 73.64ms | 47.47MiB |
+| Middleware & SQLite File Audit (/api/authenticated-audit) | 1000 | **50,856** | 21.81ms | 17.16ms | 38.31ms | 81.20ms | 51.75MiB |
 

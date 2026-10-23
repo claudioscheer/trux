@@ -25,7 +25,9 @@ import "jwt"
 - jansson
 - OpenSSL 3
 
-Point `TRUX_LIBJWT_PREFIX` at a directory that contains `include/jwt.h` and `lib/libjwt.a` when those are not on the compiler's default search path. On Windows, shared OpenSSL and jansson DLLs next to that prefix are copied beside the executable.
+Point `TRUX_LIBJWT_PREFIX` at a directory that contains `include/jwt.h` and `lib/libjwt.a` when those are not on the compiler's default search path.
+
+A program may import `jwt` and declare a `kernel func`. `nvcc` compiles it and links libjwt, jansson, and OpenSSL.
 
 An HS256 secret shorter than 32 bytes is accepted. It is zero-padded the way HMAC-SHA256 pads a short key, so a token signed by OpenSSL with that secret verifies.
 

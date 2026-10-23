@@ -114,6 +114,16 @@ disableKinds = ["taxonomy", "term"]
     identifier = "benchmarks"
     weight = 25
   [[menu.primary]]
+    name = "HTTP"
+    url = "docs/benchmarks/http/"
+    parent = "benchmarks"
+    weight = 10
+  [[menu.primary]]
+    name = "HTTP + GPU"
+    url = "docs/benchmarks/http-gpu/"
+    parent = "benchmarks"
+    weight = 20
+  [[menu.primary]]
     name = "GitHub"
     url = "https://github.com/thea1lab/trux"
     identifier = "github"

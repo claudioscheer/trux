@@ -17,6 +17,6 @@ jwt.getFloat(claims *jwt.Claims, key string) float
 
 A secret shorter than 32 bytes is accepted. HMAC-SHA256 pads it with zero bytes, which is the same key OpenSSL uses for that secret.
 
-The package links libjwt, jansson, and OpenSSL. It does not vendor those libraries. Set `TRUX_LIBJWT_PREFIX` to a prefix that contains `include/jwt.h` and `lib/libjwt.a` when they are not on the default compiler search path. On Windows, `libcrypto`, `libssl`, and `libjansson` DLLs from that prefix are copied next to the executable.
+The package links libjwt, jansson, and OpenSSL. It does not vendor those libraries. Set `TRUX_LIBJWT_PREFIX` to a prefix that contains `include/jwt.h` and `lib/libjwt.a` when they are not on the default compiler search path.
 
-`jwt` and `gpu` cannot be combined in one program yet. Claim values are read back with yyjson, the same JSON library used by `import "json"`.
+A program can import `jwt` and declare a `kernel func` in the same file. `nvcc` compiles that program and links the same libjwt, jansson, and OpenSSL libraries. Claim values are read back with yyjson, the same JSON library used by `import "json"`.

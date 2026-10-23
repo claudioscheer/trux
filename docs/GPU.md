@@ -44,7 +44,7 @@ kernel func paint(row int, col int, out gpu.Buffer[int], width int) {
 }
 ```
 
-Kernel code is restricted. It supports scalar locals, arithmetic, comparisons, `if`, `for`, GPU buffer indexing, and GPU coordinate helpers. It does not support strings, lists, host slices, allocation, `print`, IO, time calls, or normal function calls.
+Kernel code is restricted. It supports scalar locals, arithmetic, comparisons, `if`, `for`, GPU buffer indexing, and GPU coordinate helpers. It does not support strings, lists, host slices, allocation, `print`, IO, time calls, or normal function calls. The one exception is `exp(x)`, which takes a `float` and returns a `float`, and only inside a kernel.
 
 ## Launching
 
@@ -92,6 +92,20 @@ gpu.blockDimZ()
 `gpu.to` and `gpu.copyToHost` wait until the copied data is back on the host. `gpu.sync()` is available when source code needs an explicit synchronization point, such as timing a kernel.
 
 Integer arithmetic inside a kernel uses the same overflow and division checks as host code. On device, a failing check traps the kernel. That trap does not print a Trux runtime error message.
+
+## Models
+
+`gpu.mount(path)` reads a TXM1 file, described in [TXM.md](TXM.md). Each tensor is uploaded once. Later requests use `gpu.floats`, `gpu.ints`, `gpu.dim`, `gpu.scalar`, `gpu.hostFloats`, and `gpu.hostInts`. Those lookups do not call CUDA and do not take a lock. A second `gpu.mount` fails.
+
+`gpu.workspaceFloat(name, n)` and `gpu.workspaceInt(name, n)` allocate a device buffer and a pinned host mirror for each worker. Call them before `http.listen`. `gpu.borrowFloat` and `gpu.borrowInt` return the buffer for the worker that is running the handler. `gpu.free` fails if the pointer is a mounted tensor or a workspace.
+
+`gpu.copyToDevice` into a workspace on an HTTP worker copies into the pinned mirror and then queues the device copy on that worker's stream. It returns without waiting. `gpu.to` outside that path still waits.
+
+`gpu.finish(request, continuation)` is for an HTTP handler. The continuation is `func(request int) int`. The runtime queues a copy of the workspaces back to the pinned mirrors, then returns the worker to its `io_uring` loop. Other sockets on that worker still accept and receive. The continuation runs after the kernel finishes. `gpu.ready(name)` is the pinned `[]float` to read there. The continuation sends the HTTP response. One GPU request is in flight on each worker. Request batching is not done.
+
+If the kernel fails, the ring does not wait forever. A timeout queries the stream and the request gets a 500.
+
+`examples/projects/digits_server` mounts a digits SVM and serves one image per request on this path. `benchmarks/digits` times that request path. `make bench-digits` needs Linux, liburing, and CUDA. It is not part of `make bench`.
 
 ## Example
 

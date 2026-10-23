@@ -5,6 +5,7 @@
 *.test
 *.out
 benchmarks/**/server
+benchmarks/digits/digits.txm
 
 # Go build artifacts
 *.o

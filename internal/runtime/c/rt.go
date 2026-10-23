@@ -8,6 +8,7 @@ const Source = `#ifndef TRUX_RUNTIME_H
 #define _POSIX_C_SOURCE 200809L
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -17,24 +18,10 @@ const Source = `#ifndef TRUX_RUNTIME_H
 #include <inttypes.h>
 #include <time.h>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#if !defined(__CUDA_ARCH__)
-#include <windows.h>
-#endif
-#include <fcntl.h>
-#include <io.h>
-#else
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
-#endif
 
 #ifdef TRUX_RUNTIME_CUDA
 #include <cuda_runtime.h>
@@ -66,12 +53,7 @@ struct rt_c_array {
 
 #define RT_ARENA_DEFAULT_CHUNK_SIZE ((size_t)4096)
 
-/* Windows text-mode stdout turns \n into \r\n. Trux programs and tests use \n. */
 static RT_UNUSED void rt_stdio_binary(void) {
-#if defined(_WIN32) && !defined(__CUDA_ARCH__)
-    _setmode(_fileno(stdout), _O_BINARY);
-    _setmode(_fileno(stderr), _O_BINARY);
-#endif
 }
 
 typedef struct {
@@ -391,6 +373,51 @@ static RT_UNUSED void rt_arena_deinit(rt_arena* arena) {
         chunk = next;
     }
     arena->chunks = NULL;
+}
+
+typedef struct {
+    rt_arena* arena;
+    rt_context* ctx;
+    int live;
+    int completions;
+    int sends;
+} rt_http_park_slot;
+
+static RT_UNUSED int rt_http_park_begin(rt_http_park_slot* slot, rt_arena* stack_arena, rt_context* stack_ctx) {
+    if (slot == NULL || stack_arena == NULL || stack_ctx == NULL || slot->live) return 0;
+    rt_arena* arena = (rt_arena*)malloc(sizeof(rt_arena));
+    if (arena == NULL) return 0;
+    rt_context* ctx = (rt_context*)malloc(sizeof(rt_context));
+    if (ctx == NULL) {
+        free(arena);
+        return 0;
+    }
+    *arena = *stack_arena;
+    stack_arena->chunks = NULL;
+    stack_arena->lists = NULL;
+    stack_arena->owner = NULL;
+    *ctx = *stack_ctx;
+    ctx->arena = arena;
+    stack_ctx->chunk_pool = NULL;
+    slot->arena = arena;
+    slot->ctx = ctx;
+    slot->live = 1;
+    return 1;
+}
+
+static RT_UNUSED int rt_http_park_complete(rt_http_park_slot* slot, int responded) {
+    (void)responded;
+    if (slot == NULL || !slot->live) return 0;
+    slot->live = 0;
+    slot->completions++;
+    slot->sends++;
+    rt_context_free_chunks(slot->ctx);
+    rt_arena_deinit(slot->arena);
+    free(slot->ctx);
+    free(slot->arena);
+    slot->arena = NULL;
+    slot->ctx = NULL;
+    return 1;
 }
 
 static RT_UNUSED rt_arena_mark rt_arena_mark_current(rt_arena* arena) {
@@ -749,8 +776,6 @@ static RT_UNUSED int rt_clock_realtime(struct timespec* ts) {
 #if defined(__CUDA_ARCH__)
     (void)ts;
     return -1;
-#elif defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__))
-    return timespec_get(ts, TIME_UTC) == TIME_UTC ? 0 : -1;
 #else
     return clock_gettime(CLOCK_REALTIME, ts);
 #endif
@@ -760,18 +785,6 @@ static RT_UNUSED int rt_clock_monotonic(struct timespec* ts) {
 #if defined(__CUDA_ARCH__)
     (void)ts;
     return -1;
-#elif defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__))
-    static LARGE_INTEGER frequency;
-    LARGE_INTEGER counter;
-    if (frequency.QuadPart == 0 && !QueryPerformanceFrequency(&frequency)) {
-        return -1;
-    }
-    if (!QueryPerformanceCounter(&counter)) {
-        return -1;
-    }
-    ts->tv_sec = (time_t)(counter.QuadPart / frequency.QuadPart);
-    ts->tv_nsec = (long)((counter.QuadPart % frequency.QuadPart) * 1000000000 / frequency.QuadPart);
-    return 0;
 #else
     return clock_gettime(CLOCK_MONOTONIC, ts);
 #endif
@@ -797,8 +810,6 @@ static RT_UNUSED void rt_time_sleep_millis(int64_t millis) {
     size_t checked = rt_checked_count(millis, "sleep milliseconds");
 #if defined(__CUDA_ARCH__)
     (void)checked;
-#elif defined(_MSC_VER) || (defined(_WIN32) && defined(__CUDACC__))
-    Sleep(checked > 0xffffffffu ? 0xffffffffu : (DWORD)checked);
 #else
     struct timespec remaining;
     remaining.tv_sec = (time_t)(checked / 1000);
@@ -1496,6 +1507,204 @@ typedef struct {
     rt_error f1;
 } trux_tuple_slice_int_error;
 
+#define RT_TXM_MAX_TENSORS 256
+#define RT_TXM_MAX_NAME 64
+#define RT_GPU_MAX_WORKSPACES 16
+#define RT_GPU_MAX_OWNED 64
+#define RT_TXM_DTYPE_INT 1u
+#define RT_TXM_DTYPE_FLOAT 2u
+
+typedef struct {
+    char name[RT_TXM_MAX_NAME];
+    uint32_t name_len;
+    uint32_t dtype;
+    uint32_t rank;
+    uint64_t dims[4];
+    uint64_t count;
+    void* host;
+    double scalar;
+    void* device;
+} rt_txm_tensor;
+
+typedef struct {
+    int loaded;
+    uint32_t count;
+    rt_txm_tensor tensors[RT_TXM_MAX_TENSORS];
+} rt_txm_model;
+
+static rt_txm_model g_rt_txm;
+
+typedef struct {
+    char name[RT_TXM_MAX_NAME];
+    uint32_t name_len;
+    int is_float;
+    uint64_t count;
+} rt_gpu_ws_decl;
+
+static int g_rt_gpu_workers_started;
+
+static RT_UNUSED void rt_gpu_publish_workers(void) {
+    g_rt_gpu_workers_started = 1;
+}
+
+static void* g_rt_gpu_owned[RT_GPU_MAX_OWNED];
+static int g_rt_gpu_owned_count;
+
+static RT_UNUSED int rt_txm_read_u32(const uint8_t* data, size_t len, size_t* index, uint32_t* out) {
+    if (*index + 4 > len) return 0;
+    const uint8_t* p = data + *index;
+    *out = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    *index += 4;
+    return 1;
+}
+
+static RT_UNUSED int rt_txm_read_u64(const uint8_t* data, size_t len, size_t* index, uint64_t* out) {
+    if (*index + 8 > len) return 0;
+    const uint8_t* p = data + *index;
+    uint64_t value = 0;
+    for (int i = 0; i < 8; i++) {
+        value |= ((uint64_t)p[i]) << (8 * i);
+    }
+    *out = value;
+    *index += 8;
+    return 1;
+}
+
+static RT_UNUSED void rt_txm_reset(void) {
+    for (uint32_t i = 0; i < g_rt_txm.count; i++) {
+        free(g_rt_txm.tensors[i].host);
+        g_rt_txm.tensors[i].host = NULL;
+    }
+    memset(&g_rt_txm, 0, sizeof(g_rt_txm));
+}
+
+static RT_UNUSED const char* rt_txm_parse(const uint8_t* data, size_t len) {
+    rt_txm_reset();
+    if (data == NULL || len < 12) return "model file is truncated";
+    if (memcmp(data, "TXM1", 4) != 0) return "model file has a bad magic";
+    size_t index = 4;
+    uint32_t version = 0;
+    uint32_t count = 0;
+    if (!rt_txm_read_u32(data, len, &index, &version)) return "model file is truncated";
+    if (version != 1) return "model file has a bad version";
+    if (!rt_txm_read_u32(data, len, &index, &count)) return "model file is truncated";
+    if (count == 0 || count > RT_TXM_MAX_TENSORS) return "model file has a bad tensor count";
+    for (uint32_t n = 0; n < count; n++) {
+        uint32_t name_len = 0;
+        uint32_t dtype = 0;
+        uint32_t rank = 0;
+        if (!rt_txm_read_u32(data, len, &index, &name_len)) return "model file is truncated";
+        if (name_len == 0 || name_len > RT_TXM_MAX_NAME) return "model tensor name has a bad length";
+        if (index + name_len > len) return "model file is truncated";
+        rt_txm_tensor* tensor = &g_rt_txm.tensors[n];
+        memcpy(tensor->name, data + index, name_len);
+        tensor->name_len = name_len;
+        index += name_len;
+        for (uint32_t prev = 0; prev < n; prev++) {
+            rt_txm_tensor* other = &g_rt_txm.tensors[prev];
+            if (other->name_len == name_len && memcmp(other->name, tensor->name, name_len) == 0) {
+                return "model file has a duplicate tensor name";
+            }
+        }
+        if (!rt_txm_read_u32(data, len, &index, &dtype)) return "model file is truncated";
+        if (dtype != RT_TXM_DTYPE_INT && dtype != RT_TXM_DTYPE_FLOAT) return "model tensor has a bad dtype";
+        if (!rt_txm_read_u32(data, len, &index, &rank)) return "model file is truncated";
+        if (rank < 1 || rank > 4) return "model tensor rank must be from 1 to 4";
+        tensor->dtype = dtype;
+        tensor->rank = rank;
+        uint64_t elements = 1;
+        for (uint32_t axis = 0; axis < rank; axis++) {
+            uint64_t dim = 0;
+            if (!rt_txm_read_u64(data, len, &index, &dim)) return "model file is truncated";
+            if (dim == 0) return "model tensor dimension must be at least 1";
+            if (elements > UINT64_MAX / dim) return "model tensor dimension product overflows";
+            elements *= dim;
+            tensor->dims[axis] = dim;
+        }
+        size_t elem_size = dtype == RT_TXM_DTYPE_FLOAT ? sizeof(double) : sizeof(int64_t);
+        if (elements > SIZE_MAX / elem_size) return "model tensor dimension product overflows";
+        size_t bytes = (size_t)elements * elem_size;
+        if (index + bytes < index || index + bytes > len) return "model file is truncated";
+        void* host = malloc(bytes == 0 ? 1 : bytes);
+        if (host == NULL) return "model tensor allocation failed";
+        memcpy(host, data + index, bytes);
+        index += bytes;
+        tensor->count = elements;
+        tensor->host = host;
+        g_rt_txm.count = n + 1;
+        if (dtype == RT_TXM_DTYPE_FLOAT && elements == 1) {
+            memcpy(&tensor->scalar, host, sizeof(double));
+        }
+    }
+    if (index != len) return "model file has trailing bytes";
+    g_rt_txm.count = count;
+    return NULL;
+}
+
+static RT_UNUSED rt_txm_tensor* rt_txm_find(rt_string name) {
+    if (!g_rt_txm.loaded && g_rt_txm.count == 0) return NULL;
+    for (uint32_t i = 0; i < g_rt_txm.count; i++) {
+        rt_txm_tensor* tensor = &g_rt_txm.tensors[i];
+        if (tensor->name_len == name.len && name.len > 0 && memcmp(tensor->name, name.data, name.len) == 0) {
+            return tensor;
+        }
+    }
+    return NULL;
+}
+
+static RT_UNUSED int rt_gpu_is_owned(void* pointer) {
+    if (pointer == NULL) return 0;
+    for (uint32_t i = 0; i < g_rt_txm.count; i++) {
+        if (g_rt_txm.tensors[i].device == pointer) return 1;
+    }
+    for (int i = 0; i < g_rt_gpu_owned_count; i++) {
+        if (g_rt_gpu_owned[i] == pointer) return 1;
+    }
+    return 0;
+}
+
+static RT_UNUSED void rt_gpu_mark_owned(void* pointer) {
+    if (pointer == NULL) return;
+    if (rt_gpu_is_owned(pointer)) return;
+    if (g_rt_gpu_owned_count >= RT_GPU_MAX_OWNED) rt_runtime_fail("too many protected GPU buffers");
+    g_rt_gpu_owned[g_rt_gpu_owned_count++] = pointer;
+}
+
+static RT_UNUSED void rt_gpu_refuse_owned(void* pointer) {
+    if (rt_gpu_is_owned(pointer)) rt_runtime_fail("gpu.free cannot free a mounted tensor or workspace");
+}
+
+static RT_UNUSED int64_t rt_gpu_dim(rt_string name, int64_t axis) {
+    if (!g_rt_txm.loaded) rt_runtime_fail("gpu.mount has not been called");
+    rt_txm_tensor* tensor = rt_txm_find(name);
+    if (tensor == NULL) rt_runtime_fail("unknown model tensor");
+    if (axis < 0 || (uint32_t)axis >= tensor->rank) rt_runtime_fail("model tensor axis is out of range");
+    return (int64_t)tensor->dims[axis];
+}
+
+static RT_UNUSED double rt_gpu_scalar(rt_string name) {
+    if (!g_rt_txm.loaded) rt_runtime_fail("gpu.mount has not been called");
+    rt_txm_tensor* tensor = rt_txm_find(name);
+    if (tensor == NULL || tensor->dtype != RT_TXM_DTYPE_FLOAT || tensor->count != 1) {
+        rt_runtime_fail("gpu.scalar expects a one-element float tensor");
+    }
+    return tensor->scalar;
+}
+
+static RT_UNUSED rt_slice_float rt_gpu_host_floats(rt_string name) {
+    if (!g_rt_txm.loaded) rt_runtime_fail("gpu.mount has not been called");
+    rt_txm_tensor* tensor = rt_txm_find(name);
+    if (tensor == NULL || tensor->dtype != RT_TXM_DTYPE_FLOAT) rt_runtime_fail("gpu.hostFloats expects a float tensor");
+    return RT_LIT(rt_slice_float, (double*)tensor->host, (size_t)tensor->count);
+}
+
+static RT_UNUSED rt_slice_int rt_gpu_host_ints(rt_string name) {
+    if (!g_rt_txm.loaded) rt_runtime_fail("gpu.mount has not been called");
+    rt_txm_tensor* tensor = rt_txm_find(name);
+    if (tensor == NULL || tensor->dtype != RT_TXM_DTYPE_INT) rt_runtime_fail("gpu.hostInts expects an int tensor");
+    return RT_LIT(rt_slice_int, (int64_t*)tensor->host, (size_t)tensor->count);
+}
+
 #ifdef TRUX_RUNTIME_CUDA
 typedef struct { int64_t* data; size_t len; } rt_gpu_buffer_int;
 typedef struct { double* data; size_t len; } rt_gpu_buffer_float;
@@ -1505,6 +1714,38 @@ static RT_UNUSED void rt_cuda_check(cudaError_t err, const char* operation) {
         fprintf(stderr, "trux runtime error: CUDA %s failed: %s\n", operation, cudaGetErrorString(err));
         exit(1);
     }
+}
+
+typedef struct {
+    char name[RT_TXM_MAX_NAME];
+    uint32_t name_len;
+    int is_float;
+    uint64_t count;
+    void* device;
+    void* pinned;
+} rt_gpu_ws_slot;
+
+static __thread rt_gpu_ws_slot g_rt_gpu_ws[RT_GPU_MAX_WORKSPACES];
+static __thread int g_rt_gpu_ws_ready;
+static __thread cudaStream_t g_rt_gpu_stream;
+static __thread int g_rt_gpu_stream_ready;
+static __thread int g_rt_gpu_fd;
+static __thread int g_rt_gpu_fd_ready;
+static __thread int g_rt_gpu_job_busy;
+static rt_gpu_ws_decl g_rt_gpu_ws_decl[RT_GPU_MAX_WORKSPACES];
+static int g_rt_gpu_ws_decl_count;
+
+static RT_UNUSED rt_gpu_ws_slot* rt_gpu_ws_by_device(void* pointer) {
+    if (!g_rt_gpu_ws_ready || pointer == NULL) return NULL;
+    for (int i = 0; i < g_rt_gpu_ws_decl_count; i++) {
+        if (g_rt_gpu_ws[i].device == pointer) return &g_rt_gpu_ws[i];
+    }
+    return NULL;
+}
+
+static RT_UNUSED cudaStream_t rt_gpu_launch_stream(void) {
+    if (g_rt_gpu_stream_ready) return g_rt_gpu_stream;
+    return 0;
 }
 
 static RT_UNUSED rt_gpu_buffer_int rt_gpu_alloc_int(int64_t count) {
@@ -1523,11 +1764,23 @@ static RT_UNUSED rt_gpu_buffer_float rt_gpu_alloc_float(int64_t count) {
 
 static RT_UNUSED void rt_gpu_copy_to_device_int(rt_slice_int host, rt_gpu_buffer_int device) {
     if (host.len > device.len) rt_runtime_fail("gpu copyToDevice host slice is larger than device buffer");
+    rt_gpu_ws_slot* slot = rt_gpu_ws_by_device(device.data);
+    if (slot != NULL && g_rt_gpu_stream_ready) {
+        memcpy(slot->pinned, host.data, host.len * sizeof(int64_t));
+        rt_cuda_check(cudaMemcpyAsync(device.data, slot->pinned, host.len * sizeof(int64_t), cudaMemcpyHostToDevice, g_rt_gpu_stream), "copyToDevice");
+        return;
+    }
     rt_cuda_check(cudaMemcpy(device.data, host.data, host.len * sizeof(int64_t), cudaMemcpyHostToDevice), "copyToDevice");
 }
 
 static RT_UNUSED void rt_gpu_copy_to_device_float(rt_slice_float host, rt_gpu_buffer_float device) {
     if (host.len > device.len) rt_runtime_fail("gpu copyToDevice host slice is larger than device buffer");
+    rt_gpu_ws_slot* slot = rt_gpu_ws_by_device(device.data);
+    if (slot != NULL && g_rt_gpu_stream_ready) {
+        memcpy(slot->pinned, host.data, host.len * sizeof(double));
+        rt_cuda_check(cudaMemcpyAsync(device.data, slot->pinned, host.len * sizeof(double), cudaMemcpyHostToDevice, g_rt_gpu_stream), "copyToDevice");
+        return;
+    }
     rt_cuda_check(cudaMemcpy(device.data, host.data, host.len * sizeof(double), cudaMemcpyHostToDevice), "copyToDevice");
 }
 
@@ -1542,16 +1795,239 @@ static RT_UNUSED void rt_gpu_copy_to_host_float(rt_gpu_buffer_float device, rt_s
 }
 
 static RT_UNUSED void rt_gpu_free_int(rt_gpu_buffer_int buffer) {
+    if (rt_gpu_ws_by_device(buffer.data) != NULL) rt_runtime_fail("gpu.free cannot free a mounted tensor or workspace");
+    rt_gpu_refuse_owned(buffer.data);
     rt_cuda_check(cudaFree(buffer.data), "free");
 }
 
 static RT_UNUSED void rt_gpu_free_float(rt_gpu_buffer_float buffer) {
+    if (rt_gpu_ws_by_device(buffer.data) != NULL) rt_runtime_fail("gpu.free cannot free a mounted tensor or workspace");
+    rt_gpu_refuse_owned(buffer.data);
     rt_cuda_check(cudaFree(buffer.data), "free");
 }
 
 static RT_UNUSED void rt_gpu_sync(void) {
     rt_cuda_check(cudaDeviceSynchronize(), "sync");
 }
+
+static RT_UNUSED void rt_gpu_upload_all(void) {
+    rt_cuda_check(cudaSetDevice(0), "setDevice");
+    for (uint32_t i = 0; i < g_rt_txm.count; i++) {
+        rt_txm_tensor* tensor = &g_rt_txm.tensors[i];
+        size_t elem = tensor->dtype == RT_TXM_DTYPE_FLOAT ? sizeof(double) : sizeof(int64_t);
+        size_t bytes = (size_t)tensor->count * elem;
+        void* device = NULL;
+        rt_cuda_check(cudaMalloc(&device, bytes), "alloc");
+        rt_cuda_check(cudaMemcpy(device, tensor->host, bytes, cudaMemcpyHostToDevice), "copyToDevice");
+        tensor->device = device;
+    }
+    g_rt_txm.loaded = 1;
+}
+
+static RT_UNUSED void rt_gpu_mount(rt_string path) {
+    if (g_rt_txm.loaded) rt_runtime_fail("gpu.mount can only be called once");
+    rt_arena arena;
+    rt_arena_init(&arena);
+    trux_tuple_string_error file = rt_read_file(&arena, path);
+    if (file.f1 != NULL) {
+        rt_arena_deinit(&arena);
+        rt_runtime_fail("failed to read model file");
+    }
+    const char* err = rt_txm_parse(file.f0.data, file.f0.len);
+    rt_arena_deinit(&arena);
+    if (err != NULL) rt_runtime_fail(err);
+    rt_gpu_upload_all();
+}
+
+static RT_UNUSED rt_gpu_buffer_float rt_gpu_floats(rt_string name) {
+    if (!g_rt_txm.loaded) rt_runtime_fail("gpu.mount has not been called");
+    rt_txm_tensor* tensor = rt_txm_find(name);
+    if (tensor == NULL || tensor->dtype != RT_TXM_DTYPE_FLOAT || tensor->device == NULL) {
+        rt_runtime_fail("gpu.floats expects a mounted float tensor");
+    }
+    return RT_LIT(rt_gpu_buffer_float, (double*)tensor->device, (size_t)tensor->count);
+}
+
+static RT_UNUSED rt_gpu_buffer_int rt_gpu_ints(rt_string name) {
+    if (!g_rt_txm.loaded) rt_runtime_fail("gpu.mount has not been called");
+    rt_txm_tensor* tensor = rt_txm_find(name);
+    if (tensor == NULL || tensor->dtype != RT_TXM_DTYPE_INT || tensor->device == NULL) {
+        rt_runtime_fail("gpu.ints expects a mounted int tensor");
+    }
+    return RT_LIT(rt_gpu_buffer_int, (int64_t*)tensor->device, (size_t)tensor->count);
+}
+
+static RT_UNUSED void rt_gpu_alloc_workspace_slot(int index) {
+    rt_gpu_ws_decl* decl = &g_rt_gpu_ws_decl[index];
+    size_t elem = decl->is_float ? sizeof(double) : sizeof(int64_t);
+    size_t bytes = (size_t)decl->count * elem;
+    void* device = NULL;
+    void* pinned = NULL;
+    rt_cuda_check(cudaMalloc(&device, bytes), "workspace");
+    rt_cuda_check(cudaHostAlloc(&pinned, bytes, cudaHostAllocPortable), "workspace");
+    memset(pinned, 0, bytes);
+    g_rt_gpu_ws[index].name_len = decl->name_len;
+    memcpy(g_rt_gpu_ws[index].name, decl->name, decl->name_len);
+    g_rt_gpu_ws[index].is_float = decl->is_float;
+    g_rt_gpu_ws[index].count = decl->count;
+    g_rt_gpu_ws[index].device = device;
+    g_rt_gpu_ws[index].pinned = pinned;
+}
+
+static RT_UNUSED void rt_gpu_workspace_declare(rt_string name, int64_t count, int is_float) {
+    if (g_rt_gpu_workers_started) rt_runtime_fail("gpu.workspace must run before http.listen");
+    if (name.len == 0 || name.len > RT_TXM_MAX_NAME) rt_runtime_fail("gpu.workspace name has a bad length");
+    if (count <= 0) rt_runtime_fail("gpu.workspace length must be positive");
+    for (int i = 0; i < g_rt_gpu_ws_decl_count; i++) {
+        if (g_rt_gpu_ws_decl[i].name_len == name.len && memcmp(g_rt_gpu_ws_decl[i].name, name.data, name.len) == 0) {
+            rt_runtime_fail("gpu.workspace name is already declared");
+        }
+    }
+    if (g_rt_gpu_ws_decl_count >= RT_GPU_MAX_WORKSPACES) rt_runtime_fail("too many GPU workspaces");
+    int index = g_rt_gpu_ws_decl_count++;
+    g_rt_gpu_ws_decl[index].name_len = (uint32_t)name.len;
+    memcpy(g_rt_gpu_ws_decl[index].name, name.data, name.len);
+    g_rt_gpu_ws_decl[index].is_float = is_float;
+    g_rt_gpu_ws_decl[index].count = (uint64_t)count;
+    rt_cuda_check(cudaSetDevice(0), "setDevice");
+    rt_gpu_alloc_workspace_slot(index);
+    g_rt_gpu_ws_ready = 1;
+}
+
+static RT_UNUSED void rt_gpu_workspace_float(rt_string name, int64_t count) {
+    rt_gpu_workspace_declare(name, count, 1);
+}
+
+static RT_UNUSED void rt_gpu_workspace_int(rt_string name, int64_t count) {
+    rt_gpu_workspace_declare(name, count, 0);
+}
+
+static RT_UNUSED rt_gpu_ws_slot* rt_gpu_ws_by_name(rt_string name, int is_float) {
+    if (!g_rt_gpu_ws_ready) rt_runtime_fail("gpu.workspace has not been called on this thread");
+    for (int i = 0; i < g_rt_gpu_ws_decl_count; i++) {
+        rt_gpu_ws_slot* slot = &g_rt_gpu_ws[i];
+        if (slot->name_len == name.len && name.len > 0 && memcmp(slot->name, name.data, name.len) == 0) {
+            if (slot->is_float != is_float) rt_runtime_fail("GPU workspace has a different element type");
+            return slot;
+        }
+    }
+    rt_runtime_fail("unknown GPU workspace");
+    return NULL;
+}
+
+static RT_UNUSED rt_gpu_buffer_float rt_gpu_borrow_float(rt_string name) {
+    rt_gpu_ws_slot* slot = rt_gpu_ws_by_name(name, 1);
+    return RT_LIT(rt_gpu_buffer_float, (double*)slot->device, (size_t)slot->count);
+}
+
+static RT_UNUSED rt_gpu_buffer_int rt_gpu_borrow_int(rt_string name) {
+    rt_gpu_ws_slot* slot = rt_gpu_ws_by_name(name, 0);
+    return RT_LIT(rt_gpu_buffer_int, (int64_t*)slot->device, (size_t)slot->count);
+}
+
+static RT_UNUSED rt_slice_float rt_gpu_ready(rt_string name) {
+    rt_gpu_ws_slot* slot = rt_gpu_ws_by_name(name, 1);
+    return RT_LIT(rt_slice_float, (double*)slot->pinned, (size_t)slot->count);
+}
+
+#if defined(__linux__)
+#include <sys/eventfd.h>
+#if defined(__cplusplus)
+extern "C"
+#endif
+void trux_rt_gpu_host_signal(void* user) {
+    int fd = (int)(intptr_t)user;
+    if (fd < 0) return;
+    uint64_t one = 1;
+    ssize_t wrote = write(fd, &one, sizeof(one));
+    (void)wrote;
+}
+#else
+static void trux_rt_gpu_host_signal(void* user) { (void)user; }
+#endif
+
+static RT_UNUSED void rt_gpu_worker_init(void) {
+#if defined(__linux__)
+    rt_cuda_check(cudaSetDevice(0), "setDevice");
+    if (!g_rt_gpu_stream_ready) {
+        rt_cuda_check(cudaStreamCreateWithFlags(&g_rt_gpu_stream, cudaStreamNonBlocking), "stream");
+        g_rt_gpu_stream_ready = 1;
+    }
+    if (!g_rt_gpu_fd_ready) {
+        g_rt_gpu_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+        if (g_rt_gpu_fd < 0) rt_runtime_fail("eventfd failed");
+        g_rt_gpu_fd_ready = 1;
+    }
+    for (int i = 0; i < g_rt_gpu_ws_decl_count; i++) {
+        if (g_rt_gpu_ws[i].device == NULL) rt_gpu_alloc_workspace_slot(i);
+    }
+    g_rt_gpu_ws_ready = g_rt_gpu_ws_decl_count > 0;
+#else
+    rt_runtime_fail("the HTTP GPU worker requires Linux");
+#endif
+}
+
+static RT_UNUSED int rt_gpu_event_fd(void) { return g_rt_gpu_fd_ready ? g_rt_gpu_fd : -1; }
+
+static RT_UNUSED int rt_gpu_busy(void) { return g_rt_gpu_job_busy; }
+
+static RT_UNUSED void rt_gpu_clear_busy(void) { g_rt_gpu_job_busy = 0; }
+
+static RT_UNUSED void rt_gpu_drain_eventfd(void) {
+#if defined(__linux__)
+    if (!g_rt_gpu_fd_ready) return;
+    uint64_t value = 0;
+    while (read(g_rt_gpu_fd, &value, sizeof(value)) > 0) {
+    }
+#else
+    return;
+#endif
+}
+
+static RT_UNUSED void rt_gpu_submit_signal(void) {
+    if (!g_rt_gpu_stream_ready || rt_gpu_event_fd() < 0) rt_runtime_fail("gpu.finish requires an HTTP worker");
+    if (g_rt_gpu_job_busy) rt_runtime_fail("a GPU request is already in flight on this worker");
+    for (int i = 0; i < g_rt_gpu_ws_decl_count; i++) {
+        rt_gpu_ws_slot* slot = &g_rt_gpu_ws[i];
+        if (slot->device == NULL || slot->pinned == NULL) continue;
+        size_t elem = slot->is_float ? sizeof(double) : sizeof(int64_t);
+        size_t bytes = (size_t)slot->count * elem;
+        rt_cuda_check(cudaMemcpyAsync(slot->pinned, slot->device, bytes, cudaMemcpyDeviceToHost, g_rt_gpu_stream), "ready");
+    }
+    int fd = rt_gpu_event_fd();
+    if (fd < 0) rt_runtime_fail("gpu.finish requires an HTTP worker");
+    rt_cuda_check(cudaLaunchHostFunc(g_rt_gpu_stream, trux_rt_gpu_host_signal, (void*)(intptr_t)fd), "finish");
+    g_rt_gpu_job_busy = 1;
+}
+
+static RT_UNUSED int rt_gpu_query_job(void) {
+    if (!g_rt_gpu_stream_ready) return 0;
+    cudaError_t err = cudaStreamQuery(g_rt_gpu_stream);
+    if (err == cudaErrorNotReady) return 0;
+    if (err != cudaSuccess) {
+        cudaGetLastError();
+        return 1;
+    }
+    return 2;
+}
+
+static RT_UNUSED void rt_gpu_reset_stream(void) {
+    if (g_rt_gpu_stream_ready) {
+        cudaStreamDestroy(g_rt_gpu_stream);
+        cudaGetLastError();
+        rt_cuda_check(cudaStreamCreateWithFlags(&g_rt_gpu_stream, cudaStreamNonBlocking), "stream");
+    }
+    g_rt_gpu_job_busy = 0;
+}
+#else
+static RT_UNUSED void rt_gpu_worker_init(void) {}
+static RT_UNUSED int rt_gpu_event_fd(void) { return -1; }
+static RT_UNUSED int rt_gpu_busy(void) { return 0; }
+static RT_UNUSED void rt_gpu_clear_busy(void) {}
+static RT_UNUSED void rt_gpu_drain_eventfd(void) {}
+static RT_UNUSED void rt_gpu_submit_signal(void) { rt_runtime_fail("gpu.finish requires a CUDA build"); }
+static RT_UNUSED int rt_gpu_query_job(void) { return 0; }
+static RT_UNUSED void rt_gpu_reset_stream(void) {}
 #endif
 
 typedef struct {
@@ -1980,145 +2456,51 @@ static int rt_compare_strings(const void* a, const void* b) {
 
 static RT_UNUSED rt_error rt_create_dir(rt_arena* arena, rt_string path) {
     char* c_path = rt_string_to_c_string(path, "dir path");
-#if defined(_WIN32)
-    BOOL ok = CreateDirectoryA(c_path, NULL);
-    free(c_path);
-    if (!ok) {
-        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to create directory", 26));
-    }
-    return NULL;
-#else
     int res = mkdir(c_path, 0777);
     free(c_path);
     if (res != 0) {
         return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to create directory", 26));
     }
     return NULL;
-#endif
 }
 
 static RT_UNUSED rt_error rt_remove(rt_arena* arena, rt_string path) {
     char* c_path = rt_string_to_c_string(path, "path");
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(c_path);
-    if (attr == INVALID_FILE_ATTRIBUTES) {
-        free(c_path);
-        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to remove: path does not exist", 37));
-    }
-    BOOL ok = false;
-    if (attr & FILE_ATTRIBUTE_DIRECTORY) {
-        ok = RemoveDirectoryA(c_path);
-    } else {
-        ok = DeleteFileA(c_path);
-    }
-    free(c_path);
-    if (!ok) {
-        return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to remove", 16));
-    }
-    return NULL;
-#else
     int res = remove(c_path);
     free(c_path);
     if (res != 0) {
         return rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to remove", 16));
     }
     return NULL;
-#endif
 }
 
 static RT_UNUSED bool rt_exists(rt_string path) {
     char* c_path = rt_string_to_c_string(path, "path");
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(c_path);
-    free(c_path);
-    return attr != INVALID_FILE_ATTRIBUTES;
-#else
     struct stat st;
     int res = stat(c_path, &st);
     free(c_path);
     return res == 0;
-#endif
 }
 
 static RT_UNUSED bool rt_is_file(rt_string path) {
     char* c_path = rt_string_to_c_string(path, "path");
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(c_path);
-    free(c_path);
-    if (attr == INVALID_FILE_ATTRIBUTES) {
-        return false;
-    }
-    return !(attr & FILE_ATTRIBUTE_DIRECTORY);
-#else
     struct stat st;
     int res = stat(c_path, &st);
     free(c_path);
     return res == 0 && S_ISREG(st.st_mode);
-#endif
 }
 
 static RT_UNUSED bool rt_is_dir(rt_string path) {
     char* c_path = rt_string_to_c_string(path, "path");
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(c_path);
-    free(c_path);
-    if (attr == INVALID_FILE_ATTRIBUTES) {
-        return false;
-    }
-    return (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
-#else
     struct stat st;
     int res = stat(c_path, &st);
     free(c_path);
     return res == 0 && S_ISDIR(st.st_mode);
-#endif
 }
 
 static RT_UNUSED trux_tuple_list_string_error rt_read_dir(rt_arena* arena, rt_string path) {
     rt_list_string* entries = rt_list_string_new(arena, 0);
     char* c_path = rt_string_to_c_string(path, "dir path");
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(c_path);
-    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        free(c_path);
-        return RT_LIT(trux_tuple_list_string_error, entries, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to open directory", 25)));
-    }
-    size_t path_len = strlen(c_path);
-    char* search_pattern = (char*)malloc(path_len + 3);
-    if (search_pattern == NULL) {
-        free(c_path);
-        return RT_LIT(trux_tuple_list_string_error, entries, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"out of memory", 13)));
-    }
-    memcpy(search_pattern, c_path, path_len);
-    if (path_len > 0 && (search_pattern[path_len - 1] == '/' || search_pattern[path_len - 1] == '\\')) {
-        search_pattern[path_len] = '*';
-        search_pattern[path_len + 1] = '\0';
-    } else {
-        search_pattern[path_len] = '\\';
-        search_pattern[path_len + 1] = '*';
-        search_pattern[path_len + 2] = '\0';
-    }
-    WIN32_FIND_DATAA find_data;
-    HANDLE hFind = FindFirstFileA(search_pattern, &find_data);
-    free(search_pattern);
-    if (hFind == INVALID_HANDLE_VALUE) {
-        free(c_path);
-        return RT_LIT(trux_tuple_list_string_error, entries, rt_error_new(arena, RT_LIT(rt_string, (const uint8_t*)"failed to read directory", 24)));
-    }
-    do {
-        if (strcmp(find_data.cFileName, ".") == 0 || strcmp(find_data.cFileName, "..") == 0) {
-            continue;
-        }
-        rt_string name = rt_string_from_c(arena, find_data.cFileName);
-        rt_list_string_append(entries, name);
-    } while (FindNextFileA(hFind, &find_data) != 0);
-    FindClose(hFind);
-    free(c_path);
-    if (entries->len > 1) {
-        qsort(entries->data, entries->len, sizeof(rt_string), rt_compare_strings);
-    }
-    return RT_LIT(trux_tuple_list_string_error, entries, NULL);
-#else
     DIR* dir = opendir(c_path);
     if (dir == NULL) {
         free(c_path);
@@ -2138,7 +2520,6 @@ static RT_UNUSED trux_tuple_list_string_error rt_read_dir(rt_arena* arena, rt_st
         qsort(entries->data, entries->len, sizeof(rt_string), rt_compare_strings);
     }
     return RT_LIT(trux_tuple_list_string_error, entries, NULL);
-#endif
 }
 
 #if defined(__CUDA_ARCH__)
@@ -2235,19 +2616,6 @@ static RT_UNUSED void rt_env_add_entry(rt_arena* arena, const char* entry, size_
 }
 
 static RT_UNUSED void rt_env_load_process(rt_arena* arena) {
-#if defined(_WIN32)
-    char* block = GetEnvironmentStringsA();
-    if (block == NULL) {
-        rt_env_fail("cannot read environment");
-    }
-    char* cursor = block;
-    while (*cursor != '\0') {
-        size_t len = strlen(cursor);
-        rt_env_add_entry(arena, cursor, len);
-        cursor += len + 1;
-    }
-    FreeEnvironmentStringsA(block);
-#else
     extern char** environ;
     if (environ == NULL) {
         return;
@@ -2255,7 +2623,6 @@ static RT_UNUSED void rt_env_load_process(rt_arena* arena) {
     for (char** cursor = environ; *cursor != NULL; cursor++) {
         rt_env_add_entry(arena, *cursor, strlen(*cursor));
     }
-#endif
 }
 
 static RT_UNUSED bool rt_env_space(unsigned char c) {
@@ -2326,19 +2693,6 @@ static RT_UNUSED void rt_env_parse(rt_arena* arena, const uint8_t* data, size_t 
 
 static RT_UNUSED void rt_env_load_file(rt_arena* arena) {
     const char* path = ".env";
-#if defined(_WIN32)
-    DWORD attr = GetFileAttributesA(path);
-    if (attr == INVALID_FILE_ATTRIBUTES) {
-        DWORD err = GetLastError();
-        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) {
-            return;
-        }
-        rt_env_fail(".env: cannot open");
-    }
-    if ((attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-        rt_env_fail(".env: not a regular file");
-    }
-#else
     struct stat st;
     if (stat(path, &st) != 0) {
         if (errno == ENOENT) {
@@ -2349,7 +2703,6 @@ static RT_UNUSED void rt_env_load_file(rt_arena* arena) {
     if (!S_ISREG(st.st_mode)) {
         rt_env_fail(".env: not a regular file");
     }
-#endif
     FILE* file = fopen(path, "rb");
     if (file == NULL) {
         rt_env_fail(".env: cannot open");

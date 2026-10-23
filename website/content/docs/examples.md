@@ -484,7 +484,7 @@ See [Testing](/docs/guide/testing/).
 ## HTTP server
 
 `examples/projects/http_server/main.tx` serves `GET /`, `GET /health`, and `POST /echo` on `127.0.0.1:8080`
-(Linux and macOS). It runs until you stop it. See the [`http` package](/docs/stdlib/http/) for the full listing.
+(Linux and macOS). It speaks plaintext HTTP and runs until you stop it. The `http` package does not support HTTPS; put a reverse proxy in front for TLS. See the [`http` package](/docs/stdlib/http/#https).
 
 ```bash
 trux run examples/projects/http_server/main.tx

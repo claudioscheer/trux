@@ -16,7 +16,7 @@ they predate this site, so some of them use a terser style than the guide.
 | [Modules design](/docs/design-notes/modules/) | how imports and packages are loaded and merged, and the plan toward separate compilation |
 | [GPU design](/docs/design-notes/gpu/) | the CUDA model: device buffers, kernels, and launches |
 | [IO packages](/docs/design-notes/io/) | why IO lives in the `io` and `csv` packages and how they are lowered |
-| [HTTP package](/docs/design-notes/http/) | the HTTP server's runtime model and limits |
+| [HTTP package](/docs/design-notes/http/) | the HTTP server's runtime model, limits, and HTTPS through a reverse proxy |
 | [Image package](/docs/design-notes/image/) | the PPM-based image package |
 | [Time package](/docs/design-notes/time/) | clocks and sleeping |
 | [Naming](/docs/design-notes/naming/) | lower camelCase for source names, and how internal names differ |

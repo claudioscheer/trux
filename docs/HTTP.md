@@ -87,11 +87,29 @@ The generated C includes `trux_http_runtime.h` when HTTP calls are used. On Linu
 4. **Multishot Operations**: Single SQEs handle continuous `accept` and `recv` operations across connections.
 5. **Memory Isolation**: Each request receives its own arena and `rt_context`, isolating allocations between requests and worker threads.
 
+## HTTPS
+
+The server speaks plaintext HTTP/1.1. It does not terminate TLS, and it has no certificate or private-key API.
+
+For now, HTTPS works only through a reverse proxy. The proxy accepts HTTPS from clients and forwards plaintext HTTP to the Trux process. Caddy and Nginx both do this. A Caddy site block for a server on port 8080:
+
+```
+example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+`http.listen` binds `0.0.0.0`, so the plaintext port is reachable on every interface. To accept plaintext only from a proxy on the same machine, bind the loopback address with `http.serve`. A worker count of `0` uses one worker per core, the same choice `http.listen` makes:
+
+```trux
+http.serve("127.0.0.1", 8080, 0)
+```
+
 ## Limits
 
 - Linux server environment required for `io_uring` networking. Windows/macOS stubs fail gracefully at runtime.
 - In Docker containers, require `--security-opt seccomp=unconfined --ulimit memlock=-1:-1` for kernel buffer ring allocation.
-- Plain HTTP only. TLS should sit in front of the process (e.g. reverse proxy).
+- No HTTPS in the server. Terminate TLS at a reverse proxy and forward plaintext HTTP to this process. See [HTTPS](#https).
 - `port` must be between `1` and `65535`.
 - Request bodies use `Content-Length` and are capped at 1 MiB. Chunked request bodies are rejected.
 - If a handler returns without calling a respond helper, the runtime sends `500 text/plain`.

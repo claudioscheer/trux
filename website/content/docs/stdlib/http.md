@@ -1,6 +1,6 @@
 ---
 title: "http"
-description: "A declarative, high-performance HTTP server powered by Linux io_uring."
+description: "A plaintext HTTP/1.1 server on Linux io_uring. HTTPS goes through a reverse proxy."
 icon: "dns"
 weight: 400
 ---
@@ -9,11 +9,11 @@ weight: 400
 import "http"
 ```
 
-**What it is.** A native HTTP/1.1 server built directly on Linux **`io_uring`**. It provides declarative routing, path parameter extraction, middleware chains, request context, custom response headers, and zero-allocation networking.
+**What it is.** A native plaintext HTTP/1.1 server built directly on Linux **`io_uring`**. It provides declarative routing, path parameter extraction, middleware chains, request context, custom response headers, and zero-allocation networking.
 
 **Why.** Web services written in Trux achieve exceptional throughput and sub-millisecond latencies through an asynchronous, shared-nothing thread-per-core runtime. See [Benchmarks](/docs/benchmarks/) for detailed performance metrics.
 
-**When you don't need it.** For TLS/HTTPS, place a reverse proxy (such as Caddy or Nginx) in front. There is no HTTP client.
+**When you don't need it.** This package does not speak HTTPS. See [HTTPS](#https). There is no HTTP client.
 
 ## A complete server
 
@@ -31,6 +31,24 @@ hello
 ```
 
 The server blocks forever; stop it with ++ctrl+c++.
+
+## HTTPS
+
+The `http` server speaks plaintext HTTP/1.1. It does not terminate TLS, and it has no certificate or private-key settings.
+
+For now, HTTPS works only through a reverse proxy. The proxy accepts HTTPS from clients and forwards plaintext HTTP to the Trux process. Caddy and Nginx both do this. A Caddy site block for a server on port 8080:
+
+```
+example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+`http.listen` binds `0.0.0.0`, so the plaintext port is reachable on every interface. To accept plaintext only from a proxy on the same machine, bind the loopback address with `http.serve`. A worker count of `0` uses one worker per core, the same choice `http.listen` makes:
+
+```trux
+http.serve("127.0.0.1", 8080, 0)
+```
 
 ## Routing & Server Lifecycle
 
@@ -121,7 +139,7 @@ func handle(request int) int
 
 - Linux server environment required for `io_uring` networking. Windows/macOS stubs fail gracefully at runtime.
 - In Docker containers, specify `--security-opt seccomp=unconfined --ulimit memlock=-1:-1` so the kernel can allocate buffer rings.
-- Plain HTTP only; place a TLS reverse proxy in front for HTTPS.
+- No HTTPS in the server. Terminate TLS at a reverse proxy and forward plaintext HTTP to this process. See [HTTPS](#https).
 - Request bodies are read using `Content-Length` and are capped at 1 MiB. Chunked request bodies are rejected.
 - A program cannot use `http` together with GPU kernels yet:
 

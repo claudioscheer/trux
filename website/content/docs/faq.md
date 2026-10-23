@@ -36,6 +36,7 @@ Not implemented today, so don't expect these to work:
 - removing elements from a list
 - command-line arguments for programs (`main` takes no parameters)
 - threads or async code outside the HTTP server's worker pool
+- HTTPS on the `http` server. Terminate TLS at a reverse proxy and forward plaintext HTTP. See [`http`](/docs/stdlib/http/#https).
 - recursive directory packages and separate compilation
 
 ## Common errors

@@ -22,7 +22,7 @@ import "csv"
 | [`sqlite`](/docs/stdlib/sqlite/) | embedded relational database with transactions and prepared statements |
 | [`json`](/docs/stdlib/json/) | high-performance JSON parsing, inspection, and generation |
 | [`jwt`](/docs/stdlib/jwt/) | HS256 signing and verification for API authentication |
-| [`http`](/docs/stdlib/http/) | a plaintext HTTP/1.1 server with a worker pool (Linux/macOS) |
+| [`http`](/docs/stdlib/http/) | a plaintext HTTP/1.1 server with a worker pool (Linux/macOS). No HTTPS; put a TLS reverse proxy in front |
 | [`gpu`](/docs/stdlib/gpu/) | CUDA device buffers, kernel launches, and thread coordinates |
 | [`errors`](/docs/guide/errors/) | creating errors with `errors.new` and retrieving messages with `errors.message` |
 

@@ -131,20 +131,43 @@ static RT_UNUSED void rt_arithmetic_fail(const char* operation, const char* file
 }
 
 static RT_UNUSED int64_t rt_add_i64_at(int64_t left, int64_t right, const char* file, int line) {
+#if defined(__GNUC__) || defined(__clang__)
+    int64_t res;
+    if (__builtin_expect(__builtin_add_overflow(left, right, &res), 0)) {
+        rt_arithmetic_fail("overflow in +", file, line);
+    }
+    return res;
+#else
     if ((right > 0 && left > INT64_MAX - right) || (right < 0 && left < INT64_MIN - right)) {
         rt_arithmetic_fail("overflow in +", file, line);
     }
     return left + right;
+#endif
 }
 
 static RT_UNUSED int64_t rt_sub_i64_at(int64_t left, int64_t right, const char* file, int line) {
+#if defined(__GNUC__) || defined(__clang__)
+    int64_t res;
+    if (__builtin_expect(__builtin_sub_overflow(left, right, &res), 0)) {
+        rt_arithmetic_fail("overflow in -", file, line);
+    }
+    return res;
+#else
     if ((right < 0 && left > INT64_MAX + right) || (right > 0 && left < INT64_MIN + right)) {
         rt_arithmetic_fail("overflow in -", file, line);
     }
     return left - right;
+#endif
 }
 
 static RT_UNUSED int64_t rt_mul_i64_at(int64_t left, int64_t right, const char* file, int line) {
+#if defined(__GNUC__) || defined(__clang__)
+    int64_t res;
+    if (__builtin_expect(__builtin_mul_overflow(left, right, &res), 0)) {
+        rt_arithmetic_fail("overflow in *", file, line);
+    }
+    return res;
+#else
     if (left != 0 && right != 0) {
         if (left == INT64_MIN && right == -1) {
             rt_arithmetic_fail("overflow in *", file, line);
@@ -163,23 +186,24 @@ static RT_UNUSED int64_t rt_mul_i64_at(int64_t left, int64_t right, const char* 
         }
     }
     return left * right;
+#endif
 }
 
 static RT_UNUSED int64_t rt_div_i64_at(int64_t left, int64_t right, const char* file, int line) {
-    if (right == 0) {
+    if (__builtin_expect(right == 0, 0)) {
         rt_arithmetic_fail("division by zero", file, line);
     }
-    if (left == INT64_MIN && right == -1) {
+    if (__builtin_expect(left == INT64_MIN && right == -1, 0)) {
         rt_arithmetic_fail("overflow in /", file, line);
     }
     return left / right;
 }
 
 static RT_UNUSED int64_t rt_rem_i64_at(int64_t left, int64_t right, const char* file, int line) {
-    if (right == 0) {
+    if (__builtin_expect(right == 0, 0)) {
         rt_arithmetic_fail("remainder by zero", file, line);
     }
-    if (left == INT64_MIN && right == -1) {
+    if (__builtin_expect(left == INT64_MIN && right == -1, 0)) {
         rt_arithmetic_fail("overflow in %", file, line);
     }
     return left % right;
@@ -187,35 +211,28 @@ static RT_UNUSED int64_t rt_rem_i64_at(int64_t left, int64_t right, const char* 
 
 #ifdef TRUX_RUNTIME_CUDA
 __device__ static int64_t rt_add_i64_device(int64_t left, int64_t right) {
-    if ((right > 0 && left > INT64_MAX - right) || (right < 0 && left < INT64_MIN - right)) {
+    int64_t res = (int64_t)((uint64_t)left + (uint64_t)right);
+    if (((left ^ ~right) & (left ^ res)) < 0) {
         asm("trap;");
     }
-    return left + right;
+    return res;
 }
 
 __device__ static int64_t rt_sub_i64_device(int64_t left, int64_t right) {
-    if ((right < 0 && left > INT64_MAX + right) || (right > 0 && left < INT64_MIN + right)) {
+    int64_t res = (int64_t)((uint64_t)left - (uint64_t)right);
+    if (((left ^ right) & (left ^ res)) < 0) {
         asm("trap;");
     }
-    return left - right;
+    return res;
 }
 
 __device__ static int64_t rt_mul_i64_device(int64_t left, int64_t right) {
-    if (left != 0 && right != 0) {
-        if ((left == INT64_MIN && right == -1) || (right == INT64_MIN && left == -1)) {
-            asm("trap;");
-        }
-        if (left > 0) {
-            if ((right > 0 && left > INT64_MAX / right) || (right < 0 && right < INT64_MIN / left)) {
-                asm("trap;");
-            }
-        } else {
-            if ((right > 0 && left < INT64_MIN / right) || (right < 0 && left < INT64_MAX / right)) {
-                asm("trap;");
-            }
-        }
+    int64_t res = (int64_t)((uint64_t)left * (uint64_t)right);
+    int64_t hi = __mul64hi(left, right);
+    if (hi != (res >> 63)) {
+        asm("trap;");
     }
-    return left * right;
+    return res;
 }
 
 __device__ static int64_t rt_div_i64_device(int64_t left, int64_t right) {

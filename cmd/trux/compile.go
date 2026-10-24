@@ -257,6 +257,20 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 			// The host compiler accepts it through -Xcompiler.
 			args = append(args, "-D_GNU_SOURCE", "-Xcompiler", "-pthread", "-luring")
 		}
+		if opts.UsesSQLite {
+			host := os.Getenv("CC")
+			if host == "" {
+				host = "cc"
+			}
+			sqliteObj, err := ensureSQLiteObjectCached(host)
+			if err != nil {
+				return err
+			}
+			args = append(args, sqliteObj)
+			if !opts.UsesHTTP {
+				args = append(args, "-Xcompiler", "-pthread")
+			}
+		}
 		if opts.UsesJSON || opts.UsesJWT {
 			host := os.Getenv("CC")
 			if host == "" {

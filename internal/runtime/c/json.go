@@ -269,24 +269,16 @@ static RT_UNUSED bool rt_json_valid(rt_arena* arena, rt_string input) {
     return false;
 }
 
-static void rt_json_mut_doc_free(void* ptr) {
-    yyjson_mut_doc_free((yyjson_mut_doc*)ptr);
-}
-
 static RT_UNUSED trux_json_mut_doc* rt_json_new_doc(rt_arena* arena) {
-    /* The document owns its bytes on the heap. A string added from a called
-       function, or inside a loop that rewinds this frame, stays intact until
-       the arena that created the document is released. */
-    yyjson_mut_doc* doc = yyjson_mut_doc_new(NULL);
+    /* Allocate the mutable document and its value/string pools in the durable
+       context arena so inner function frames or loop rewinds cannot overwrite
+       values added to the document before the context arena is released. */
+    rt_arena* doc_arena = (arena != NULL && arena->owner != NULL && arena->owner->arena != NULL) ? arena->owner->arena : arena;
+    yyjson_alc alc = { rt_yyjson_malloc, rt_yyjson_realloc, rt_yyjson_free, doc_arena };
+    yyjson_mut_doc* doc = yyjson_mut_doc_new(&alc);
     if (doc == NULL) {
         rt_runtime_fail("allocation failed");
     }
-    rt_list_allocation* node = (rt_list_allocation*)malloc(sizeof(*node));
-    if (node == NULL) {
-        yyjson_mut_doc_free(doc);
-        rt_runtime_fail("allocation failed");
-    }
-    rt_arena_track_list(arena, node, doc, rt_json_mut_doc_free);
     return (trux_json_mut_doc*)doc;
 }
 

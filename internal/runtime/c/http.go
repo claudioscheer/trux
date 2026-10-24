@@ -78,6 +78,7 @@ typedef struct {
     rt_string method;
     rt_string path;
     rt_http_handler_fn handler;
+    bool uses_gpu;
 } rt_http_route_entry;
 
 typedef struct {
@@ -347,7 +348,14 @@ static RT_UNUSED void rt_http_register_route(rt_string method, rt_string path, r
     if (g_trux_http_router.route_count >= RT_HTTP_MAX_ROUTES) {
         rt_runtime_fail("exceeded maximum number of http routes");
     }
-    g_trux_http_router.routes[g_trux_http_router.route_count++] = RT_LIT(rt_http_route_entry, method, path, handler);
+    g_trux_http_router.routes[g_trux_http_router.route_count++] = RT_LIT(rt_http_route_entry, method, path, handler, false);
+}
+
+static RT_UNUSED void rt_http_register_route_gpu(rt_string method, rt_string path, rt_http_handler_fn handler) {
+    if (g_trux_http_router.route_count >= RT_HTTP_MAX_ROUTES) {
+        rt_runtime_fail("exceeded maximum number of http routes");
+    }
+    g_trux_http_router.routes[g_trux_http_router.route_count++] = RT_LIT(rt_http_route_entry, method, path, handler, true);
 }
 
 static RT_UNUSED void rt_http_register_middleware(rt_string prefix, rt_http_handler_fn handler) {
@@ -362,41 +370,47 @@ static RT_UNUSED void rt_http_register_not_found(rt_http_handler_fn handler) {
 }
 
 static RT_UNUSED rt_string rt_http_method(rt_arena* arena, int64_t handle) {
+    (void)arena;
     rt_http_request* req = rt_http_request_from_handle(handle);
-    return rt_http_clone_string(arena, req->method, req->method_len);
+    return RT_LIT(rt_string, req->method, req->method_len);
 }
 
 static RT_UNUSED rt_string rt_http_path(rt_arena* arena, int64_t handle) {
+    (void)arena;
     rt_http_request* req = rt_http_request_from_handle(handle);
-    return rt_http_clone_string(arena, req->path, req->path_len);
+    return RT_LIT(rt_string, req->path, req->path_len);
 }
 
 static RT_UNUSED rt_string rt_http_query(rt_arena* arena, int64_t handle) {
+    (void)arena;
     rt_http_request* req = rt_http_request_from_handle(handle);
-    return rt_http_clone_string(arena, req->query, req->query_len);
+    return RT_LIT(rt_string, req->query, req->query_len);
 }
 
 static RT_UNUSED rt_string rt_http_body(rt_arena* arena, int64_t handle) {
+    (void)arena;
     rt_http_request* req = rt_http_request_from_handle(handle);
-    return rt_http_clone_string(arena, req->body, req->body_len);
+    return RT_LIT(rt_string, req->body, req->body_len);
 }
 
 static RT_UNUSED rt_string rt_http_header(rt_arena* arena, int64_t handle, rt_string name) {
+    (void)arena;
     rt_http_request* req = rt_http_request_from_handle(handle);
     for (size_t i = 0; i < req->header_count; i++) {
         rt_http_header_pair header = req->headers[i];
         if (rt_http_string_equal_ci(name, header.name, header.name_len)) {
-            return rt_http_clone_string(arena, header.value, header.value_len);
+            return RT_LIT(rt_string, header.value, header.value_len);
         }
     }
     return RT_LIT(rt_string, NULL, 0);
 }
 
 static RT_UNUSED rt_string rt_http_param(rt_arena* arena, int64_t handle, rt_string name) {
+    (void)arena;
     rt_http_request* req = rt_http_request_from_handle(handle);
     for (size_t i = 0; i < req->param_count; i++) {
         if (req->params[i].key.len == name.len && memcmp(req->params[i].key.data, name.data, name.len) == 0) {
-            return rt_http_clone_string(arena, req->params[i].val.data, req->params[i].val.len);
+            return RT_LIT(rt_string, req->params[i].val.data, req->params[i].val.len);
         }
     }
     return RT_LIT(rt_string, NULL, 0);
@@ -801,15 +815,12 @@ static RT_UNUSED void rt_http_dispatch(rt_http_request* req) {
 typedef struct {
     char host[128];
     int port;
+    int worker_index;
 } rt_http_thread_args;
 
 static RT_UNUSED void rt_http_drain_conn(rt_http_conn* conns, rt_http_conn* c, int client_fd, struct io_uring* ring, bool* need_submit) {
     if (c == NULL || !c->in_use) return;
     for (;;) {
-        if (g_rt_http_parked != NULL) {
-            rt_http_enqueue_ready(conns, client_fd);
-            return;
-        }
         ssize_t hdr_end = rt_http_find_header_end(c->buffer, c->len, c->header_scan_start);
         if (hdr_end < 0) {
             if (c->len > 3) c->header_scan_start = c->len - 3;
@@ -843,6 +854,22 @@ static RT_UNUSED void rt_http_drain_conn(rt_http_conn* conns, rt_http_conn* c, i
         }
 
         if (c->len < (size_t)hdr_end + content_length) return;
+
+        if (g_rt_http_parked != NULL) {
+            bool matches_gpu = false;
+            for (size_t i = 0; i < g_trux_http_router.route_count; i++) {
+                rt_http_route_entry* r = &g_trux_http_router.routes[i];
+                if (r->uses_gpu && rt_http_token_equal_ci(r->method.data, r->method.len, req.method, req.method_len) &&
+                    rt_http_match_route(r->path, req.path, req.path_len, req.params, &req.param_count, RT_HTTP_MAX_PARAMS)) {
+                    matches_gpu = true;
+                    break;
+                }
+            }
+            if (matches_gpu) {
+                rt_http_enqueue_ready(conns, client_fd);
+                return;
+            }
+        }
 
         req.body = c->buffer + hdr_end;
         req.body_len = content_length;
@@ -904,6 +931,7 @@ static RT_UNUSED void rt_http_gpu_release(struct io_uring* ring, rt_http_conn* c
     }
     g_rt_http_parked = NULL;
     g_rt_http_gpu_gen++;
+    g_rt_http_gpu_timer_armed = false;
     rt_gpu_clear_busy();
     rt_http_request* req = park->req;
     int fd = req->fd;
@@ -953,6 +981,16 @@ static RT_UNUSED void rt_http_gpu_release(struct io_uring* ring, rt_http_conn* c
 
 static RT_UNUSED void* rt_http_worker_thread(void* arg) {
     rt_http_thread_args* targs = (rt_http_thread_args*)arg;
+    int worker_idx = targs->worker_index;
+#if defined(__linux__)
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    long nproc = sysconf(_SC_NPROCESSORS_ONLN);
+    if (nproc > 0) {
+        CPU_SET((size_t)(worker_idx % nproc), &cpuset);
+        (void)pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+    }
+#endif
 
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd < 0) rt_runtime_fail("worker socket creation failed");
@@ -978,8 +1016,22 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
     }
 
     struct io_uring ring;
-    int ret = io_uring_queue_init(RT_URING_ENTRIES, &ring, 0);
-    if (ret < 0) rt_runtime_fail("io_uring_queue_init failed");
+    struct io_uring_params params;
+    memset(&params, 0, sizeof(params));
+#ifdef IORING_SETUP_COOP_TASKRUN
+    params.flags |= IORING_SETUP_COOP_TASKRUN;
+#endif
+#ifdef IORING_SETUP_SINGLE_ISSUER
+    params.flags |= IORING_SETUP_SINGLE_ISSUER;
+#endif
+#ifdef IORING_SETUP_DEFER_TASKRUN
+    params.flags |= IORING_SETUP_DEFER_TASKRUN;
+#endif
+    int ret = io_uring_queue_init_params(RT_URING_ENTRIES, &ring, &params);
+    if (ret < 0) {
+        ret = io_uring_queue_init(RT_URING_ENTRIES, &ring, 0);
+        if (ret < 0) rt_runtime_fail("io_uring_queue_init failed");
+    }
 
     uint8_t* buf_storage = NULL;
     if (posix_memalign((void**)&buf_storage, 4096, RT_BUF_RING_SIZE * RT_BUF_SIZE) != 0) {
@@ -1011,6 +1063,20 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
     }
 
     for (;;) {
+        if (g_rt_http_parked != NULL) {
+            int query = rt_gpu_query_job();
+            if (query == 2) {
+                bool need_sub = false;
+                rt_http_gpu_release(&ring, conns, &need_sub, 0);
+                if (need_sub) io_uring_submit(&ring);
+            } else if (query == 1) {
+                rt_gpu_reset_stream();
+                bool need_sub = false;
+                rt_http_gpu_release(&ring, conns, &need_sub, 1);
+                if (need_sub) io_uring_submit(&ring);
+            }
+        }
+
         struct io_uring_cqe* cqe;
         ret = io_uring_wait_cqe(&ring, &cqe);
         if (ret < 0) {
@@ -1040,6 +1106,7 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
                 }
             } else if ((udata & 0xFFFFFFFF00000000ULL) == RT_HTTP_UDATA_GPU_TIMEOUT) {
                 io_uring_cq_advance(&ring, 1);
+                g_rt_http_gpu_timer_armed = false;
                 uint32_t gen = (uint32_t)udata;
                 if (g_rt_http_parked != NULL && gen == g_rt_http_gpu_gen) {
                     int query = rt_gpu_query_job();
@@ -1109,7 +1176,20 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
                     rt_http_conn* c = &conns[client_fd];
                     if (res <= 0) {
                         io_uring_cq_advance(&ring, 1);
-                        if (c->in_use) {
+                        if (res == -ENOBUFS && c->in_use) {
+                            struct io_uring_sqe* rsqe = io_uring_get_sqe(&ring);
+                            if (!rsqe) {
+                                io_uring_submit(&ring);
+                                rsqe = io_uring_get_sqe(&ring);
+                            }
+                            if (rsqe) {
+                                io_uring_prep_recv_multishot(rsqe, client_fd, NULL, 0, 0);
+                                rsqe->flags |= IOSQE_BUFFER_SELECT;
+                                rsqe->buf_group = RT_BUF_GROUP_ID;
+                                rsqe->user_data = (uint64_t)client_fd;
+                                need_submit = true;
+                            }
+                        } else if (c->in_use) {
                             close(client_fd);
                             c->in_use = false;
                             c->len = 0;
@@ -1205,10 +1285,14 @@ static RT_UNUSED void rt_http_serve(rt_string host, int64_t port, int64_t worker
 
     pthread_t* threads = (pthread_t*)malloc((size_t)workers * sizeof(pthread_t));
     if (!threads) rt_runtime_fail("allocation failed for worker threads");
+    rt_http_thread_args* thread_args = (rt_http_thread_args*)malloc((size_t)workers * sizeof(rt_http_thread_args));
+    if (!thread_args) rt_runtime_fail("allocation failed for worker thread args");
 
     rt_gpu_publish_workers();
     for (int64_t i = 0; i < workers; i++) {
-        if (pthread_create(&threads[i], NULL, rt_http_worker_thread, &args) != 0) {
+        thread_args[i] = args;
+        thread_args[i].worker_index = (int)i;
+        if (pthread_create(&threads[i], NULL, rt_http_worker_thread, &thread_args[i]) != 0) {
             rt_runtime_fail("failed to spawn worker thread");
         }
     }
@@ -1216,6 +1300,7 @@ static RT_UNUSED void rt_http_serve(rt_string host, int64_t port, int64_t worker
     for (int64_t i = 0; i < workers; i++) {
         (void)pthread_join(threads[i], NULL);
     }
+    free(thread_args);
     free(threads);
 }
 
@@ -1228,6 +1313,7 @@ static RT_UNUSED void rt_http_listen(int64_t port) {
 typedef int64_t (*rt_http_handler_fn)(rt_context* trux_ctx, rt_arena* trux_result_arena, int64_t request);
 
 static RT_UNUSED void rt_http_register_route(rt_string method, rt_string path, rt_http_handler_fn handler) { (void)method; (void)path; (void)handler; rt_runtime_fail("http is supported on Linux only"); }
+static RT_UNUSED void rt_http_register_route_gpu(rt_string method, rt_string path, rt_http_handler_fn handler) { (void)method; (void)path; (void)handler; rt_runtime_fail("http is supported on Linux only"); }
 static RT_UNUSED void rt_http_register_middleware(rt_string prefix, rt_http_handler_fn handler) { (void)prefix; (void)handler; rt_runtime_fail("http is supported on Linux only"); }
 static RT_UNUSED void rt_http_register_not_found(rt_http_handler_fn handler) { (void)handler; rt_runtime_fail("http is supported on Linux only"); }
 static RT_UNUSED void rt_http_listen(int64_t port) { (void)port; rt_runtime_fail("http is supported on Linux only"); }

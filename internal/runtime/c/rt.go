@@ -131,20 +131,43 @@ static RT_UNUSED void rt_arithmetic_fail(const char* operation, const char* file
 }
 
 static RT_UNUSED int64_t rt_add_i64_at(int64_t left, int64_t right, const char* file, int line) {
+#if defined(__GNUC__) || defined(__clang__)
+    int64_t res;
+    if (__builtin_expect(__builtin_add_overflow(left, right, &res), 0)) {
+        rt_arithmetic_fail("overflow in +", file, line);
+    }
+    return res;
+#else
     if ((right > 0 && left > INT64_MAX - right) || (right < 0 && left < INT64_MIN - right)) {
         rt_arithmetic_fail("overflow in +", file, line);
     }
     return left + right;
+#endif
 }
 
 static RT_UNUSED int64_t rt_sub_i64_at(int64_t left, int64_t right, const char* file, int line) {
+#if defined(__GNUC__) || defined(__clang__)
+    int64_t res;
+    if (__builtin_expect(__builtin_sub_overflow(left, right, &res), 0)) {
+        rt_arithmetic_fail("overflow in -", file, line);
+    }
+    return res;
+#else
     if ((right < 0 && left > INT64_MAX + right) || (right > 0 && left < INT64_MIN + right)) {
         rt_arithmetic_fail("overflow in -", file, line);
     }
     return left - right;
+#endif
 }
 
 static RT_UNUSED int64_t rt_mul_i64_at(int64_t left, int64_t right, const char* file, int line) {
+#if defined(__GNUC__) || defined(__clang__)
+    int64_t res;
+    if (__builtin_expect(__builtin_mul_overflow(left, right, &res), 0)) {
+        rt_arithmetic_fail("overflow in *", file, line);
+    }
+    return res;
+#else
     if (left != 0 && right != 0) {
         if (left == INT64_MIN && right == -1) {
             rt_arithmetic_fail("overflow in *", file, line);
@@ -163,23 +186,24 @@ static RT_UNUSED int64_t rt_mul_i64_at(int64_t left, int64_t right, const char* 
         }
     }
     return left * right;
+#endif
 }
 
 static RT_UNUSED int64_t rt_div_i64_at(int64_t left, int64_t right, const char* file, int line) {
-    if (right == 0) {
+    if (__builtin_expect(right == 0, 0)) {
         rt_arithmetic_fail("division by zero", file, line);
     }
-    if (left == INT64_MIN && right == -1) {
+    if (__builtin_expect(left == INT64_MIN && right == -1, 0)) {
         rt_arithmetic_fail("overflow in /", file, line);
     }
     return left / right;
 }
 
 static RT_UNUSED int64_t rt_rem_i64_at(int64_t left, int64_t right, const char* file, int line) {
-    if (right == 0) {
+    if (__builtin_expect(right == 0, 0)) {
         rt_arithmetic_fail("remainder by zero", file, line);
     }
-    if (left == INT64_MIN && right == -1) {
+    if (__builtin_expect(left == INT64_MIN && right == -1, 0)) {
         rt_arithmetic_fail("overflow in %", file, line);
     }
     return left % right;
@@ -187,35 +211,28 @@ static RT_UNUSED int64_t rt_rem_i64_at(int64_t left, int64_t right, const char* 
 
 #ifdef TRUX_RUNTIME_CUDA
 __device__ static int64_t rt_add_i64_device(int64_t left, int64_t right) {
-    if ((right > 0 && left > INT64_MAX - right) || (right < 0 && left < INT64_MIN - right)) {
+    int64_t res = (int64_t)((uint64_t)left + (uint64_t)right);
+    if (((left ^ ~right) & (left ^ res)) < 0) {
         asm("trap;");
     }
-    return left + right;
+    return res;
 }
 
 __device__ static int64_t rt_sub_i64_device(int64_t left, int64_t right) {
-    if ((right < 0 && left > INT64_MAX + right) || (right > 0 && left < INT64_MIN + right)) {
+    int64_t res = (int64_t)((uint64_t)left - (uint64_t)right);
+    if (((left ^ right) & (left ^ res)) < 0) {
         asm("trap;");
     }
-    return left - right;
+    return res;
 }
 
 __device__ static int64_t rt_mul_i64_device(int64_t left, int64_t right) {
-    if (left != 0 && right != 0) {
-        if ((left == INT64_MIN && right == -1) || (right == INT64_MIN && left == -1)) {
-            asm("trap;");
-        }
-        if (left > 0) {
-            if ((right > 0 && left > INT64_MAX / right) || (right < 0 && right < INT64_MIN / left)) {
-                asm("trap;");
-            }
-        } else {
-            if ((right > 0 && left < INT64_MIN / right) || (right < 0 && left < INT64_MAX / right)) {
-                asm("trap;");
-            }
-        }
+    int64_t res = (int64_t)((uint64_t)left * (uint64_t)right);
+    int64_t hi = __mul64hi(left, right);
+    if (hi != (res >> 63)) {
+        asm("trap;");
     }
-    return left * right;
+    return res;
 }
 
 __device__ static int64_t rt_div_i64_device(int64_t left, int64_t right) {
@@ -378,6 +395,8 @@ static RT_UNUSED void rt_arena_deinit(rt_arena* arena) {
 typedef struct {
     rt_arena* arena;
     rt_context* ctx;
+    rt_arena arena_storage;
+    rt_context ctx_storage;
     int live;
     int completions;
     int sends;
@@ -385,22 +404,18 @@ typedef struct {
 
 static RT_UNUSED int rt_http_park_begin(rt_http_park_slot* slot, rt_arena* stack_arena, rt_context* stack_ctx) {
     if (slot == NULL || stack_arena == NULL || stack_ctx == NULL || slot->live) return 0;
-    rt_arena* arena = (rt_arena*)malloc(sizeof(rt_arena));
-    if (arena == NULL) return 0;
-    rt_context* ctx = (rt_context*)malloc(sizeof(rt_context));
-    if (ctx == NULL) {
-        free(arena);
-        return 0;
-    }
-    *arena = *stack_arena;
+    slot->arena_storage = *stack_arena;
     stack_arena->chunks = NULL;
     stack_arena->lists = NULL;
     stack_arena->owner = NULL;
-    *ctx = *stack_ctx;
-    ctx->arena = arena;
+    slot->ctx_storage = *stack_ctx;
+    slot->ctx_storage.arena = &slot->arena_storage;
+    if (slot->arena_storage.owner == stack_ctx) {
+        slot->arena_storage.owner = &slot->ctx_storage;
+    }
     stack_ctx->chunk_pool = NULL;
-    slot->arena = arena;
-    slot->ctx = ctx;
+    slot->arena = &slot->arena_storage;
+    slot->ctx = &slot->ctx_storage;
     slot->live = 1;
     return 1;
 }
@@ -411,10 +426,8 @@ static RT_UNUSED int rt_http_park_complete(rt_http_park_slot* slot, int responde
     slot->live = 0;
     slot->completions++;
     slot->sends++;
-    rt_context_free_chunks(slot->ctx);
     rt_arena_deinit(slot->arena);
-    free(slot->ctx);
-    free(slot->arena);
+    rt_context_free_chunks(slot->ctx);
     slot->arena = NULL;
     slot->ctx = NULL;
     return 1;
@@ -1723,12 +1736,16 @@ typedef struct {
     uint64_t count;
     void* device;
     void* pinned;
+    int borrowed;
+    int copied_h2d;
 } rt_gpu_ws_slot;
 
 static __thread rt_gpu_ws_slot g_rt_gpu_ws[RT_GPU_MAX_WORKSPACES];
 static __thread int g_rt_gpu_ws_ready;
 static __thread cudaStream_t g_rt_gpu_stream;
 static __thread int g_rt_gpu_stream_ready;
+static __thread cudaEvent_t g_rt_gpu_event;
+static __thread int g_rt_gpu_event_ready;
 static __thread int g_rt_gpu_fd;
 static __thread int g_rt_gpu_fd_ready;
 static __thread int g_rt_gpu_job_busy;
@@ -1766,6 +1783,7 @@ static RT_UNUSED void rt_gpu_copy_to_device_int(rt_slice_int host, rt_gpu_buffer
     if (host.len > device.len) rt_runtime_fail("gpu copyToDevice host slice is larger than device buffer");
     rt_gpu_ws_slot* slot = rt_gpu_ws_by_device(device.data);
     if (slot != NULL && g_rt_gpu_stream_ready) {
+        slot->copied_h2d = 1;
         memcpy(slot->pinned, host.data, host.len * sizeof(int64_t));
         rt_cuda_check(cudaMemcpyAsync(device.data, slot->pinned, host.len * sizeof(int64_t), cudaMemcpyHostToDevice, g_rt_gpu_stream), "copyToDevice");
         return;
@@ -1777,6 +1795,7 @@ static RT_UNUSED void rt_gpu_copy_to_device_float(rt_slice_float host, rt_gpu_bu
     if (host.len > device.len) rt_runtime_fail("gpu copyToDevice host slice is larger than device buffer");
     rt_gpu_ws_slot* slot = rt_gpu_ws_by_device(device.data);
     if (slot != NULL && g_rt_gpu_stream_ready) {
+        slot->copied_h2d = 1;
         memcpy(slot->pinned, host.data, host.len * sizeof(double));
         rt_cuda_check(cudaMemcpyAsync(device.data, slot->pinned, host.len * sizeof(double), cudaMemcpyHostToDevice, g_rt_gpu_stream), "copyToDevice");
         return;
@@ -1786,11 +1805,37 @@ static RT_UNUSED void rt_gpu_copy_to_device_float(rt_slice_float host, rt_gpu_bu
 
 static RT_UNUSED void rt_gpu_copy_to_host_int(rt_gpu_buffer_int device, rt_slice_int host) {
     if (host.len > device.len) rt_runtime_fail("gpu copyToHost host slice is larger than device buffer");
+    if (g_rt_gpu_stream_ready) {
+        size_t bytes = host.len * sizeof(int64_t);
+        rt_gpu_ws_slot* slot = rt_gpu_ws_by_device(device.data);
+        if (slot != NULL && slot->pinned != NULL) {
+            rt_cuda_check(cudaMemcpyAsync(slot->pinned, device.data, bytes, cudaMemcpyDeviceToHost, g_rt_gpu_stream), "copyToHost");
+            rt_cuda_check(cudaStreamSynchronize(g_rt_gpu_stream), "copyToHost");
+            memcpy(host.data, slot->pinned, bytes);
+            return;
+        }
+        rt_cuda_check(cudaMemcpyAsync(host.data, device.data, bytes, cudaMemcpyDeviceToHost, g_rt_gpu_stream), "copyToHost");
+        rt_cuda_check(cudaStreamSynchronize(g_rt_gpu_stream), "copyToHost");
+        return;
+    }
     rt_cuda_check(cudaMemcpy(host.data, device.data, host.len * sizeof(int64_t), cudaMemcpyDeviceToHost), "copyToHost");
 }
 
 static RT_UNUSED void rt_gpu_copy_to_host_float(rt_gpu_buffer_float device, rt_slice_float host) {
     if (host.len > device.len) rt_runtime_fail("gpu copyToHost host slice is larger than device buffer");
+    if (g_rt_gpu_stream_ready) {
+        size_t bytes = host.len * sizeof(double);
+        rt_gpu_ws_slot* slot = rt_gpu_ws_by_device(device.data);
+        if (slot != NULL && slot->pinned != NULL) {
+            rt_cuda_check(cudaMemcpyAsync(slot->pinned, device.data, bytes, cudaMemcpyDeviceToHost, g_rt_gpu_stream), "copyToHost");
+            rt_cuda_check(cudaStreamSynchronize(g_rt_gpu_stream), "copyToHost");
+            memcpy(host.data, slot->pinned, bytes);
+            return;
+        }
+        rt_cuda_check(cudaMemcpyAsync(host.data, device.data, bytes, cudaMemcpyDeviceToHost, g_rt_gpu_stream), "copyToHost");
+        rt_cuda_check(cudaStreamSynchronize(g_rt_gpu_stream), "copyToHost");
+        return;
+    }
     rt_cuda_check(cudaMemcpy(host.data, device.data, host.len * sizeof(double), cudaMemcpyDeviceToHost), "copyToHost");
 }
 
@@ -1807,6 +1852,10 @@ static RT_UNUSED void rt_gpu_free_float(rt_gpu_buffer_float buffer) {
 }
 
 static RT_UNUSED void rt_gpu_sync(void) {
+    if (g_rt_gpu_stream_ready) {
+        rt_cuda_check(cudaStreamSynchronize(g_rt_gpu_stream), "sync");
+        return;
+    }
     rt_cuda_check(cudaDeviceSynchronize(), "sync");
 }
 
@@ -1917,11 +1966,13 @@ static RT_UNUSED rt_gpu_ws_slot* rt_gpu_ws_by_name(rt_string name, int is_float)
 
 static RT_UNUSED rt_gpu_buffer_float rt_gpu_borrow_float(rt_string name) {
     rt_gpu_ws_slot* slot = rt_gpu_ws_by_name(name, 1);
+    slot->borrowed = 1;
     return RT_LIT(rt_gpu_buffer_float, (double*)slot->device, (size_t)slot->count);
 }
 
 static RT_UNUSED rt_gpu_buffer_int rt_gpu_borrow_int(rt_string name) {
     rt_gpu_ws_slot* slot = rt_gpu_ws_by_name(name, 0);
+    slot->borrowed = 1;
     return RT_LIT(rt_gpu_buffer_int, (int64_t*)slot->device, (size_t)slot->count);
 }
 
@@ -1953,6 +2004,10 @@ static RT_UNUSED void rt_gpu_worker_init(void) {
         rt_cuda_check(cudaStreamCreateWithFlags(&g_rt_gpu_stream, cudaStreamNonBlocking), "stream");
         g_rt_gpu_stream_ready = 1;
     }
+    if (!g_rt_gpu_event_ready) {
+        rt_cuda_check(cudaEventCreateWithFlags(&g_rt_gpu_event, cudaEventDisableTiming), "event");
+        g_rt_gpu_event_ready = 1;
+    }
     if (!g_rt_gpu_fd_ready) {
         g_rt_gpu_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
         if (g_rt_gpu_fd < 0) rt_runtime_fail("eventfd failed");
@@ -1971,7 +2026,13 @@ static RT_UNUSED int rt_gpu_event_fd(void) { return g_rt_gpu_fd_ready ? g_rt_gpu
 
 static RT_UNUSED int rt_gpu_busy(void) { return g_rt_gpu_job_busy; }
 
-static RT_UNUSED void rt_gpu_clear_busy(void) { g_rt_gpu_job_busy = 0; }
+static RT_UNUSED void rt_gpu_clear_busy(void) {
+    g_rt_gpu_job_busy = 0;
+    for (int i = 0; i < g_rt_gpu_ws_decl_count; i++) {
+        g_rt_gpu_ws[i].borrowed = 0;
+        g_rt_gpu_ws[i].copied_h2d = 0;
+    }
+}
 
 static RT_UNUSED void rt_gpu_drain_eventfd(void) {
 #if defined(__linux__)
@@ -1987,22 +2048,34 @@ static RT_UNUSED void rt_gpu_drain_eventfd(void) {
 static RT_UNUSED void rt_gpu_submit_signal(void) {
     if (!g_rt_gpu_stream_ready || rt_gpu_event_fd() < 0) rt_runtime_fail("gpu.finish requires an HTTP worker");
     if (g_rt_gpu_job_busy) rt_runtime_fail("a GPU request is already in flight on this worker");
+    int has_output_only_ws = 0;
+    for (int i = 0; i < g_rt_gpu_ws_decl_count; i++) {
+        rt_gpu_ws_slot* slot = &g_rt_gpu_ws[i];
+        if (slot->is_float && slot->borrowed && !slot->copied_h2d) {
+            has_output_only_ws = 1;
+            break;
+        }
+    }
     for (int i = 0; i < g_rt_gpu_ws_decl_count; i++) {
         rt_gpu_ws_slot* slot = &g_rt_gpu_ws[i];
         if (slot->device == NULL || slot->pinned == NULL) continue;
-        size_t elem = slot->is_float ? sizeof(double) : sizeof(int64_t);
-        size_t bytes = (size_t)slot->count * elem;
+        if (!slot->is_float || !slot->borrowed) continue;
+        if (has_output_only_ws && slot->copied_h2d) continue;
+        size_t bytes = (size_t)slot->count * sizeof(double);
         rt_cuda_check(cudaMemcpyAsync(slot->pinned, slot->device, bytes, cudaMemcpyDeviceToHost, g_rt_gpu_stream), "ready");
     }
     int fd = rt_gpu_event_fd();
     if (fd < 0) rt_runtime_fail("gpu.finish requires an HTTP worker");
+    if (g_rt_gpu_event_ready) {
+        rt_cuda_check(cudaEventRecord(g_rt_gpu_event, g_rt_gpu_stream), "event");
+    }
     rt_cuda_check(cudaLaunchHostFunc(g_rt_gpu_stream, trux_rt_gpu_host_signal, (void*)(intptr_t)fd), "finish");
     g_rt_gpu_job_busy = 1;
 }
 
 static RT_UNUSED int rt_gpu_query_job(void) {
     if (!g_rt_gpu_stream_ready) return 0;
-    cudaError_t err = cudaStreamQuery(g_rt_gpu_stream);
+    cudaError_t err = g_rt_gpu_event_ready ? cudaEventQuery(g_rt_gpu_event) : cudaStreamQuery(g_rt_gpu_stream);
     if (err == cudaErrorNotReady) return 0;
     if (err != cudaSuccess) {
         cudaGetLastError();
@@ -2017,7 +2090,12 @@ static RT_UNUSED void rt_gpu_reset_stream(void) {
         cudaGetLastError();
         rt_cuda_check(cudaStreamCreateWithFlags(&g_rt_gpu_stream, cudaStreamNonBlocking), "stream");
     }
-    g_rt_gpu_job_busy = 0;
+    if (g_rt_gpu_event_ready) {
+        cudaEventDestroy(g_rt_gpu_event);
+        cudaGetLastError();
+        rt_cuda_check(cudaEventCreateWithFlags(&g_rt_gpu_event, cudaEventDisableTiming), "event");
+    }
+    rt_gpu_clear_busy();
 }
 #else
 static RT_UNUSED void rt_gpu_worker_init(void) {}

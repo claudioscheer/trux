@@ -295,7 +295,7 @@ func main() int {
 	wantParts := []string{
 		"#define TRUX_RUNTIME_CUDA 1",
 		"#include \"trux_runtime.h\"",
-		"__global__ void trux_k_4_fill(int64_t* trux_v_3_out, int64_t trux_v_1_n)",
+		"__global__ void trux_k_4_fill(int64_t* __restrict__ trux_v_3_out, int64_t trux_v_1_n)",
 		"trux_v_3_out[trux_v_1_i] = rt_mul_i64(rt_add_i64(trux_v_1_i, 1), 2);",
 	}
 	for _, part := range wantParts {
@@ -359,11 +359,11 @@ func main() int {
 }`)
 
 	wantParts := []string{
-		"__global__ void trux_k_4_fill(int64_t trux_dim_x, int64_t* trux_v_3_out)",
+		"__global__ void trux_k_4_fill(int64_t trux_dim_x, int64_t* __restrict__ trux_v_3_out)",
 		"int64_t trux_v_1_i = ((int64_t)(blockIdx.x * blockDim.x + threadIdx.x));",
 		"if (trux_v_1_i < trux_dim_x)",
 		"trux_k_4_fill<<<dim3((unsigned int)(((4) + 255) / 256), 1u, 1u), dim3(256u, 1u, 1u), 0, rt_gpu_launch_stream()>>>(4, trux_v_6_device.data)",
-		"__global__ void trux_k_5_paint(int64_t trux_dim_x, int64_t trux_dim_y, int64_t* trux_v_3_out, int64_t trux_v_5_width)",
+		"__global__ void trux_k_5_paint(int64_t trux_dim_x, int64_t trux_dim_y, int64_t* __restrict__ trux_v_3_out, int64_t trux_v_5_width)",
 		"int64_t trux_v_3_row = ((int64_t)(blockIdx.y * blockDim.y + threadIdx.y));",
 		"int64_t trux_v_3_col = ((int64_t)(blockIdx.x * blockDim.x + threadIdx.x));",
 		"if (trux_v_3_row < trux_dim_y && trux_v_3_col < trux_dim_x)",
@@ -486,7 +486,7 @@ func main() int {
 
 	wantParts := []string{
 		"int64_t trux_f_12_kernel_scale(rt_context* trux_ctx, rt_arena* trux_result_arena);",
-		"__global__ void trux_k_5_scale(int64_t* trux_v_3_out, int64_t trux_v_1_n);",
+		"__global__ void trux_k_5_scale(int64_t* __restrict__ trux_v_3_out, int64_t trux_v_1_n);",
 		"trux_return_value = trux_f_12_kernel_scale(trux_ctx, trux_result_arena);",
 	}
 	for _, part := range wantParts {
@@ -1236,8 +1236,8 @@ func main() int {
     return 0
 }`)
 
-	proto := "__global__ void trux_k_4_fill(int64_t* trux_v_3_out, int64_t trux_v_1_n);"
-	def := "__global__ void trux_k_4_fill(int64_t* trux_v_3_out, int64_t trux_v_1_n) {"
+	proto := "__global__ void trux_k_4_fill(int64_t* __restrict__ trux_v_3_out, int64_t trux_v_1_n);"
+	def := "__global__ void trux_k_4_fill(int64_t* __restrict__ trux_v_3_out, int64_t trux_v_1_n) {"
 	if !strings.Contains(cSource, proto) || !strings.Contains(cSource, def) {
 		t.Fatalf("kernel prototype and definition diverged:\n%s", cSource)
 	}

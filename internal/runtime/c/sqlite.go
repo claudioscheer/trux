@@ -54,6 +54,7 @@ const SQLiteImplSource = `
 
 typedef struct {
     char path[512];
+    size_t path_len;
     trux_sqlite_db* db;
 } rt_sqlite_tls_entry;
 
@@ -173,32 +174,33 @@ static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open(rt
 }
 
 static RT_UNUSED trux_tuple_ptr_struct_14_trux_sqlite_db_error rt_sqlite_open_thread_local(rt_arena* arena, rt_string path) {
-    char* c_path = rt_string_to_c_string(path, "sqlite open path");
+    rt_check_string(path);
     for (size_t i = 0; i < g_trux_sqlite_tls_count; i++) {
         if (g_trux_sqlite_tls_cache[i].db != NULL &&
             g_trux_sqlite_tls_cache[i].db->is_open &&
-            strcmp(g_trux_sqlite_tls_cache[i].path, c_path) == 0) {
-            free(c_path);
+            g_trux_sqlite_tls_cache[i].path_len == path.len &&
+            (path.len == 0 || memcmp(g_trux_sqlite_tls_cache[i].path, path.data, path.len) == 0)) {
             return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, g_trux_sqlite_tls_cache[i].db, NULL);
         }
     }
 
     trux_tuple_ptr_struct_14_trux_sqlite_db_error res = rt_sqlite_open(arena, path);
     if (res.f1 != NULL) {
-        free(c_path);
         return res;
     }
 
     trux_sqlite_db* db = res.f0;
     db->is_thread_local = 1;
 
-    if (g_trux_sqlite_tls_count < RT_SQLITE_TLS_CACHE_SIZE) {
-        strncpy(g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].path, c_path, sizeof(g_trux_sqlite_tls_cache[0].path) - 1);
-        g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].path[sizeof(g_trux_sqlite_tls_cache[0].path) - 1] = '\0';
+    if (g_trux_sqlite_tls_count < RT_SQLITE_TLS_CACHE_SIZE && path.len < sizeof(g_trux_sqlite_tls_cache[0].path)) {
+        if (path.len > 0) {
+            memcpy(g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].path, path.data, path.len);
+        }
+        g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].path[path.len] = '\0';
+        g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].path_len = path.len;
         g_trux_sqlite_tls_cache[g_trux_sqlite_tls_count].db = db;
         g_trux_sqlite_tls_count++;
     }
-    free(c_path);
     return RT_LIT(trux_tuple_ptr_struct_14_trux_sqlite_db_error, db, NULL);
 }
 
@@ -588,8 +590,18 @@ static RT_UNUSED rt_string rt_sqlite_column_text(rt_arena* arena, trux_sqlite_st
     if (stmt == NULL || stmt->is_finalized || stmt->handle == NULL) {
         return RT_LIT(rt_string, NULL, 0);
     }
-    const char* text = (const char*)sqlite3_column_text(stmt->handle, (int)col);
-    return rt_string_from_c(arena, text ? text : "");
+    const uint8_t* text = (const uint8_t*)sqlite3_column_text(stmt->handle, (int)col);
+    if (text == NULL) {
+        return RT_LIT(rt_string, NULL, 0);
+    }
+    int bytes = sqlite3_column_bytes(stmt->handle, (int)col);
+    if (bytes <= 0) {
+        return RT_LIT(rt_string, NULL, 0);
+    }
+    size_t len = (size_t)bytes;
+    uint8_t* data = (uint8_t*)rt_arena_alloc(arena, len);
+    memcpy(data, text, len);
+    return RT_LIT(rt_string, data, len);
 }
 
 static RT_UNUSED bool rt_sqlite_column_is_null(rt_arena* arena, trux_sqlite_stmt* stmt, int64_t col) {

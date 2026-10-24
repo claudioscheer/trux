@@ -2948,6 +2948,42 @@ func main() int {
 	}
 }
 
+func TestBuildFileLinksSQLiteWhenGPUUsesSQLite(t *testing.T) {
+	path := writeTempSource(t, `package main
+import "gpu"
+import "sqlite"
+
+kernel func fill(i int, out gpu.Buffer[int]) {
+    out[i] = 1
+}
+
+func main() int {
+    let db *sqlite.DB, err error = sqlite.open(":memory:")
+    if err != nil {
+        return 1
+    }
+    let _ error = sqlite.close(db)
+    let out gpu.Buffer[int] = gpu.alloc(1)
+    gpu.launch(fill, 1, 1, 1, 1, 1, 1, 1, out)
+    gpu.free(out)
+    return 0
+}`)
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "program")
+	logPath := filepath.Join(dir, "nvcc.log")
+	fakeNVCC := writeFakeCompiler(t, filepath.Join(dir, "fake-nvcc"), logPath)
+	t.Setenv("NVCC", fakeNVCC)
+
+	if err := buildFile(path, outputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	log := readFile(t, logPath)
+	if !strings.Contains(log, "sqlite3-3.47.2-") {
+		t.Fatalf("compiler args = %q, want sqlite3 object", log)
+	}
+}
+
 func TestBuildFileLinksJWTWhenGPUUsesJWT(t *testing.T) {
 	path := writeTempSource(t, `package main
 import "gpu"

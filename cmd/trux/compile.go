@@ -234,7 +234,7 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 	if opts.Debug {
 		args = []string{"-std=c11", "-O0", sourcePath, "-o", outputPath}
 	} else {
-		args = []string{"-std=c11", "-O2", sourcePath, "-o", outputPath}
+		args = []string{"-std=c11", "-O2", "-march=native", "-mtune=native", sourcePath, "-o", outputPath}
 	}
 	if opts.UsesCUDA {
 		compiler = os.Getenv("NVCC")
@@ -250,12 +250,26 @@ func compileGenerated(sourcePath string, outputPath string, opts generatedCompil
 		if opts.Debug {
 			args = append(args, "-O0")
 		} else {
-			args = append(args, "-O2")
+			args = append(args, "-O2", "-arch=native", "-use_fast_math", "--extra-device-vectorization", "-Xcompiler", "-O2,-march=native")
 		}
 		if opts.UsesHTTP {
 			// nvcc rejects -pthread ("Unknown option '-pthread'" on CUDA 12).
 			// The host compiler accepts it through -Xcompiler.
 			args = append(args, "-D_GNU_SOURCE", "-Xcompiler", "-pthread", "-luring")
+		}
+		if opts.UsesSQLite {
+			host := os.Getenv("CC")
+			if host == "" {
+				host = "cc"
+			}
+			sqliteObj, err := ensureSQLiteObjectCached(host)
+			if err != nil {
+				return err
+			}
+			args = append(args, sqliteObj)
+			if !opts.UsesHTTP {
+				args = append(args, "-Xcompiler", "-pthread")
+			}
 		}
 		if opts.UsesJSON || opts.UsesJWT {
 			host := os.Getenv("CC")

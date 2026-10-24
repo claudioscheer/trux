@@ -1519,7 +1519,11 @@ func (e *funcEmitter) emitStmt(out *bytes.Buffer, stmt ir.Stmt, level int, opts 
 		}
 		e.writePrelude(out, indent, method.prelude)
 		e.writePrelude(out, indent, path.prelude)
-		fmt.Fprintf(out, "%srt_http_register_route(%s, %s, %s);\n", indent, method.value, path.value, mangleFunc(stmt.HandlerName))
+		if e.funcUsesGPU(stmt.HandlerName) {
+			fmt.Fprintf(out, "%srt_http_register_route_gpu(%s, %s, %s);\n", indent, method.value, path.value, mangleFunc(stmt.HandlerName))
+		} else {
+			fmt.Fprintf(out, "%srt_http_register_route(%s, %s, %s);\n", indent, method.value, path.value, mangleFunc(stmt.HandlerName))
+		}
 	case *ir.HTTPNotFoundStmt:
 		fmt.Fprintf(out, "%srt_http_register_not_found(%s);\n", indent, mangleFunc(stmt.HandlerName))
 	case *ir.HTTPSetStmt:
@@ -3191,7 +3195,7 @@ func emitKernelType(typ ast.Type) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return elem + "*", nil
+		return elem + "* __restrict__", nil
 	default:
 		return "", fmt.Errorf("unsupported kernel type %s", typ)
 	}
@@ -4625,3 +4629,90 @@ func jsonRuntimeFnName(kind semtypes.JSONCallKind) string {
 		panic("unknown json call kind: " + string(kind))
 	}
 }
+
+func (e *funcEmitter) funcUsesGPU(name string) bool {
+	if e.program == nil {
+		return false
+	}
+	visited := make(map[string]bool)
+	var check func(fnName string) bool
+	check = func(fnName string) bool {
+		if visited[fnName] {
+			return false
+		}
+		visited[fnName] = true
+		for _, f := range e.program.Functions {
+			if f.Name == fnName {
+				for _, stmt := range f.Body {
+					if stmtHasGPU(stmt, check) {
+						return true
+					}
+				}
+				break
+			}
+		}
+		return false
+	}
+	return check(name)
+}
+
+func stmtHasGPU(stmt ir.Stmt, checkFunc func(string) bool) bool {
+	if stmt == nil {
+		return false
+	}
+	switch s := stmt.(type) {
+	case *ir.GPULaunchStmt, *ir.GPUFinishStmt, *ir.GPUCopyStmt, *ir.GPUFreeStmt, *ir.GPUSyncStmt, *ir.GPUWorkspaceStmt, *ir.GPUMountStmt:
+		return true
+	case *ir.LetStmt:
+		return exprHasGPU(s.Value, checkFunc)
+	case *ir.ReturnStmt:
+		return exprHasGPU(s.Value, checkFunc)
+	case *ir.AssignStmt:
+		return exprHasGPU(s.Value, checkFunc)
+	case *ir.IfStmt:
+		if exprHasGPU(s.Condition, checkFunc) {
+			return true
+		}
+		for _, ts := range s.Then {
+			if stmtHasGPU(ts, checkFunc) {
+				return true
+			}
+		}
+		for _, es := range s.Else {
+			if stmtHasGPU(es, checkFunc) {
+				return true
+			}
+		}
+	case *ir.ForStmt:
+		if stmtHasGPU(s.Init, checkFunc) || exprHasGPU(s.Condition, checkFunc) || stmtHasGPU(s.Post, checkFunc) {
+			return true
+		}
+		for _, bs := range s.Body {
+			if stmtHasGPU(bs, checkFunc) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func exprHasGPU(expr ir.Expr, checkFunc func(string) bool) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := expr.(type) {
+	case *ir.CallExpr:
+		if checkFunc(e.Callee) {
+			return true
+		}
+		for _, arg := range e.Args {
+			if exprHasGPU(arg, checkFunc) {
+				return true
+			}
+		}
+	case *ir.GPUAllocExpr, *ir.GPUFromExpr, *ir.GPUCoordExpr, *ir.GPUNameExpr, *ir.GPUExpExpr, *ir.GPUSqrtExpr:
+		return true
+	}
+	return false
+}
+

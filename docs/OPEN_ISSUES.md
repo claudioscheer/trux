@@ -20,6 +20,4 @@ Tradeoff: this would make generated C smaller and avoid unnecessary arena init/d
 
 ## Type checker: GPU coordinate helpers are accepted in host code
 
-Status: open
-
-`gpu.globalX()` and the other coordinate helpers type-check outside a `kernel func`, but host code has no `blockIdx` or `threadIdx`, so the generated C fails to compile with an error such as `'blockIdx' undeclared`. The checker should reject these calls outside kernels with a Trux diagnostic.
+Status: resolved. `checkGPUCall` in `internal/types/types.go` rejects `gpu.globalX()` and the other coordinate helpers outside `kernel func` (covered by `examples/errors/gpu_coordinate_on_host.tx`).

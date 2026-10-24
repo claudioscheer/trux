@@ -9,6 +9,8 @@ benchmarks/digits/digits.txm
 examples/projects/mnist_mlp/model.txm
 examples/projects/tiny_transformer/data/
 examples/projects/tiny_transformer/checkpoint.pt
+examples/projects/shakespeare_server/model.txm
+examples/projects/shakespeare_server/server
 
 # Python
 __pycache__/

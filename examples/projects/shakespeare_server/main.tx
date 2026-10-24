@@ -1,0 +1,561 @@
+package main
+
+import "gpu"
+import "hostmath.tx"
+import "http"
+import "json"
+import "time"
+
+// ---------------------------------------------------------------------------
+// GPU kernels
+// ---------------------------------------------------------------------------
+
+kernel func embedK(i int, tokens gpu.Buffer [int], tokEmb gpu.Buffer [float], posEmb gpu.Buffer [float], out gpu.Buffer [float], width int) {
+  let t int = i / width
+  let d int = i - t * width
+  let token int = tokens[t]
+  out[i] = tokEmb[token * width + d] + posEmb[t * width + d]
+}
+
+kernel func layerNormK(i int, input gpu.Buffer [float], gamma gpu.Buffer [float], beta gpu.Buffer [float], out gpu.Buffer [float], width int, offset int, invWidth float, eps float) {
+  let base int = i * width
+  let sum float = 0.0
+  for let d int = 0; d < width; d = d + 1 {
+    sum = sum + input[base + d]
+  }
+  let mean float = sum * invWidth
+  let variance float = 0.0
+  for let d int = 0; d < width; d = d + 1 {
+    let delta float = input[base + d] - mean
+    variance = variance + delta * delta
+  }
+  let inv float = 1.0 / sqrt(variance *invWidth + eps)
+  for let d int = 0; d < width; d = d + 1 {
+    out[base + d] = (input[base + d] - mean) * inv * gamma[offset + d] + beta[offset + d]
+  }
+}
+
+kernel func linearK(i int, input gpu.Buffer [float], weight gpu.Buffer [float], bias gpu.Buffer [float], out gpu.Buffer [float], inDim int, outDim int, weightBase int, biasBase int, relu int) {
+  let row int = i / outDim
+  let oc int = i - row * outDim
+  let sum float = bias[biasBase + oc]
+  let inputBase int = row * inDim
+  let weightRow int = weightBase + oc * inDim
+  for let k int = 0; k < inDim; k = k + 1 {
+    sum = sum + weight[weightRow + k] *input[inputBase + k]
+  }
+  if relu == 1 && sum < 0.0 {
+    sum = 0.0
+  }
+  out[i] = sum
+}
+
+kernel func linearAddK(i int, input gpu.Buffer [float], weight gpu.Buffer [float], bias gpu.Buffer [float], out gpu.Buffer [float], inDim int, outDim int, weightBase int, biasBase int) {
+  let row int = i / outDim
+  let oc int = i - row * outDim
+  let sum float = bias[biasBase + oc]
+  let inputBase int = row * inDim
+  let weightRow int = weightBase + oc * inDim
+  for let k int = 0; k < inDim; k = k + 1 {
+    sum = sum + weight[weightRow + k] *input[inputBase + k]
+  }
+  out[i] = out[i] + sum
+}
+
+kernel func scoresK(i int, q gpu.Buffer [float], k gpu.Buffer [float], out gpu.Buffer [float], length int, heads int, width int, scale float) {
+  let perHead int = length * length
+  let h int = i / perHead
+  let rem int = i - h * perHead
+  let t int = rem / length
+  let keyIdx int = rem - t * length
+  if keyIdx <= t {
+    let headDim int = width / heads
+    let headOffset int = h * headDim
+    let qBase int = t * width + headOffset
+    let kBase int = keyIdx * width + headOffset
+    let sum float = 0.0
+    for let d int = 0; d < headDim; d = d + 1 {
+      sum = sum + q[qBase + d] *k[kBase + d]
+    }
+    out[i] = sum * scale
+  }
+}
+
+kernel func softmaxK(i int, scores gpu.Buffer [float], length int) {
+  let h int = i / length
+  let t int = i - h * length
+  let base int = (h *length + t) * length
+  let best float = scores[base]
+  for let keyIdx int = 1; keyIdx <= t; keyIdx = keyIdx + 1 {
+    if scores[base + keyIdx] > best {
+      best = scores[base + keyIdx]
+    }
+  }
+  let sum float = 0.0
+  for let keyIdx int = 0; keyIdx <= t; keyIdx = keyIdx + 1 {
+    let e float = exp(scores[base + keyIdx] - best)
+    scores[base + keyIdx] = e
+    sum = sum + e
+  }
+  let inv float = 1.0 / sum
+  for let keyIdx int = 0; keyIdx <= t; keyIdx = keyIdx + 1 {
+    scores[base + keyIdx] = scores[base + keyIdx] *inv
+  }
+}
+
+kernel func weightedK(i int, scores gpu.Buffer [float], v gpu.Buffer [float], out gpu.Buffer [float], length int, heads int, width int) {
+  let t int = i / width
+  let d int = i - t * width
+  let headDim int = width / heads
+  let h int = d / headDim
+  let base int = (h *length + t) * length
+  let sum float = 0.0
+  for let keyIdx int = 0; keyIdx <= t; keyIdx = keyIdx + 1 {
+    sum = sum + scores[base + keyIdx] *v[keyIdx * width + d]
+  }
+  out[i] = sum
+}
+
+// ---------------------------------------------------------------------------
+// Host helpers & forward passes
+// ---------------------------------------------------------------------------
+
+func findToken(vocab string, ch string) int {
+  for let i int = 0; i < len(vocab); i = i + 1 {
+    if vocab[i] == ch {
+      return i
+    }
+  }
+  return -1
+}
+
+func tokenizePromptWindow(vocab string, prompt string, blockSize int, mut out []int) int {
+  let promptLen int = len(prompt)
+  for let i int = 0; i < promptLen; i = i + 1 {
+    if findToken(vocab, prompt[i]) < 0 {
+      return -1
+    }
+  }
+  let start int = 0
+  let count int = promptLen
+  if promptLen > blockSize {
+    start = promptLen - blockSize
+    count = blockSize
+  }
+  for let i int = 0; i < count; i = i + 1 {
+    out[i] = findToken(vocab, prompt[start + i])
+  }
+  return count
+}
+
+func appendContextToken(mut tokens []int, n int, blockSize int, id int) int {
+  if n < blockSize {
+    tokens[n] = id
+    return n + 1
+  }
+  for let k int = 0; k < blockSize - 1; k = k + 1 {
+    tokens[k] = tokens[k + 1]
+  }
+  tokens[blockSize - 1] = id
+  return blockSize
+}
+
+func decodeTokens(vocab string, tokens []int, start int, count int) string {
+  let result string = ""
+  for let i int = 0; i < count; i = i + 1 {
+    result = result + vocab[tokens[start + i]]
+  }
+  return result
+}
+
+func argmax(values []float, base int, count int) int {
+  let bestIndex int = 0
+  let best float = values[base]
+  for let i int = 1; i < count; i = i + 1 {
+    let value float = values[base + i]
+    if value > best {
+      best = value
+      bestIndex = i
+    }
+  }
+  return bestIndex
+}
+
+func layerNormHost(input []float, gamma []float, beta []float, mut out []float, rows int, width int, offset int, invWidth float, eps float) int {
+  for let row int = 0; row < rows; row = row + 1 {
+    let base int = row * width
+    let sum float = 0.0
+    for let d int = 0; d < width; d = d + 1 {
+      sum = sum + input[base + d]
+    }
+    let mean float = sum * invWidth
+    let variance float = 0.0
+    for let d int = 0; d < width; d = d + 1 {
+      let delta float = input[base + d] - mean
+      variance = variance + delta * delta
+    }
+    let inv float = 1.0 / hostmath.hsqrt(variance *invWidth + eps)
+    for let d int = 0; d < width; d = d + 1 {
+      out[base + d] = (input[base + d] - mean) * inv * gamma[offset + d] + beta[offset + d]
+    }
+  }
+  return 0
+}
+
+func linearHost(input []float, weight []float, bias []float, mut out []float, rows int, inDim int, outDim int, weightBase int, biasBase int, relu int) int {
+  for let row int = 0; row < rows; row = row + 1 {
+    let inputBase int = row * inDim
+    let outputBase int = row * outDim
+    for let oc int = 0; oc < outDim; oc = oc + 1 {
+      let sum float = bias[biasBase + oc]
+      let weightRow int = weightBase + oc * inDim
+      for let k int = 0; k < inDim; k = k + 1 {
+        sum = sum + weight[weightRow + k] *input[inputBase + k]
+      }
+      if relu == 1 && sum < 0.0 {
+        sum = 0.0
+      }
+      out[outputBase + oc] = sum
+    }
+  }
+  return 0
+}
+
+func linearAddHost(input []float, weight []float, bias []float, mut out []float, rows int, inDim int, outDim int, weightBase int, biasBase int) int {
+  for let row int = 0; row < rows; row = row + 1 {
+    let inputBase int = row * inDim
+    let outputBase int = row * outDim
+    for let oc int = 0; oc < outDim; oc = oc + 1 {
+      let sum float = bias[biasBase + oc]
+      let weightRow int = weightBase + oc * inDim
+      for let k int = 0; k < inDim; k = k + 1 {
+        sum = sum + weight[weightRow + k] *input[inputBase + k]
+      }
+      out[outputBase + oc] = out[outputBase + oc] + sum
+    }
+  }
+  return 0
+}
+
+func softmaxHost(mut scores []float, length int, heads int) int {
+  for let h int = 0; h < heads; h = h + 1 {
+    for let t int = 0; t < length; t = t + 1 {
+      let base int = (h *length + t) * length
+      let best float = scores[base]
+      for let a int = 1; a <= t; a = a + 1 {
+        if scores[base + a] > best {
+          best = scores[base + a]
+        }
+      }
+      let sum float = 0.0
+      for let b int = 0; b <= t; b = b + 1 {
+        let e float = hostmath.hexp(scores[base + b] - best)
+        scores[base + b] = e
+        sum = sum + e
+      }
+      let inv float = 1.0 / sum
+      for let c int = 0; c <= t; c = c + 1 {
+        scores[base + c] = scores[base + c] *inv
+      }
+    }
+  }
+  return 0
+}
+
+func forwardGpuStep(hostTokens []int, n int, vocabSize int, layers int, heads int, width int, hidden int, invWidth float, attnScale float, lnEps float) int {
+  let tokenSlice []int = hostTokens[0:n]
+  let dTokens gpu.Buffer[int] = gpu.borrowInt("tokens")
+  let dX gpu.Buffer[float] = gpu.borrowFloat("x")
+  let dXn gpu.Buffer[float] = gpu.borrowFloat("xn")
+  let dQ gpu.Buffer[float] = gpu.borrowFloat("q")
+  let dK gpu.Buffer[float] = gpu.borrowFloat("k")
+  let dV gpu.Buffer[float] = gpu.borrowFloat("v")
+  let dAttn gpu.Buffer[float] = gpu.borrowFloat("attn")
+  let dScores gpu.Buffer[float] = gpu.borrowFloat("scores")
+  let dH gpu.Buffer[float] = gpu.borrowFloat("h")
+  let dLogits gpu.Buffer[float] = gpu.borrowFloat("logits")
+
+  gpu.copyToDevice(tokenSlice, dTokens)
+  gpu.launch1d(embedK, n *width, dTokens, gpu.floats("tok_emb"), gpu.floats("pos_emb"), dX, width)
+
+  for let layer int = 0; layer < layers; layer = layer + 1 {
+    gpu.launch1d(layerNormK, n, dX, gpu.floats("ln1_g"), gpu.floats("ln1_b"), dXn, width, layer *width, invWidth, lnEps)
+    gpu.launch1d(linearK, n *width, dXn, gpu.floats("wq"), gpu.floats("bq"), dQ, width, width, layer *width *width, layer *width, 0)
+    gpu.launch1d(linearK, n *width, dXn, gpu.floats("wk"), gpu.floats("bk"), dK, width, width, layer *width *width, layer *width, 0)
+    gpu.launch1d(linearK, n *width, dXn, gpu.floats("wv"), gpu.floats("bv"), dV, width, width, layer *width *width, layer *width, 0)
+    gpu.launch1d(scoresK, heads *n *n, dQ, dK, dScores, n, heads, width, attnScale)
+    gpu.launch1d(softmaxK, heads *n, dScores, n)
+    gpu.launch1d(weightedK, n *width, dScores, dV, dAttn, n, heads, width)
+    gpu.launch1d(linearAddK, n *width, dAttn, gpu.floats("wo"), gpu.floats("bo"), dX, width, width, layer *width *width, layer *width)
+    gpu.launch1d(layerNormK, n, dX, gpu.floats("ln2_g"), gpu.floats("ln2_b"), dXn, width, layer *width, invWidth, lnEps)
+    gpu.launch1d(linearK, n *hidden, dXn, gpu.floats("w1"), gpu.floats("b1"), dH, width, hidden, layer *hidden *width, layer *hidden, 1)
+    gpu.launch1d(linearAddK, n *width, dH, gpu.floats("w2"), gpu.floats("b2"), dX, hidden, width, layer *width *hidden, layer *width)
+  }
+
+  gpu.launch1d(layerNormK, n, dX, gpu.floats("lnf_g"), gpu.floats("lnf_b"), dXn, width, 0, invWidth, lnEps)
+  gpu.launch1d(linearK, n *vocabSize, dXn, gpu.floats("wout"), gpu.floats("bout"), dLogits, width, vocabSize, 0, 0, 0)
+  return 0
+}
+
+func forwardCpuStep(tokens []int, mut x []float, mut xn []float, mut q []float, mut k []float, mut v []float, mut attn []float, mut scores []float, mut h []float, mut logits []float, n int, vocabSize int, layers int, heads int, width int, hidden int, invWidth float, attnScale float, lnEps float) int {
+  let headDim int = width / heads
+  let tokEmb []float = gpu.hostFloats("tok_emb")
+  let posEmb []float = gpu.hostFloats("pos_emb")
+  let ln1G []float = gpu.hostFloats("ln1_g")
+  let ln1B []float = gpu.hostFloats("ln1_b")
+  let wq []float = gpu.hostFloats("wq")
+  let bq []float = gpu.hostFloats("bq")
+  let wk []float = gpu.hostFloats("wk")
+  let bk []float = gpu.hostFloats("bk")
+  let wv []float = gpu.hostFloats("wv")
+  let bv []float = gpu.hostFloats("bv")
+  let wo []float = gpu.hostFloats("wo")
+  let bo []float = gpu.hostFloats("bo")
+  let ln2G []float = gpu.hostFloats("ln2_g")
+  let ln2B []float = gpu.hostFloats("ln2_b")
+  let w1 []float = gpu.hostFloats("w1")
+  let b1 []float = gpu.hostFloats("b1")
+  let w2 []float = gpu.hostFloats("w2")
+  let b2 []float = gpu.hostFloats("b2")
+  let lnfG []float = gpu.hostFloats("lnf_g")
+  let lnfB []float = gpu.hostFloats("lnf_b")
+  let wout []float = gpu.hostFloats("wout")
+  let bout []float = gpu.hostFloats("bout")
+
+  for let t int = 0; t < n; t = t + 1 {
+    let token int = tokens[t]
+    let tokenBase int = token * width
+    let posBase int = t * width
+    for let d int = 0; d < width; d = d + 1 {
+      x[t * width + d] = tokEmb[tokenBase + d] + posEmb[posBase + d]
+    }
+  }
+
+  for let layer int = 0; layer < layers; layer = layer + 1 {
+    layerNormHost(x, ln1G, ln1B, xn, n, width, layer *width, invWidth, lnEps)
+    linearHost(xn, wq, bq, q, n, width, width, layer *width *width, layer *width, 0)
+    linearHost(xn, wk, bk, k, n, width, width, layer *width *width, layer *width, 0)
+    linearHost(xn, wv, bv, v, n, width, width, layer *width *width, layer *width, 0)
+
+    for let head int = 0; head < heads; head = head + 1 {
+      let headOffset int = head * headDim
+      for let t int = 0; t < n; t = t + 1 {
+        let qBase int = t * width + headOffset
+        for let keyIdx int = 0; keyIdx <= t; keyIdx = keyIdx + 1 {
+          let kBase int = keyIdx * width + headOffset
+          let sum float = 0.0
+          for let d int = 0; d < headDim; d = d + 1 {
+            sum = sum + q[qBase + d] *k[kBase + d]
+          }
+          scores[(head *n + t) * n + keyIdx] = sum * attnScale
+        }
+      }
+    }
+
+    softmaxHost(scores, n, heads)
+
+    for let t int = 0; t < n; t = t + 1 {
+      for let d int = 0; d < width; d = d + 1 {
+        let head int = d / headDim
+        let base int = (head *n + t) * n
+        let sum float = 0.0
+        for let keyIdx int = 0; keyIdx <= t; keyIdx = keyIdx + 1 {
+          sum = sum + scores[base + keyIdx] *v[keyIdx * width + d]
+        }
+        attn[t * width + d] = sum
+      }
+    }
+
+    linearAddHost(attn, wo, bo, x, n, width, width, layer *width *width, layer *width)
+    layerNormHost(x, ln2G, ln2B, xn, n, width, layer *width, invWidth, lnEps)
+    linearHost(xn, w1, b1, h, n, width, hidden, layer *hidden *width, layer *hidden, 1)
+    linearAddHost(h, w2, b2, x, n, hidden, width, layer *width *hidden, layer *width)
+  }
+
+  layerNormHost(x, lnfG, lnfB, xn, n, width, 0, invWidth, lnEps)
+  linearHost(xn, wout, bout, logits, n, width, vocabSize, 0, 0, 0)
+  return 0
+}
+
+// ---------------------------------------------------------------------------
+// HTTP handlers
+// ---------------------------------------------------------------------------
+
+func healthHandler(request int) int {
+  http.json(request, 200, "{\"status\":\"ok\",\"model\":\"tiny_transformer\"}\n")
+  return 0
+}
+
+func errorJson(message string) string {
+  let doc *json.MutDoc = json.newDoc()
+  let obj *json.MutVal = json.newObject(doc)
+  json.setRoot(doc, obj)
+  json.addString(doc, obj, "error", message)
+  return json.write(doc) + "\n"
+}
+
+func generateHandler(request int) int {
+  let config []int = gpu.hostInts("config")
+  let vocabSize int = config[0]
+  let blockSize int = config[1]
+  let layers int = config[2]
+  let heads int = config[3]
+  let width int = config[4]
+  let hidden int = config[5]
+
+  let invWidth float = gpu.hostFloats("inv_width")[0]
+  let attnScale float = gpu.hostFloats("attn_scale")[0]
+  let lnEps float = gpu.hostFloats("ln_eps")[0]
+
+  let vocab string = "\n !$&',-.3:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  let prompt string = "JULIET:\n"
+  let genLen int = 60
+  let device string = "gpu"
+
+  let body string = http.body(request)
+  if len(body) > 0 {
+    let doc *json.Doc, err error = json.parse(body)
+    if err != nil {
+      http.json(request, 400, errorJson("invalid JSON body"))
+      return 0
+    }
+    let root *json.Val = json.root(doc)
+    if !json.isObject(root) {
+      http.json(request, 400, errorJson("request body must be a JSON object"))
+      return 0
+    }
+    let reqPrompt string = json.fieldString(root, "prompt")
+    if len(reqPrompt) > 0 {
+      prompt = reqPrompt
+    }
+    let reqTokens int = json.fieldInt(root, "tokens")
+    if reqTokens > 0 {
+      genLen = reqTokens
+    }
+    let reqDevice string = json.fieldString(root, "device")
+    if len(reqDevice) > 0 {
+      device = reqDevice
+    }
+  }
+
+  if device != "gpu" && device != "cpu" {
+    http.json(request, 400, errorJson("device must be \"gpu\" or \"cpu\""))
+    return 0
+  }
+
+  let promptLen int = len(prompt)
+  if promptLen < 1 {
+    http.json(request, 400, errorJson("prompt must not be empty"))
+    return 0
+  }
+  if genLen < 1 {
+    http.json(request, 400, errorJson("tokens must be positive"))
+    return 0
+  }
+
+  let tokens []int = make([]int, blockSize)
+  let contextLen int = tokenizePromptWindow(vocab, prompt, blockSize, tokens)
+  if contextLen < 1 {
+    http.json(request, 400, errorJson("prompt contains a character outside the 65-character Tiny Shakespeare vocabulary"))
+    return 0
+  }
+
+  let generatedTokens []int = make([]int, genLen)
+  let started int = time.monotonicNanos()
+
+  if device == "gpu" {
+    let hostLogits []float = make([]float, blockSize *vocabSize)
+    let dLogits gpu.Buffer[float] = gpu.borrowFloat("logits")
+    let n int = contextLen
+
+    forwardGpuStep(tokens, n, vocabSize, layers, heads, width, hidden, invWidth, attnScale, lnEps)
+    gpu.sync()
+    let promptSlice []float = hostLogits[0:n * vocabSize]
+    gpu.to(dLogits, promptSlice)
+
+    for let step int = 0; step < genLen; step = step + 1 {
+      let logitBase int = (n - 1) * vocabSize
+      let id int = argmax(hostLogits, logitBase, vocabSize)
+      generatedTokens[step] = id
+      n = appendContextToken(tokens, n, blockSize, id)
+
+      if step + 1 < genLen {
+        forwardGpuStep(tokens, n, vocabSize, layers, heads, width, hidden, invWidth, attnScale, lnEps)
+        gpu.sync()
+        let stepSlice []float = hostLogits[0:n * vocabSize]
+        gpu.to(dLogits, stepSlice)
+      }
+    }
+  } else {
+    let x []float = make([]float, blockSize *width)
+    let xn []float = make([]float, blockSize *width)
+    let q []float = make([]float, blockSize *width)
+    let k []float = make([]float, blockSize *width)
+    let v []float = make([]float, blockSize *width)
+    let attn []float = make([]float, blockSize *width)
+    let scores []float = make([]float, heads *blockSize * blockSize)
+    let h []float = make([]float, blockSize *hidden)
+    let logits []float = make([]float, blockSize *vocabSize)
+    let n int = contextLen
+
+    forwardCpuStep(tokens, x, xn, q, k, v, attn, scores, h, logits, n, vocabSize, layers, heads, width, hidden, invWidth, attnScale, lnEps)
+
+    for let step int = 0; step < genLen; step = step + 1 {
+      let logitBase int = (n - 1) * vocabSize
+      let id int = argmax(logits, logitBase, vocabSize)
+      generatedTokens[step] = id
+      n = appendContextToken(tokens, n, blockSize, id)
+
+      if step + 1 < genLen {
+        forwardCpuStep(tokens, x, xn, q, k, v, attn, scores, h, logits, n, vocabSize, layers, heads, width, hidden, invWidth, attnScale, lnEps)
+      }
+    }
+  }
+
+  let finished int = time.monotonicNanos()
+  let elapsedMs int = (finished - started) / 1000000
+  let generated string = decodeTokens(vocab, generatedTokens, 0, genLen)
+  let fullText string = prompt + generated
+
+  let outDoc *json.MutDoc = json.newDoc()
+  let outObj *json.MutVal = json.newObject(outDoc)
+  json.setRoot(outDoc, outObj)
+  json.addString(outDoc, outObj, "prompt", prompt)
+  json.addString(outDoc, outObj, "generated", generated)
+  json.addString(outDoc, outObj, "text", fullText)
+  json.addInt(outDoc, outObj, "tokens", genLen)
+  json.addString(outDoc, outObj, "device", device)
+  json.addInt(outDoc, outObj, "elapsed_ms", elapsedMs)
+
+  http.json(request, 200, json.write(outDoc) + "\n")
+  return 0
+}
+
+func main() int {
+  gpu.mount("model.txm")
+
+  let config []int = gpu.hostInts("config")
+  let vocabSize int = config[0]
+  let blockSize int = config[1]
+  let heads int = config[3]
+  let width int = config[4]
+  let hidden int = config[5]
+
+  gpu.workspaceInt("tokens", blockSize)
+  gpu.workspaceFloat("x", blockSize *width)
+  gpu.workspaceFloat("xn", blockSize *width)
+  gpu.workspaceFloat("q", blockSize *width)
+  gpu.workspaceFloat("k", blockSize *width)
+  gpu.workspaceFloat("v", blockSize *width)
+  gpu.workspaceFloat("attn", blockSize *width)
+  gpu.workspaceFloat("scores", heads *blockSize *blockSize)
+  gpu.workspaceFloat("h", blockSize *hidden)
+  gpu.workspaceFloat("logits", blockSize *vocabSize)
+
+  http.get("/health", healthHandler)
+  http.post("/generate", generateHandler)
+
+  print("shakespeare_server listening on http://0.0.0.0:8080 (2 workers)")
+  http.serve("0.0.0.0", 8080, 2)
+  return 0
+}

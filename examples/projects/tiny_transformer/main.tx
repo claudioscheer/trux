@@ -112,6 +112,7 @@ type DeviceScratch struct {
   h gpu.Buffer[float]
   logits gpu.Buffer[float]
   hostTokens[]int
+  genTokens[]int
   hostLogits[]float
 }
 
@@ -310,6 +311,18 @@ func tokenizePrompt(vocab string, prompt string, mut out []int) int {
     out[i] = id
   }
   return len(prompt)
+}
+
+func appendContextToken(mut tokens []int, n int, blockSize int, id int) int {
+  if n < blockSize {
+    tokens[n] = id
+    return n + 1
+  }
+  for let k int = 0; k < blockSize - 1; k = k + 1 {
+    tokens[k] = tokens[k + 1]
+  }
+  tokens[blockSize - 1] = id
+  return blockSize
 }
 
 func layerNormHost(input []float, gamma []float, beta []float, mut out []float, rows int, width int, offset int, invWidth float, eps float) int {
@@ -591,8 +604,7 @@ func generateCpu(m HostModel, s CpuScratch, check int) Stats {
     }
 
     s.genTokens[step] = id
-    s.tokens[n] = id
-    n = n + 1
+    n = appendContextToken(s.tokens, n, m.blockSize, id)
 
     if step + 1 < m.genLen{
       forwardCpu(m, s, n)
@@ -675,8 +687,8 @@ func generateGpu(m DeviceModel, s DeviceScratch, h HostModel, check int) Stats {
       tokenMismatch = tokenMismatch + 1
     }
 
-    s.hostTokens[n] = id
-    n = n + 1
+    s.genTokens[step] = id
+    n = appendContextToken(s.hostTokens, n, h.blockSize, id)
 
     if step + 1 < h.genLen{
       forwardGpu(m, s, h, n)
@@ -776,12 +788,9 @@ func main() int {
   }
 
   let promptLen int = len(prompt)
-  if promptLen < 1 {
-    print("prompt must not be empty")
+  if promptLen < 1 || promptLen > blockSize {
+    print("prompt length (", promptLen, ") must be between 1 and ", blockSize)
     return 1
-  }
-  if (!hasEnvTokens || len(envTokens) == 0) && promptLen + genLen > blockSize && promptLen < blockSize {
-    genLen = blockSize - promptLen
   }
 
   if vocabSize != len(vocab) {
@@ -796,8 +805,8 @@ func main() int {
     print("width must be divisible by heads")
     return 1
   }
-  if genLen < 1 || promptLen + genLen > blockSize {
-    print("prompt length (", promptLen, ") plus generated tokens (", genLen, ") exceeds context (", blockSize, ")")
+  if genLen < 1 {
+    print("generated tokens must be positive")
     return 1
   }
   if gpu.dim("tok_emb", 0) != vocabSize || gpu.dim("tok_emb", 1) != width {
@@ -933,9 +942,9 @@ func main() int {
     h: make([]float, blockSize *hidden),
     logits: make([]float, blockSize *vocabSize),
     promptLogits: make([]float, blockSize *vocabSize),
-    stepLogits: make([]float, blockSize *vocabSize),
+    stepLogits: make([]float, genLen *vocabSize),
     tokens: make([]int, blockSize),
-    genTokens: make([]int, blockSize),
+    genTokens: make([]int, genLen),
   }
 
   let dTokens gpu.Buffer[int] = gpu.alloc(blockSize)
@@ -961,6 +970,7 @@ func main() int {
     h: dH,
     logits: dLogits,
     hostTokens: make([]int, blockSize),
+    genTokens: make([]int, genLen),
     hostLogits: make([]float, blockSize *vocabSize),
   }
 
@@ -996,7 +1006,7 @@ func main() int {
       lnfB: hm.lnfB,
       wout: hm.wout,
       bout: hm.bout,
-      promptTokens: cpuScratch.tokens,
+      promptTokens: promptCheckTokens,
       expectedPromptLogits: cpuScratch.promptLogits,
       expectedStepLogits: cpuScratch.stepLogits,
       expectedTokens: cpuScratch.genTokens,
@@ -1021,8 +1031,8 @@ func main() int {
   let gpuStats Stats = generateGpu(dm, gpuScratch, gpuRefModel, 1)
   let gpuFinished int = time.monotonicNanos()
 
-  let cpuText string = prompt + decodeTokens(vocab, cpuScratch.tokens, promptLen, genLen)
-  let gpuText string = prompt + decodeTokens(vocab, gpuScratch.hostTokens, promptLen, genLen)
+  let cpuText string = prompt + decodeTokens(vocab, cpuScratch.genTokens, 0, genLen)
+  let gpuText string = prompt + decodeTokens(vocab, gpuScratch.genTokens, 0, genLen)
 
   let textMismatch int = 0
   if cpuText != gpuText {
@@ -1040,6 +1050,9 @@ func main() int {
   // autoregressive loop. It includes the token upload and the host copy, the
   // same work the generation loop does for every step.
   let totalLen int = promptLen + genLen
+  if totalLen > blockSize {
+    totalLen = blockSize
+  }
   let cpuPrefillStarted int = time.monotonicNanos()
   forwardCpu(hm, cpuScratch, totalLen)
   let cpuPrefillFinished int = time.monotonicNanos()

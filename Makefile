@@ -7,7 +7,7 @@ BINARY := trux
 CMD := ./cmd/trux
 RUN_BIN := ./bin/$(BINARY)
 
-.PHONY: build run test bench bench-digits mnist mnist-bench transformer transformer-train fmt emit-c lsp clean
+.PHONY: build run test bench bench-digits mnist mnist-bench transformer transformer-train shakespeare-docker fmt emit-c lsp clean
 
 build:
 	$(GO) build -o $(RUN_BIN) $(CMD)
@@ -71,6 +71,11 @@ transformer: build
 # Train and re-export the tiny transformer in Python/PyTorch.
 transformer-train:
 	@cd examples/projects/tiny_transformer && python3 train.py
+
+# Build and run the Tiny Shakespeare HTTP + CUDA server inside a Docker
+# container limited to 2 vCPUs and 4 GB RAM.
+shakespeare-docker:
+	./examples/projects/shakespeare_server/run-docker.sh
 
 fmt: build
 	./bin/$(BINARY) fmt -r

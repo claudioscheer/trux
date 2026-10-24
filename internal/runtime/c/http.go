@@ -104,6 +104,8 @@ typedef struct {
     size_t header_scan_start;
     uint8_t* tx_buf;
     size_t tx_cap;
+    size_t tx_sent;
+    size_t tx_total;
     bool tx_in_flight;
     bool close_after_tx;
     bool in_use;
@@ -516,6 +518,8 @@ static RT_UNUSED void rt_http_respond(int64_t handle, int64_t status, rt_string 
                 io_uring_prep_send(sqe, req->fd, req->conn->tx_buf, total_len, MSG_NOSIGNAL);
                 sqe->user_data = RT_HTTP_UDATA_SEND | (uint64_t)(uint32_t)req->fd;
                 req->conn->tx_in_flight = true;
+                req->conn->tx_sent = 0;
+                req->conn->tx_total = total_len;
                 req->conn->close_after_tx = req->close_after_response;
                 if (req->need_submit) *req->need_submit = true;
                 req->responded = true;
@@ -823,6 +827,14 @@ static RT_UNUSED void rt_http_drain_conn(rt_http_conn* conns, rt_http_conn* c, i
     for (;;) {
         ssize_t hdr_end = rt_http_find_header_end(c->buffer, c->len, c->header_scan_start);
         if (hdr_end < 0) {
+            if (c->len > RT_HTTP_MAX_HEADER_BYTES) {
+                rt_http_send_simple(client_fd, 431, "request header fields too large\n", true);
+                shutdown(client_fd, SHUT_RDWR);
+                close(client_fd);
+                c->in_use = false;
+                c->len = 0;
+                return;
+            }
             if (c->len > 3) c->header_scan_start = c->len - 3;
             return;
         }
@@ -1157,7 +1169,24 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
                 io_uring_cq_advance(&ring, 1);
                 if (client_fd >= 0 && client_fd < RT_MAX_CONNS) {
                     rt_http_conn* c = &conns[client_fd];
+                    if (res > 0 && c->tx_total > 0 && (size_t)res < (c->tx_total - c->tx_sent)) {
+                        c->tx_sent += (size_t)res;
+                        size_t remaining = c->tx_total - c->tx_sent;
+                        struct io_uring_sqe* ssqe = io_uring_get_sqe(&ring);
+                        if (!ssqe) {
+                            io_uring_submit(&ring);
+                            ssqe = io_uring_get_sqe(&ring);
+                        }
+                        if (ssqe) {
+                            io_uring_prep_send(ssqe, client_fd, c->tx_buf + c->tx_sent, remaining, MSG_NOSIGNAL);
+                            ssqe->user_data = RT_HTTP_UDATA_SEND | (uint64_t)(uint32_t)client_fd;
+                            need_submit = true;
+                            continue;
+                        }
+                    }
                     c->tx_in_flight = false;
+                    c->tx_sent = 0;
+                    c->tx_total = 0;
                     if (res <= 0 || c->close_after_tx) {
                         if (c->in_use) {
                             if (c->close_after_tx) shutdown(client_fd, SHUT_RDWR);
@@ -1165,6 +1194,16 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
                             c->in_use = false;
                             c->len = 0;
                             c->close_after_tx = false;
+                            if (c->tx_cap > 65536) {
+                                free(c->tx_buf);
+                                c->tx_buf = NULL;
+                                c->tx_cap = 0;
+                            }
+                            if (c->cap > 65536) {
+                                free(c->buffer);
+                                c->buffer = NULL;
+                                c->cap = 0;
+                            }
                         }
                     }
                 }
@@ -1193,6 +1232,16 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
                             close(client_fd);
                             c->in_use = false;
                             c->len = 0;
+                            if (c->tx_cap > 65536) {
+                                free(c->tx_buf);
+                                c->tx_buf = NULL;
+                                c->tx_cap = 0;
+                            }
+                            if (c->cap > 65536) {
+                                free(c->buffer);
+                                c->buffer = NULL;
+                                c->cap = 0;
+                            }
                         }
                     } else {
                         int bid = flags >> IORING_CQE_BUFFER_SHIFT;
@@ -1245,6 +1294,10 @@ static RT_UNUSED void* rt_http_worker_thread(void* arg) {
         }
     }
 
+    for (int i = 0; i < RT_MAX_CONNS; i++) {
+        if (conns[i].buffer) free(conns[i].buffer);
+        if (conns[i].tx_buf) free(conns[i].tx_buf);
+    }
     free(conns);
     io_uring_free_buf_ring(&ring, br, RT_BUF_RING_SIZE, RT_BUF_GROUP_ID);
     free(buf_storage);

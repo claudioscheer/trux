@@ -112,6 +112,6 @@ http.serve("127.0.0.1", 8080, 0)
 - In Docker containers, require `--security-opt seccomp=unconfined --ulimit memlock=-1:-1` for kernel buffer ring allocation.
 - No HTTPS in the server. Terminate TLS at a reverse proxy and forward plaintext HTTP to this process. See [HTTPS](#https).
 - `port` must be between `1` and `65535`.
-- Request bodies use `Content-Length` and are capped at 1 MiB. Chunked request bodies are rejected.
+- Request bodies use `Content-Length` and are capped at 10 MiB. Chunked request bodies are rejected.
 - If a handler returns without calling a respond helper, the runtime sends `500 text/plain`.
 - If a handler calls a respond helper more than once, only the first response is sent.

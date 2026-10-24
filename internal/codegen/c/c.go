@@ -3191,7 +3191,7 @@ func emitKernelType(typ ast.Type) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return elem + "*", nil
+		return elem + "* __restrict__", nil
 	default:
 		return "", fmt.Errorf("unsupported kernel type %s", typ)
 	}

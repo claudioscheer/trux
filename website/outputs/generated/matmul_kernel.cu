@@ -1,5 +1,5 @@
 #line 15 "gpu_matrix_multiply.tx"
-__global__ void trux_k_12_matmulKernel(int64_t trux_dim_x, int64_t trux_dim_y, int64_t* trux_v_1_a, int64_t* trux_v_1_b, int64_t* trux_v_3_out, int64_t trux_v_1_n) {
+__global__ void trux_k_12_matmulKernel(int64_t trux_dim_x, int64_t trux_dim_y, int64_t* __restrict__ trux_v_1_a, int64_t* __restrict__ trux_v_1_b, int64_t* __restrict__ trux_v_3_out, int64_t trux_v_1_n) {
     int64_t trux_v_3_row = ((int64_t)(blockIdx.y * blockDim.y + threadIdx.y));
     int64_t trux_v_3_col = ((int64_t)(blockIdx.x * blockDim.x + threadIdx.x));
     if (trux_v_3_row < trux_dim_y && trux_v_3_col < trux_dim_x) {
